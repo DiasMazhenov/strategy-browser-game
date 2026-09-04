@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Cinzel", serif;
+  --font-body: "Inter", sans-serif;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overscroll-behavior: none;
+  background: #0c1410;
+  font-family: var(--font-body);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.font-display { font-family: var(--font-display); }
+
+canvas.game-canvas {
+  touch-action: none;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* Parchment + gold theme helpers */
+.gold-text {
+  background: linear-gradient(180deg, #fde68a 0%, #f59e0b 45%, #b45309 70%, #fde68a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.parchment {
+  background:
+    radial-gradient(1200px 400px at 50% -10%, rgba(253,230,138,.14), transparent 60%),
+    linear-gradient(180deg, #1a2420 0%, #101915 100%);
+}
+.panel-iron {
+  background: linear-gradient(180deg, rgba(24,32,28,.96), rgba(12,18,15,.97));
+  border: 1px solid rgba(212,175,55,.22);
+  box-shadow: 0 10px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(10px);
+}
+.btn-gold {
+  background: linear-gradient(180deg, #f6d47c 0%, #d4a017 45%, #8a5f06 100%);
+  box-shadow: 0 4px 0 #5c3f04, 0 8px 24px rgba(212,160,23,.35), inset 0 1px 0 rgba(255,255,255,.6);
+  color: #1c1206;
+  transition: transform .08s ease, filter .15s ease;
+}
+.btn-gold:hover { filter: brightness(1.07); }
+.btn-gold:active { transform: translateY(3px); box-shadow: 0 1px 0 #5c3f04, 0 4px 12px rgba(212,160,23,.3); }
+.btn-iron {
+  background: linear-gradient(180deg, #2b3831, #141c18);
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 3px 0 rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
+  transition: transform .08s ease, filter .15s;
+}
+.btn-iron:active { transform: translateY(2px); }
+.btn-iron.active {
+  border-color: rgba(246,212,124,.7);
+  box-shadow: 0 0 0 1px rgba(246,212,124,.5), 0 0 18px rgba(246,212,124,.25);
+}
+
+@keyframes floaty { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-8px);} }
+@keyframes pulse-ring { 0% { transform: scale(.9); opacity:.8;} 100% { transform: scale(1.25); opacity:0;} }
+@keyframes banner-in { 0% { transform: translateY(-24px) scale(.96); opacity:0;} 100% { transform: translateY(0) scale(1); opacity:1;} }
+@keyframes shimmer { 0% { background-position: -200% 0;} 100% { background-position: 200% 0;} }
+@keyframes torch { 0%,100% { opacity:.75; transform: scale(1);} 50% { opacity:1; transform: scale(1.12);} }
+@keyframes marquee-glow { 0%,100% { box-shadow: 0 0 24px rgba(245,158,11,.25);} 50% { box-shadow: 0 0 44px rgba(245,158,11,.5);} }
+
+.anim-banner { animation: banner-in .45s cubic-bezier(.2,1.4,.3,1) both; }
+.anim-floaty { animation: floaty 4s ease-in-out infinite; }
+
+.shimmer-line {
+  background: linear-gradient(90deg, transparent, rgba(253,230,138,.7), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2.6s linear infinite;
+}
+
+.scroll-thin::-webkit-scrollbar { height:6px; width:6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgba(212,175,55,.35); border-radius: 99px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+/* HUD pop animation for resource gain */
+@keyframes res-pop { 0% { transform: scale(1);} 40% { transform: scale(1.25);} 100% { transform: scale(1);} }
+.res-pop { animation: res-pop .3s ease; }
+
+/* Damage vignette */
+@keyframes dmg-flash { 0% { opacity:.55;} 100% { opacity:0;} }
