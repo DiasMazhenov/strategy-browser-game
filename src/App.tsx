@@ -5,7 +5,7 @@ import {
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles,
 } from 'lucide-react';
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
-import { AGES, BUILDING_DEFS, UNIT_DEFS, type BuildingKey, type Difficulty } from './game/config';
+import { AGES, BUILDING_DEFS, DIFF, UNIT_DEFS, type BuildingKey, type Difficulty } from './game/config';
 import heroBattle from './assets/hero-battle.jpg';
 
 type Screen = 'menu' | 'game';
@@ -24,13 +24,13 @@ function costStr(c: { wood: number; food: number; gold: number }) {
   if (c.wood) p.push(`${c.wood}🪵`);
   if (c.food) p.push(`${c.food}🍖`);
   if (c.gold) p.push(`${c.gold}🪙`);
-  return p.join(' ') || 'Free';
+  return p.join(' ') || 'Бесплатно';
 }
 
 const DIFFS: { id: Difficulty; name: string; desc: string; icon: string }[] = [
-  { id: 'easy', name: 'Settler', desc: 'Relaxed raids. Learn the ropes.', icon: '🌱' },
-  { id: 'normal', name: 'Warlord', desc: 'Classic AoE pressure. Balanced.', icon: '⚔️' },
-  { id: 'hard', name: 'Conqueror', desc: 'Relentless waves. No mercy.', icon: '🔥' },
+  { id: 'easy', name: 'Поселенец', desc: 'Спокойные набеги. Для обучения.', icon: '🌱' },
+  { id: 'normal', name: 'Воевода', desc: 'Классический напор AoE. Баланс.', icon: '⚔️' },
+  { id: 'hard', name: 'Завоеватель', desc: 'Беспощадные волны. Без пощады.', icon: '🔥' },
 ];
 
 export default function App() {
@@ -89,7 +89,7 @@ export default function App() {
   const saveScore = () => {
     if (!over || saved) return;
     const entry: ScoreEntry = {
-      name: name.trim() || 'Anonymous', score: over.score, result: over.result,
+      name: name.trim() || 'Безымянный', score: over.score, result: over.result,
       difficulty: over.difficulty, kills: over.kills, time: over.timeSec, date: new Date().toLocaleDateString(),
     };
     const next = [...loadScores(), entry].sort((a, b) => b.score - a.score).slice(0, 8);
@@ -134,25 +134,25 @@ export default function App() {
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
               <span className="flex items-center gap-1 text-slate-300"><Timer className="h-3.5 w-3.5" />{fmtTime(hud?.timeSec ?? 0)}</span>
               <span className={`flex items-center gap-1 ${(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}`}>
-                <Swords className="h-3.5 w-3.5" />Wave {hud?.wave ?? 0} → {hud?.nextWave ?? 0}s
+                <Swords className="h-3.5 w-3.5" />Волна {hud?.wave ?? 0} → {hud?.nextWave ?? 0}с
               </span>
             </div>
             <div className="mt-1 flex items-center gap-2">
-              <TcBar label="YOU" hp={hud?.pTc ?? 1} max={hud?.pTcMax ?? 1} color="bg-sky-400" />
+              <TcBar label="ВЫ" hp={hud?.pTc ?? 1} max={hud?.pTcMax ?? 1} color="bg-sky-400" />
               <span className="font-display text-[10px] font-bold tracking-widest text-amber-200/80">VS</span>
-              <TcBar label="FOE" hp={hud?.eTc ?? 1} max={hud?.eTcMax ?? 1} color="bg-red-400" />
+              <TcBar label="ВРАГ" hp={hud?.eTc ?? 1} max={hud?.eTcMax ?? 1} color="bg-red-400" />
             </div>
           </div>
 
           {/* buttons */}
           <div className="pointer-events-auto flex items-center gap-1.5">
             <div className="panel-iron hidden items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-bold text-amber-200 sm:flex">
-              <Crown className="h-4 w-4" />{hud?.ageName ?? 'Dark Age'}
+              <Crown className="h-4 w-4" />{hud?.ageName ?? 'Тёмный век'}
             </div>
-            <IconBtn onClick={() => g()?.toggleMute()} label="Mute">
+            <IconBtn onClick={() => g()?.toggleMute()} label="Звук">
               {(hud?.muted) ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </IconBtn>
-            <IconBtn onClick={() => setPaused(true)} label="Pause">
+            <IconBtn onClick={() => setPaused(true)} label="Пауза">
               <Pause className="h-4 w-4" />
             </IconBtn>
           </div>
@@ -163,7 +163,7 @@ export default function App() {
           <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-full px-3 py-1 text-[11px] font-bold">
             <span className="text-amber-300">🏆{hud?.score ?? 0}</span>
             <span className="text-slate-300">{fmtTime(hud?.timeSec ?? 0)}</span>
-            <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}>🌊{hud?.nextWave ?? 0}s</span>
+            <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}>🌊{hud?.nextWave ?? 0}с</span>
             <span className="text-amber-200">{AGES[hud?.age ?? 0].icon}</span>
           </div>
         </div>
@@ -183,7 +183,7 @@ export default function App() {
       <div className="absolute left-2 top-[74px] z-20 sm:top-[86px]">
         <div className="panel-iron pointer-events-auto w-[172px] rounded-xl p-2 sm:w-[196px]">
           <button onClick={() => setShowQuests(s => !s)} className="flex w-full items-center justify-between text-[11px] font-black tracking-widest text-amber-200">
-            <span className="flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />QUESTS</span>
+            <span className="flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />ЗАДАНИЯ</span>
             <ChevronUp className={`h-3.5 w-3.5 transition-transform ${showQuests ? '' : 'rotate-180'}`} />
           </button>
           {showQuests && (
@@ -201,15 +201,15 @@ export default function App() {
         {/* army controls */}
         <div className="pointer-events-auto mt-2 flex w-[172px] flex-col gap-1 sm:w-[196px]">
           <div className="grid grid-cols-2 gap-1">
-            <MiniBtn onClick={() => g()?.armySelect()}><Swords className="h-3.5 w-3.5" />Army</MiniBtn>
-            <MiniBtn onClick={() => g()?.villsSelect()}><Axe className="h-3.5 w-3.5" />Vills</MiniBtn>
-            <MiniBtn onClick={() => g()?.idleSelect()}>Idle{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
-            <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Work</MiniBtn>
+            <MiniBtn onClick={() => g()?.armySelect()}><Swords className="h-3.5 w-3.5" />Армия</MiniBtn>
+            <MiniBtn onClick={() => g()?.villsSelect()}><Axe className="h-3.5 w-3.5" />Кресты</MiniBtn>
+            <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
+            <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
           </div>
           <div className="grid grid-cols-3 gap-1">
-            <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />TC</MiniBtn>
-            <MiniBtn active={hud?.attackArmed} onClick={() => { const gm = g(); if (gm) { gm.attackArmed = !gm.attackArmed; gm.pushHud(); } }}><Flag className="h-3.5 w-3.5" />Atk</MiniBtn>
-            <MiniBtn active={hud?.panMode} onClick={() => { const gm = g(); if (gm) { gm.panMode = !gm.panMode; gm.pushHud(); } }}><Hand className="h-3.5 w-3.5" />{hud?.panMode ? 'Pan' : 'Box'}</MiniBtn>
+            <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />Центр</MiniBtn>
+            <MiniBtn active={hud?.attackArmed} onClick={() => { const gm = g(); if (gm) { gm.attackArmed = !gm.attackArmed; gm.pushHud(); } }}><Flag className="h-3.5 w-3.5" />Атака</MiniBtn>
+            <MiniBtn active={hud?.panMode} onClick={() => { const gm = g(); if (gm) { gm.panMode = !gm.panMode; gm.pushHud(); } }}><Hand className="h-3.5 w-3.5" />{hud?.panMode ? 'Кам.' : 'Рамка'}</MiniBtn>
           </div>
         </div>
       </div>
@@ -225,12 +225,12 @@ export default function App() {
                 </div>
                 <div>
                   <div className="text-xs font-black text-white">
-                    {hud.sel.count} selected • {hud.sel.types?.map(t => `${t.count} ${t.label}`).join(' · ')}
+                    Выбрано: {hud.sel.count} • {hud.sel.types?.map(t => `${t.count} ${t.label}`).join(' · ')}
                   </div>
                   <HpMini hp={hud.sel.avgHp ?? 1} max={hud.sel.maxHp ?? 1} />
                   <div className="mt-1 flex gap-1">
-                    <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.attackArmed = true; gm.pushHud(); } }}><Flag className="h-3 w-3" />Attack-move (G)</MiniBtn>
-                    <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕ Deselect</MiniBtn>
+                    <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.attackArmed = true; gm.pushHud(); } }}><Flag className="h-3 w-3" />Атака-мув (G)</MiniBtn>
+                    <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕ Снять выбор</MiniBtn>
                   </div>
                 </div>
               </>
@@ -238,16 +238,16 @@ export default function App() {
               <>
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-xl">{bldIcon(hud.sel.bkey!)}</div>
                 <div>
-                  <div className="text-xs font-black text-white">{hud.sel.blabel} {(hud.sel.done ?? 1) < 1 && <span className="text-lime-300">• building {Math.round((hud.sel.done ?? 0) * 100)}%</span>}</div>
+                  <div className="text-xs font-black text-white">{hud.sel.blabel} {(hud.sel.done ?? 1) < 1 && <span className="text-lime-300">• стройка {Math.round((hud.sel.done ?? 0) * 100)}%</span>}</div>
                   <HpMini hp={hud.sel.hp ?? 1} max={hud.sel.bmax ?? 1} />
                   {(hud.sel.queue?.length ?? 0) > 0 && (
                     <div className="mt-0.5 text-[10px] font-bold text-amber-200">
-                      Training: {hud.sel.queue![0].label} {Math.round((hud.sel.queue![0].t / hud.sel.queue![0].total) * 100)}%{hud.sel.queue!.length > 1 && ` (+${hud.sel.queue!.length - 1})`}
+                      Обучение: {hud.sel.queue![0].label} {Math.round((hud.sel.queue![0].t / hud.sel.queue![0].total) * 100)}%{hud.sel.queue!.length > 1 && ` (+${hud.sel.queue!.length - 1})`}
                     </div>
                   )}
                   {(hud.sel.bkey === 'towncenter' || hud.sel.bkey === 'barracks') && (
                     <div className="mt-1 flex gap-1">
-                      <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.rallyArmed = true; gm.pushHud(); } }} active={hud.rallyArmed}><Flag className="h-3 w-3" />Rally</MiniBtn>
+                      <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.rallyArmed = true; gm.pushHud(); } }} active={hud.rallyArmed}><Flag className="h-3 w-3" />Сбор</MiniBtn>
                       <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕</MiniBtn>
                     </div>
                   )}
@@ -262,7 +262,7 @@ export default function App() {
       {hud?.placement && (
         <div className="absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto flex items-center gap-2 rounded-full border border-lime-300/50 bg-lime-950/90 px-4 py-1.5 text-xs font-bold text-lime-200">
-            🏗️ Placing {BUILDING_DEFS[hud.placement].name} — tap map to build
+            🏗️ Строим: {BUILDING_DEFS[hud.placement].name} — кликните по карте
             <button onClick={() => g()?.cancelPlacement()} className="rounded-full bg-white/10 p-1"><X className="h-3.5 w-3.5" /></button>
           </div>
         </div>
@@ -270,7 +270,7 @@ export default function App() {
       {hud?.attackArmed && !hud?.placement && (
         <div className="absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto rounded-full border border-red-300/50 bg-red-950/90 px-4 py-1.5 text-xs font-bold text-red-200">
-            🎯 Attack-move armed — tap where to ravage! (Esc cancels)
+            🎯 Атака-мув готова — укажите точку набега! (Esc — отмена)
           </div>
         </div>
       )}
@@ -280,15 +280,15 @@ export default function App() {
         <div className="mx-auto max-w-3xl px-2">
           <div className="panel-iron pointer-events-auto rounded-2xl p-2">
             <div className="scroll-thin flex items-stretch gap-1.5 overflow-x-auto">
-              <TrainBtn label="Villager" icon="🧑‍🌾" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} onClick={() => g()?.train('villager')} />
-              <TrainBtn label="Militia" icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} onClick={() => g()?.train('swordsman')} />
-              <TrainBtn label="Archer" icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} onClick={() => g()?.train('archer')} />
-              <TrainBtn label="Knight" icon="🐎" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} onClick={() => g()?.train('knight')} />
+              <TrainBtn label="Крестьянин" icon="🧑‍🌾" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} onClick={() => g()?.train('villager')} />
+              <TrainBtn label="Ополченец" icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} onClick={() => g()?.train('swordsman')} />
+              <TrainBtn label="Лучник" icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} onClick={() => g()?.train('archer')} />
+              <TrainBtn label="Рыцарь" icon="🐎" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} onClick={() => g()?.train('knight')} />
               <div className="mx-0.5 w-px shrink-0 bg-white/10" />
-              <TrainBtn label="House" icon="🏠" key_="Q" cost={BUILDING_DEFS.house.cost} ok={canAfford(BUILDING_DEFS.house.cost)} active={hud?.placement === 'house'} onClick={() => g()?.enterPlacement('house')} />
-              <TrainBtn label="Barracks" icon="⚒️" key_="E" cost={BUILDING_DEFS.barracks.cost} ok={canAfford(BUILDING_DEFS.barracks.cost)} active={hud?.placement === 'barracks'} onClick={() => g()?.enterPlacement('barracks')} />
-              <TrainBtn label="Tower" icon="🗼" key_="R" cost={BUILDING_DEFS.tower.cost} ok={canAfford(BUILDING_DEFS.tower.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} onClick={() => g()?.enterPlacement('tower')} />
-              <TrainBtn label="Farm" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} onClick={() => g()?.enterPlacement('farm')} />
+              <TrainBtn label="Дом" icon="🏠" key_="Q" cost={BUILDING_DEFS.house.cost} ok={canAfford(BUILDING_DEFS.house.cost)} active={hud?.placement === 'house'} onClick={() => g()?.enterPlacement('house')} />
+              <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={BUILDING_DEFS.barracks.cost} ok={canAfford(BUILDING_DEFS.barracks.cost)} active={hud?.placement === 'barracks'} onClick={() => g()?.enterPlacement('barracks')} />
+              <TrainBtn label="Башня" icon="🗼" key_="R" cost={BUILDING_DEFS.tower.cost} ok={canAfford(BUILDING_DEFS.tower.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} onClick={() => g()?.enterPlacement('tower')} />
+              <TrainBtn label="Ферма" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} onClick={() => g()?.enterPlacement('farm')} />
               <div className="mx-0.5 w-px shrink-0 bg-white/10" />
               <button
                 onClick={() => g()?.ageUp()}
@@ -296,14 +296,14 @@ export default function App() {
                 className={`flex w-[86px] shrink-0 flex-col items-center justify-center rounded-xl px-2 py-1.5 text-center transition ${(hud?.ageAfford && (hud?.age ?? 0) < 3) ? 'btn-gold animate-pulse' : 'btn-iron opacity-80'} disabled:opacity-40`}
               >
                 <span className="text-lg leading-none">{(hud?.age ?? 0) >= 3 ? '👑' : AGES[(hud?.age ?? 0) + 1].icon}</span>
-                <span className="mt-0.5 text-[10px] font-black leading-tight">{(hud?.age ?? 0) >= 3 ? 'MAX AGE' : `Age Up (T)`}</span>
+                <span className="mt-0.5 text-[10px] font-black leading-tight">{(hud?.age ?? 0) >= 3 ? 'МАКС. ВЕК' : `Эпоха (T)`}</span>
                 <span className="text-[9px] font-bold opacity-80">{hud?.ageCost}</span>
               </button>
             </div>
             {!isMobile && (
               <div className="mt-1 hidden items-center justify-center gap-3 text-[10px] font-semibold text-slate-400 sm:flex">
-                <span className="flex items-center gap-1"><MousePointer2 className="h-3 w-3" />Drag select • Right-click order • Wheel zoom • Edge pan</span>
-                <span className="flex items-center gap-1"><Keyboard className="h-3 w-3" />WASD camera • 1-4 train • Q/E/R/F build • G attack • H home • Space pause</span>
+                <span className="flex items-center gap-1"><MousePointer2 className="h-3 w-3" />Рамка — выбор • ПКМ — приказ • Колесо — зум • камера к краю</span>
+                <span className="flex items-center gap-1"><Keyboard className="h-3 w-3" />WASD камера • 1-4 тренировка • Q/E/R/F стройка • G атака • H домой • Space пауза</span>
               </div>
             )}
           </div>
@@ -313,15 +313,15 @@ export default function App() {
       {/* ===== PAUSE ===== */}
       {paused && !over && (
         <Overlay>
-          <div className="font-display text-3xl font-black tracking-wide sm:text-4xl"><span className="gold-text">PAUSED</span></div>
-          <p className="mt-1 text-sm text-slate-400">Your empire awaits your return, sire.</p>
+          <div className="font-display text-3xl font-black tracking-wide sm:text-4xl"><span className="gold-text">ПАУЗА</span></div>
+          <p className="mt-1 text-sm text-slate-400">Ваша империя ждёт вашего возвращения, повелитель.</p>
           <div className="mt-5 grid w-full gap-2">
-            <BigBtn onClick={() => setPaused(false)}><Play className="h-4 w-4" />Resume (Space)</BigBtn>
+            <BigBtn onClick={() => setPaused(false)}><Play className="h-4 w-4" />Продолжить (Space)</BigBtn>
             <div className="grid grid-cols-2 gap-2">
-              <MidBtn onClick={() => { setPaused(false); startGame(difficulty); }}><RotateCcw className="h-4 w-4" />Restart</MidBtn>
-              <MidBtn onClick={() => { gameRef.current?.destroy(); setScreen('menu'); setPaused(false); }}><Home className="h-4 w-4" />Menu</MidBtn>
+              <MidBtn onClick={() => { setPaused(false); startGame(difficulty); }}><RotateCcw className="h-4 w-4" />Заново</MidBtn>
+              <MidBtn onClick={() => { gameRef.current?.destroy(); setScreen('menu'); setPaused(false); }}><Home className="h-4 w-4" />Меню</MidBtn>
             </div>
-            <MidBtn onClick={() => g()?.toggleMute()}>{hud?.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}{hud?.muted ? 'Unmute' : 'Mute'} (M)</MidBtn>
+            <MidBtn onClick={() => g()?.toggleMute()}>{hud?.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}{hud?.muted ? 'Включить звук' : 'Выключить звук'} (M)</MidBtn>
           </div>
           <ControlsRecap />
         </Overlay>
@@ -398,10 +398,10 @@ function MidBtn({ children, onClick }: { children: React.ReactNode; onClick: () 
 function ControlsRecap() {
   return (
     <div className="mt-4 grid grid-cols-2 gap-1.5 text-left text-[10.5px] font-semibold text-slate-400">
-      <div className="rounded-lg bg-white/5 p-2">🖱️ <b className="text-slate-200">Select:</b> drag box / double-click same type</div>
-      <div className="rounded-lg bg-white/5 p-2">⚔️ <b className="text-slate-200">Order:</b> right-click / tap target</div>
-      <div className="rounded-lg bg-white/5 p-2">⌨️ <b className="text-slate-200">Keys:</b> 1-4 train • Q/E/R/F build</div>
-      <div className="rounded-lg bg-white/5 p-2">📷 <b className="text-slate-200">Camera:</b> WASD • wheel • minimap</div>
+      <div className="rounded-lg bg-white/5 p-2">🖱️ <b className="text-slate-200">Выбор:</b> рамка / двойной клик по типу</div>
+      <div className="rounded-lg bg-white/5 p-2">⚔️ <b className="text-slate-200">Приказ:</b> правый клик / касание цели</div>
+      <div className="rounded-lg bg-white/5 p-2">⌨️ <b className="text-slate-200">Клавиши:</b> 1-4 тренировка • Q/E/R/F стройка</div>
+      <div className="rounded-lg bg-white/5 p-2">📷 <b className="text-slate-200">Камера:</b> WASD • колесо • мини-карта</div>
     </div>
   );
 }
@@ -440,35 +440,35 @@ function MenuScreen({ scores, difficulty, setDifficulty, onPlay }: { scores: Sco
       <div className="relative mx-auto max-w-4xl px-4 pb-10 pt-8 sm:pt-12">
         {/* hero art */}
         <div className="relative overflow-hidden rounded-3xl border border-amber-200/25 shadow-[0_20px_80px_rgba(0,0,0,.55)]">
-          <img src={heroBattle} alt="Empires at dawn" className="h-44 w-full object-cover sm:h-60" />
+          <img src={heroBattle} alt="Империи на рассвете" className="h-44 w-full object-cover sm:h-60" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/25 to-transparent" />
           <div className="absolute left-1/2 top-3 -translate-x-1/2">
             <div className="anim-floaty flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-300/50 bg-black/50 text-3xl backdrop-blur">🏰</div>
           </div>
           <div className="absolute bottom-2 left-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-black tracking-widest text-amber-200 backdrop-blur">
             <span className="relative flex h-2 w-2"><span className="absolute h-full w-full animate-ping rounded-full bg-lime-400 opacity-75" /><span className="h-2 w-2 rounded-full bg-lime-400" /></span>
-            LIVE BATTLEFIELD • 60 FPS
+            ЖИВОЕ ПОЛЕ БОЯ • 60 КАДРОВ/С
           </div>
-          <div className="absolute bottom-2 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-slate-300 backdrop-blur">⚔️ Blue vs Red • Conquest</div>
+          <div className="absolute bottom-2 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-slate-300 backdrop-blur">⚔️ Синие против Красных • Завоевание</div>
         </div>
         <div className="mt-3 text-center">
-          <div className="text-[11px] font-black tracking-[0.35em] text-amber-300/80">A MINI AGE OF EMPIRES</div>
+          <div className="text-[11px] font-black tracking-[0.35em] text-amber-300/80">МИНИ-STRATEGY В ДУХЕ AGE OF EMPIRES</div>
           <h1 className="font-display mt-1 text-4xl font-black leading-tight sm:text-6xl">
-            <span className="gold-text">EMPIRES</span> <span className="text-emerald-100">OF THE</span> <span className="gold-text">DAWN</span>
+            <span className="gold-text">ИМПЕРИИ</span> <span className="text-emerald-100">РАССВЕТА</span>
           </h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-300 sm:text-[15px]">
-            Gather 🪵🍖🪙 • Raise an army • Advance the ages • <b className="text-amber-200">Raze the enemy Town Center</b> before they raze yours.
-            Wolves, raids & glory await — fun in the first 10 seconds, guaranteed.
+            Добывай 🪵🍖🪙 • Собирай армию • Развивай эпохи • <b className="text-amber-200">Снеси вражеский Городской центр</b>, пока не снесли твой.
+            Волки, набеги и слава ждут — веселье с первых 10 секунд, гарантируем.
           </p>
         </div>
 
         {/* feature strip */}
         <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
-            { i: <Axe className="h-4 w-4 text-lime-300" />, t: 'Gather & boom' },
-            { i: <Swords className="h-4 w-4 text-red-300" />, t: 'Raid & conquer' },
-            { i: <Crown className="h-4 w-4 text-amber-300" />, t: '4 Ages to rule' },
-            { i: <Trophy className="h-4 w-4 text-yellow-300" />, t: 'Score & legends' },
+            { i: <Axe className="h-4 w-4 text-lime-300" />, t: 'Добыча и рост' },
+            { i: <Swords className="h-4 w-4 text-red-300" />, t: 'Набеги и захват' },
+            { i: <Crown className="h-4 w-4 text-amber-300" />, t: '4 эпохи власти' },
+            { i: <Trophy className="h-4 w-4 text-yellow-300" />, t: 'Очки и легенды' },
           ].map((f, i) => (
             <div key={i} className="panel-iron flex items-center justify-center gap-2 rounded-xl px-2 py-2.5 text-xs font-bold text-slate-200">{f.i}{f.t}</div>
           ))}
@@ -476,7 +476,7 @@ function MenuScreen({ scores, difficulty, setDifficulty, onPlay }: { scores: Sco
 
         {/* difficulty */}
         <div className="mt-5">
-          <div className="mb-2 text-center text-[11px] font-black tracking-[0.25em] text-slate-400">CHOOSE YOUR DESTINY</div>
+          <div className="mb-2 text-center text-[11px] font-black tracking-[0.25em] text-slate-400">ВЫБЕРИ СВОЮ СУДЬБУ</div>
           <div className="grid grid-cols-3 gap-2">
             {DIFFS.map(d => (
               <button
@@ -495,35 +495,35 @@ function MenuScreen({ scores, difficulty, setDifficulty, onPlay }: { scores: Sco
         {/* play */}
         <div className="mt-5 flex flex-col items-center">
           <button onClick={onPlay} className="btn-gold group flex items-center gap-3 rounded-2xl px-10 py-4 text-lg font-black tracking-wide" style={{ animation: 'marquee-glow 2.4s ease-in-out infinite' }}>
-            <Play className="h-6 w-6 fill-current transition-transform group-hover:scale-125" /> MARCH TO WAR
+            <Play className="h-6 w-6 fill-current transition-transform group-hover:scale-125" /> В ПОХОД!
           </button>
-          <div className="mt-2 text-[11px] font-bold text-slate-500">press <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-slate-300">Enter</kbd> to start • instant action, no loading</div>
+          <div className="mt-2 text-[11px] font-bold text-slate-500">нажми <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-slate-300">Enter</kbd> для старта • сразу в бой, без загрузки</div>
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-2">
           {/* how to play */}
           <div className="panel-iron rounded-2xl p-4">
-            <div className="font-display text-sm font-black tracking-widest text-amber-200">⚔️ COMMANDER'S HANDBOOK</div>
+            <div className="font-display text-sm font-black tracking-widest text-amber-200">⚔️ УСТАВ КОМАНДИРА</div>
             <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-300">
-              <HowRow n="1" t="Your militia is selected — right-click / tap the 🐺 wolves to taste first blood (+🍖 +score)." />
-              <HowRow n="2" t="Villagers gather: tap a villager, then tap trees 🪵, berries 🍖 or gold 🪙. They haul it home automatically." />
-              <HowRow n="3" t="Boom: House (Q) for pop → Barracks (E) → spam Militia (2) & Archers (3). Farm (F) = endless food." />
-              <HowRow n="4" t="Age up (T) for +power. Towers (R) shred raids. Win by destroying the red Town Center!" />
+              <HowRow n="1" t="Ваше ополчение уже выбрано — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
+              <HowRow n="2" t="Крестьяне добывают: выбери крестьянина и коснись деревьев 🪵, ягод 🍖 или золота 🪙. Ресурсы носят в центр сами." />
+              <HowRow n="3" t="Развитие: Дом (Q) для населения → Казармы (E) → штампуй Ополченцев (2) и Лучников (3). Ферма (F) = бесконечная еда." />
+              <HowRow n="4" t="Новая эпоха (T) даёт +силу. Башни (R) крошат набеги. Победа — разрушить красный Городской центр!" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
-              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />Desktop</span>Drag select • Right-click order • WASD + wheel camera • 1-4 / QERF / G / H / Space</div>
-              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Touch</span>Tap select • tap ground to order • Box/Pan toggle • pinch zoom • minimap jump</div>
+              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 1-4 / QERF / G / H / Space</div>
+              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>Касание — выбор • касание земли — приказ • Рамка/Камера • щипковый зум • прыжок по мини-карте</div>
             </div>
           </div>
           {/* highscores */}
           <div className="panel-iron rounded-2xl p-4">
             <div className="flex items-center justify-between">
-              <div className="font-display text-sm font-black tracking-widest text-amber-200">🏆 HALL OF LEGENDS</div>
-              <div className="text-[10px] font-bold text-slate-500">local • top 8</div>
+              <div className="font-display text-sm font-black tracking-widest text-amber-200">🏆 ЗАЛ ЛЕГЕНД</div>
+              <div className="text-[10px] font-bold text-slate-500">локально • топ-8</div>
             </div>
             {scores.length === 0 ? (
               <div className="mt-3 rounded-xl border border-dashed border-white/15 p-5 text-center text-xs text-slate-400">
-                No legends yet. <b className="text-amber-200">Your name could be first.</b><br />Victory + kills + speed = eternal glory.
+                Легенд пока нет. <b className="text-amber-200">Твоё имя может стать первым.</b><br />Победа + убийства + скорость = вечная слава.
               </div>
             ) : (
               <div className="mt-3 space-y-1">
@@ -531,20 +531,20 @@ function MenuScreen({ scores, difficulty, setDifficulty, onPlay }: { scores: Sco
                   <div key={i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold ${i === 0 ? 'bg-amber-400/15 text-amber-200' : 'bg-white/5 text-slate-300'}`}>
                     <span className="w-6 text-center">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}</span>
                     <span className="flex-1 truncate">{s.name}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${s.result === 'victory' ? 'bg-lime-500/20 text-lime-300' : 'bg-red-500/20 text-red-300'}`}>{s.result === 'victory' ? 'WIN' : 'FALLEN'}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${s.result === 'victory' ? 'bg-lime-500/20 text-lime-300' : 'bg-red-500/20 text-red-300'}`}>{s.result === 'victory' ? 'ПОБЕДА' : 'ПАЛ'}</span>
                     <span className="tabular-nums text-amber-300">{s.score}</span>
                   </div>
                 ))}
               </div>
             )}
             <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500/10 p-2 text-[11px] font-semibold text-emerald-200">
-              <Shield className="h-4 w-4 shrink-0" />Tip: wolves give food + score. Hunt early, boom fast, strike before Wave 4.
+              <Shield className="h-4 w-4 shrink-0" />Совет: волки дают еду и очки. Охоться рано, развивайся быстро, ударь до 4-й волны.
             </div>
           </div>
         </div>
 
         <div className="mt-6 text-center text-[11px] font-semibold text-slate-600">
-          Runs at 60fps • Canvas engine • Synthesized battle sounds • No assets, all juice 🎇
+          60 кадров/с • движок на Canvas • синтезированные звуки битвы • без ассетов, один сочный экшен 🎇
         </div>
       </div>
     </div>
@@ -579,37 +579,37 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
       <div className="panel-iron anim-banner w-full max-w-lg rounded-3xl p-6 text-center">
         <div className="text-5xl">{win ? '👑' : '💀'}</div>
         <div className={`font-display mt-1 text-4xl font-black tracking-wide ${win ? '' : 'text-red-400'}`}>
-          {win ? <span className="gold-text">VICTORY!</span> : 'DEFEAT'}
+          {win ? <span className="gold-text">ПОБЕДА!</span> : 'ПОРАЖЕНИЕ'}
         </div>
         <p className="mt-1 text-xs font-semibold text-slate-400">
-          {win ? 'The enemy Town Center lies in ruins. Bards will sing of this day.' : 'Your Town Center has fallen... but legends rise again. Instant rematch?'}
+          {win ? 'Вражеский Городской центр лежит в руинах. Барды будут слагать песни об этом дне.' : 'Ваш Городской центр пал... но легенды возрождаются. Мгновенный реванш?'}
         </p>
         <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-amber-400/15 px-4 py-1.5 text-sm font-black text-amber-200">
-          <Trophy className="h-4 w-4" />{over.score} pts
-          <span className="text-[10px] font-bold text-slate-400">• {over.difficulty} • {AGES[over.age].name}</span>
+          <Trophy className="h-4 w-4" />{over.score} очков
+          <span className="text-[10px] font-bold text-slate-400">• {DIFF[over.difficulty].name} • {AGES[over.age].name}</span>
         </div>
         <div className="mt-3 grid grid-cols-4 gap-1.5">
-          <Stat icon={<Skull className="h-3.5 w-3.5" />} v={`${over.kills}`} l="Kills" />
-          <Stat icon={<Castle className="h-3.5 w-3.5" />} v={`${over.razed}`} l="Razed" />
-          <Stat icon={<Axe className="h-3.5 w-3.5" />} v={`${over.gathered}`} l="Gathered" />
-          <Stat icon={<Timer className="h-3.5 w-3.5" />} v={fmtTime(over.timeSec)} l="Survived" />
+          <Stat icon={<Skull className="h-3.5 w-3.5" />} v={`${over.kills}`} l="Убито" />
+          <Stat icon={<Castle className="h-3.5 w-3.5" />} v={`${over.razed}`} l="Снесено" />
+          <Stat icon={<Axe className="h-3.5 w-3.5" />} v={`${over.gathered}`} l="Добыто" />
+          <Stat icon={<Timer className="h-3.5 w-3.5" />} v={fmtTime(over.timeSec)} l="Партия" />
         </div>
         {!saved ? (
           <div className="mt-4 flex gap-2">
             <input
-              value={name} onChange={e => setName(e.target.value)} maxLength={14} placeholder="Your legend's name..."
+              value={name} onChange={e => setName(e.target.value)} maxLength={14} placeholder="Имя твоей легенды..."
               className="min-w-0 flex-1 rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-sm font-bold text-white placeholder:text-slate-600 focus:border-amber-300 focus:outline-none"
             />
-            <button onClick={onSave} className="btn-gold shrink-0 rounded-xl px-4 py-2.5 text-sm font-black">SAVE</button>
+            <button onClick={onSave} className="btn-gold shrink-0 rounded-xl px-4 py-2.5 text-sm font-black">СОХРАНИТЬ</button>
           </div>
         ) : (
           <div className="mt-4 flex items-center justify-center gap-1.5 rounded-xl bg-lime-500/15 py-2 text-xs font-black text-lime-300">
-            <Check className="h-4 w-4" />Etched into the Hall of Legends!
+            <Check className="h-4 w-4" />Высечено в Зале легенд!
           </div>
         )}
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <BigBtn onClick={onRestart}><RotateCcw className="h-4 w-4" />REMATCH (R)</BigBtn>
-          <MidBtn onClick={onMenu}><Home className="h-4 w-4" />Menu</MidBtn>
+          <BigBtn onClick={onRestart}><RotateCcw className="h-4 w-4" />РЕВАНШ (R)</BigBtn>
+          <MidBtn onClick={onMenu}><Home className="h-4 w-4" />Меню</MidBtn>
         </div>
         {scores.length > 0 && (
           <div className="mt-4 max-h-36 overflow-y-auto scroll-thin rounded-xl bg-black/30 p-2 text-left">

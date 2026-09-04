@@ -86,7 +86,7 @@ export class Game {
   grassTile: HTMLCanvasElement | null = null;
   muted = false;
   dpr = 1; vw = 0; vh = 0;
-  hint = 'Drag to select • Right-click to command';
+  hint = 'Потяните для выделения • Правый клик — приказ';
   destroyed = false;
 
   constructor(canvas: HTMLCanvasElement, opts: { difficulty: Difficulty; onHud: (h: HudSnapshot) => void; onGameOver: (s: GameStats) => void; onPauseRequest: () => void }) {
@@ -104,8 +104,8 @@ export class Game {
     this.centerOn(380, 1620, true);
     const isMobile = matchMedia('(pointer: coarse)').matches;
     this.cam.zoom = isMobile ? 0.7 : 0.9;
-    this.hint = isMobile ? 'Tap to select • Tap ground to command • Drag = select box' : 'Left-drag select • Right-click command • WASD camera • 1-4 train';
-    this.pushBanner('⚔️ To Arms!', 'Command your militia — hunt the wolves north-east', 3.4);
+    this.hint = isMobile ? 'Касание — выбор • Касание земли — приказ • Потяните — рамка выбора' : 'ЛКМ-рамка — выделение • ПКМ — приказ • WASD камера • 1-4 тренировка';
+    this.pushBanner('⚔️ К оружию!', 'Ведите ополчение — охотьтесь на волков на северо-востоке', 3.4);
     this.last = performance.now();
     const loop = (t: number) => { if (this.destroyed) return; this.raf = requestAnimationFrame(loop); this.frame(t); };
     this.raf = requestAnimationFrame(loop);
@@ -600,13 +600,13 @@ export class Game {
     if (key === 'villager' && b && b.queue.length >= 5) b = undefined;
     if (!b) {
       // try select building first for feedback
-      const need = key === 'villager' ? 'Town Center' : 'Barracks';
-      this.floater(this.cam.x, this.cam.y - 120, `Need ${need}!`, '#f87171', 20);
+      const need = key === 'villager' ? 'Городской центр' : 'Казармы';
+      this.floater(this.cam.x, this.cam.y - 120, `Нужен: ${need}!`, '#f87171', 20);
       this.sound.error(); return;
     }
-    if (key === 'knight' && this.age < 1) { this.floater(b.x, b.y - 60, 'Requires Feudal Age!', '#f87171', 17); this.sound.error(); return; }
-    if (this.popUsed('player') + d.pop > this.popCap('player')) { this.floater(b.x, b.y - 60, 'Build Houses! (+8 pop)', '#f87171', 17); this.sound.error(); return; }
-    if (!this.afford(d.cost)) { this.floater(b.x, b.y - 60, 'Not enough resources!', '#f87171', 17); this.sound.error(); return; }
+    if (key === 'knight' && this.age < 1) { this.floater(b.x, b.y - 60, 'Нужен Феодальный век!', '#f87171', 17); this.sound.error(); return; }
+    if (this.popUsed('player') + d.pop > this.popCap('player')) { this.floater(b.x, b.y - 60, 'Постройте дома! (+8 к населению)', '#f87171', 17); this.sound.error(); return; }
+    if (!this.afford(d.cost)) { this.floater(b.x, b.y - 60, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
     this.pay(d.cost);
     b.queue.push({ key, t: 0, total: d.trainTime });
     this.sound.train();
@@ -616,9 +616,9 @@ export class Game {
 
   enterPlacement(key: BuildingKey) {
     if (this.paused || this.over) return;
-    if (key === 'tower' && this.age < 1) { this.floater(this.cam.x, this.cam.y - 100, 'Towers need Feudal Age!', '#f87171', 18); this.sound.error(); return; }
+    if (key === 'tower' && this.age < 1) { this.floater(this.cam.x, this.cam.y - 100, 'Башням нужен Феодальный век!', '#f87171', 18); this.sound.error(); return; }
     const c = BUILDING_DEFS[key].cost;
-    if (!this.afford(c)) { this.floater(this.cam.x, this.cam.y - 100, 'Not enough wood/gold!', '#f87171', 18); this.sound.error(); return; }
+    if (!this.afford(c)) { this.floater(this.cam.x, this.cam.y - 100, 'Не хватает дерева/золота!', '#f87171', 18); this.sound.error(); return; }
     this.placement = key; this.attackArmed = false; this.rallyArmed = false;
     this.sound.select(); this.pushHud();
   }
@@ -649,7 +649,7 @@ export class Game {
     b.buildT = 0;
     this.sound.place();
     this.burst(x, y, 22, ['#d6a45c', '#8b5e2e', '#f6d47c'], 120);
-    this.floater(x, y - 50, `${BUILDING_DEFS[key].name} foundation!`, '#f6d47c', 16);
+    this.floater(x, y - 50, `${BUILDING_DEFS[key].name}: фундамент заложен!`, '#f6d47c', 16);
     // auto-send nearest idle-ish villager
     let best: Unit | null = null; let bd = 700 * 700;
     for (const u of this.units) {
@@ -670,7 +670,7 @@ export class Game {
     const next = AGES[this.age + 1];
     if (!next.cost) return;
     if (this.res.food < next.cost.food || this.res.gold < (next.cost.gold || 0)) {
-      this.floater(this.cam.x, this.cam.y - 100, `Need ${next.cost.food}🍖 ${next.cost.gold ? next.cost.gold + '🪙' : ''}`, '#f87171', 18);
+      this.floater(this.cam.x, this.cam.y - 100, `Нужно: ${next.cost.food}🍖 ${next.cost.gold ? next.cost.gold + '🪙' : ''}`, '#f87171', 18);
       this.sound.error(); return;
     }
     this.res.food -= next.cost.food; this.res.gold -= next.cost.gold || 0;
@@ -681,7 +681,7 @@ export class Game {
     for (const b of this.blds) if (b.owner === 'player') { b.maxHp *= m; b.hp = Math.min(b.maxHp, b.hp * m); }
     this.score += SCORE.ageUp * this.age;
     this.sound.ageup();
-    this.pushBanner(`${next.icon} ${next.name}!`, 'Army stronger & Knights / Towers empowered', 3);
+    this.pushBanner(`${next.icon} ${next.name}!`, 'Армия сильнее, рыцари и башни укреплены', 3);
     this.burst(380, 1620, 40, ['#f6d47c', '#fff'], 160);
     this.checkQuests();
     this.pushHud();
@@ -711,7 +711,7 @@ export class Game {
       const nd = this.nearestNode(u.x, u.y, n % 3 === 0 ? 'wood' : n % 3 === 1 ? 'food' : 'gold');
       if (nd) { this.orderGather(u, nd.id); n++; }
     }
-    if (n) { this.sound.move(); this.floater(this.cam.x, this.cam.y - 80, `${n} villagers to work!`, '#a3e635', 17); }
+    if (n) { this.sound.move(); this.floater(this.cam.x, this.cam.y - 80, `${n} крестьян отправлено на работу!`, '#a3e635', 17); }
     this.pushHud();
   }
   nearestNode(x: number, y: number, kind: 'wood' | 'food' | 'gold'): Node | null {
@@ -770,14 +770,14 @@ export class Game {
       if (!this.questsDone[id] && ok) {
         this.questsDone[id] = true; reward();
         this.sound.quest();
-        this.pushBanner('📜 Quest complete!', msg, 2.2);
+        this.pushBanner('📜 Задание выполнено!', msg, 2.2);
       }
     };
-    q('wood', this.woodGathered >= 60, () => { this.res.food += 40; }, '+40 🍖 — keep chopping!');
-    q('army', this.soldiersTrained >= 3, () => { this.res.wood += 60; this.res.gold += 40; }, '+60 🪵 +40 🪙 — raid time!');
-    q('rax', this.barracksBuilt >= 1, () => { this.res.food += 80; }, '+80 🍖 — train your horde!');
-    q('wolf', this.wolvesSlain >= 4, () => { this.res.gold += 100; }, '+100 🪙 — apex predator!');
-    q('age', this.age >= 1, () => { this.res.wood += 120; }, '+120 🪵 — Feudal might!');
+    q('wood', this.woodGathered >= 60, () => { this.res.food += 40; }, '+40 🍖 — рубите дальше!');
+    q('army', this.soldiersTrained >= 3, () => { this.res.wood += 60; this.res.gold += 40; }, '+60 🪵 +40 🪙 — время набега!');
+    q('rax', this.barracksBuilt >= 1, () => { this.res.food += 80; }, '+80 🍖 — обучайте орду!');
+    q('wolf', this.wolvesSlain >= 4, () => { this.res.gold += 100; }, '+100 🪙 — грозный хищник!');
+    q('age', this.age >= 1, () => { this.res.wood += 120; }, '+120 🪵 — мощь феодализма!');
   }
 
   // ---------- update ----------
@@ -860,7 +860,7 @@ export class Game {
     this.waveT -= dt;
     if (this.waveT <= 8 && this.waveT + dt > 8 && !this.over) {
       this.sound.horn();
-      this.pushBanner('⚠️ Raid incoming!', 'Enemy war party marching on your town!', 2.8);
+      this.pushBanner('⚠️ Набег близко!', 'Вражеский отряд идёт на ваш город!', 2.8);
     }
     if (this.waveT <= 0) { this.launchWave(); this.waveT = Math.max(34, DIFF[this.difficulty].waveInterval - this.wave * 3.2); }
 
@@ -880,11 +880,11 @@ export class Game {
       this.hintT = 0;
       if (this.time < 90) {
         const hints = [
-          'Select militia → right-click wolves to hunt (+🍖 +score)',
-          'Villagers: right-click trees / berries / gold to gather',
-          'Press 2 / 3 to train army at Barracks • Q house • E barracks',
-          'Build farms (F) for endless food • Towers (R) defend',
-          'Press T to advance Age when you can afford it!',
+          'Выберите ополченцев → ПКМ по волкам для охоты (+🍖 +очки)',
+          'Крестьяне: ПКМ по дереву / ягодам / золоту — добыча',
+          'Клавиши 2 / 3 — армия в казармах • Q — дом • E — казармы',
+          'Стройте фермы (F) — бесконечная еда • Башни (R) — оборона',
+          'Жмите T для перехода в новую эпоху, когда хватает ресурсов!',
         ];
         this.hint = hints[((this.time / 6) | 0) % hints.length];
       }
@@ -1223,12 +1223,12 @@ export class Game {
     this.trauma = Math.min(1, this.trauma + (b.key === 'towncenter' ? 1 : 0.55));
     this.burst(b.x, b.y - 20, 46, ['#f59e0b', '#78716c', '#44403c', '#fde68a'], 220, 1.1);
     this.burst(b.x, b.y - 30, 20, ['#ef4444', '#f97316'], 160, 0.9);
-    this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '💥 TOWN CENTER DESTROYED!' : `💥 ${BUILDING_DEFS[b.key].name} razed!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
+    this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '💥 ГОРОДСКОЙ ЦЕНТР УНИЧТОЖЕН!' : `💥 ${BUILDING_DEFS[b.key].name} разрушен(о)!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
     if (byOwner === 'player' && b.owner === 'enemy') {
       this.razed++;
       const pts = b.key === 'towncenter' ? SCORE.tc : SCORE.building;
       this.score += pts;
-      this.floater(b.x, b.y - 95, `+${pts} score`, '#fde047', 16);
+      this.floater(b.x, b.y - 95, `+${pts} очков`, '#fde047', 16);
     }
     // free villagers building it
     for (const u of this.units) if (u.buildId === b.id) { u.buildId = -1; if (u.state === 'build') u.state = 'idle'; }
@@ -1257,7 +1257,7 @@ export class Game {
           b.hp = b.maxHp;
           this.sound.build();
           this.burst(b.x, b.y - 30, 24, ['#f6d47c', '#a16207', '#fff'], 140, 0.8);
-          this.floater(b.x, b.y - 60, `${def.name} ready!`, '#a3e635', 16);
+          this.floater(b.x, b.y - 60, `${def.name}: готово!`, '#a3e635', 16);
           if (b.owner === 'player') { for (const u of this.units) if (u.buildId === b.id && u.owner === 'player') { u.buildId = -1; u.state = 'idle'; } }
         }
         continue;
@@ -1363,7 +1363,7 @@ export class Game {
     }
     // ensure aggression
     this.sound.horn();
-    this.pushBanner(`⚔️ Wave ${this.wave} — Enemy Raid!`, `${comp.length} hostiles inbound. Towers up! (R)`, 3);
+    this.pushBanner(`⚔️ Волна ${this.wave} — вражеский набег!`, `${comp.length} врагов на подходе. Стройте башни! (R)`, 3);
     this.trauma = Math.min(1, this.trauma + 0.15);
   }
 
@@ -1472,11 +1472,11 @@ export class Game {
       sel, placement: this.placement, attackArmed: this.attackArmed, rallyArmed: this.rallyArmed, panMode: this.panMode,
       banner,
       quests: [
-        { id: 'wood', label: 'Chop 60 🪵', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
-        { id: 'army', label: 'Train 3 soldiers', done: !!this.questsDone.army, progress: `${Math.min(3, this.soldiersTrained)}/3` },
-        { id: 'rax', label: 'Build Barracks (E)', done: !!this.questsDone.rax, progress: this.barracksBuilt ? '1/1' : '0/1' },
-        { id: 'wolf', label: 'Slay 4 wolves', done: !!this.questsDone.wolf, progress: `${Math.min(4, this.wolvesSlain)}/4` },
-        { id: 'age', label: 'Reach Feudal (T)', done: !!this.questsDone.age, progress: this.age >= 1 ? '1/1' : '0/1' },
+        { id: 'wood', label: 'Нарубить 60 🪵', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
+        { id: 'army', label: 'Обучить 3 воинов', done: !!this.questsDone.army, progress: `${Math.min(3, this.soldiersTrained)}/3` },
+        { id: 'rax', label: 'Построить казармы (E)', done: !!this.questsDone.rax, progress: this.barracksBuilt ? '1/1' : '0/1' },
+        { id: 'wolf', label: 'Убить 4 волка', done: !!this.questsDone.wolf, progress: `${Math.min(4, this.wolvesSlain)}/4` },
+        { id: 'age', label: 'Дойти до Феодализма (T)', done: !!this.questsDone.age, progress: this.age >= 1 ? '1/1' : '0/1' },
       ],
       muted: this.muted, idleVills,
       pTc: ptc ? Math.max(0, Math.ceil(ptc.hp)) : 0, pTcMax: ptc ? ptc.maxHp : 1,
@@ -1698,7 +1698,7 @@ export class Game {
       ctx.strokeStyle = ok ? '#a3e635' : '#ef4444'; ctx.lineWidth = 2; ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.fillStyle = '#fff'; ctx.font = '800 13px Inter';
-      ctx.fillText(ok ? 'Click to place' : 'Blocked!', gx, gy - hh - 10);
+      ctx.fillText(ok ? 'Клик — поставить' : 'Занято!', gx, gy - hh - 10);
       if (this.placement === 'tower') {
         ctx.strokeStyle = ok ? 'rgba(246,212,124,0.4)' : 'rgba(248,113,113,0.4)'; ctx.lineWidth = 1.5;
         isoEllipse(ctx, gx, gy, BUILDING_DEFS.tower.attack!.range * 0.7, BUILDING_DEFS.tower.attack!.range * 0.7);
@@ -2691,7 +2691,7 @@ export class Game {
     ctx.strokeRect(vx0, vy0, vw, vh);
     ctx.restore();
     ctx.fillStyle = 'rgba(253,230,138,0.85)'; ctx.font = '700 9px Inter';
-    ctx.textAlign = 'left'; ctx.fillText('MINIMAP — tap to jump', x - 2, y - 8);
+    ctx.textAlign = 'left'; ctx.fillText('КАРТА — нажмите, чтобы прыгнуть', x - 2, y - 8);
   }
 }
 
