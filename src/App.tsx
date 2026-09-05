@@ -14,6 +14,8 @@ interface ScoreEntry { name: string; score: number; result: string; difficulty: 
 
 const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
+// версия игры — единый источник для показа в меню
+export const GAME_VERSION = '1.0.0';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -985,6 +987,10 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         <div className="mt-6 text-center text-[11px] font-semibold text-slate-600">
           60 кадров/с • движок на Canvas • синтезированные звуки битвы • без ассетов, один сочный экшен 🎇
         </div>
+      </div>
+      {/* версия — левый нижний угол меню */}
+      <div className="pointer-events-none fixed bottom-2 left-3 z-10 select-none text-[10px] font-semibold tracking-wide text-white/40">
+        Империи Рассвета • v{GAME_VERSION}
       </div>
     </div>
   );
