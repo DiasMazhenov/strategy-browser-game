@@ -105,13 +105,29 @@ npx http-server dist -p 8080 -c-1  # локальный предпросмотр
 
 ## Git / рабочий процесс
 
-- Рабочая ветка сессии: **`arena/01a06db0-strategy-browser-game`** — коммитить и пушить только в неё.
-  `git push origin HEAD:refs/heads/arena/01a06db0-strategy-browser-game`.
+- Рабочая ветка сессии: **`arena/01a06db0-strategy-browser-game`** — коммитим сюда (по ней Arena отслеживает сессию).
+- **По приказу владельца проекта актуальное состояние ВСЕГДА зеркалируется и в `main`.**
+  После коммита в сессионную ветку пушить тот же HEAD и в main:
+  ```bash
+  git push origin HEAD:refs/heads/arena/01a06db0-strategy-browser-game
+  git push --force-with-lease origin HEAD:refs/heads/main   # или origin HEAD:main
+  ```
+  `main` на GitHub был одиночным коммитом-загрузкой через веб (orphan-история), поэтому
+  первая синхронизация — force-push (истории не связаны). Дальше можно fast-forward,
+  но сессионная ветка — источник истины, при расхождении её и приводим к main.
 - Коммиты — conventional commits на русском (`feat:`, `fix:` …).
-- **Не коммитить** скретч: `raw/`, `scripts/proc.cjs`, `scripts/tile-test.cjs`, `tile-test.png`,
-  `plan.md`, `dist/`, `node_modules/` (всё в `.gitignore`).
-- История: база `6e67394` → перевод на русский `113493f` → спрайты/стены `5cc7abb` →
-  снос/ворота/угол/боевой звук `09b4e3a` → версия в меню `ac6e956` → …
+- **Версионируемая dev-тулза** (лежит в `scripts/`, коммитится): `process-art.cjs` (обработка
+  спрайтов), `build-sprites.cjs`, `extract-sprites.cjs`, `iso-check.cjs`,
+  `pixelart-preview.cjs`, `walk-sheet.cjs`, `walk-strip.cjs`.
+- **Не коммитить** скретч (в `.gitignore`): `raw/`, `plan.md`, `tile-test.png`,
+  `scripts/proc.cjs` (одноразовый обработчик), `scripts/tile-test.cjs` (одноразовый композит),
+  `dist/`, `node_modules/`.
+  Внимание: в `.gitignore` нет inline-комментариев после паттерна (git их не поддерживает —
+  комментарий только с отдельной строки, иначе ломается паттерн).
+- Мёртвые ассеты не возвращать: `wall_b.png`/`gate_b.png` (неверно ориентированные диагональные
+  спрайты) — вторая диагональ рисуется зеркально, эти файлы не нужны.
+- История сессии: база `6e67394` → перевод на русский `113493f` → спрайты/стены `5cc7abb` →
+  снос/ворота/угол/боевой звук `09b4e3a` → версия в меню `ac6e956` → context.md+1.0.001 `57b8006` → …
 
 ---
 
