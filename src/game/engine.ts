@@ -82,9 +82,10 @@ interface Unit {
   cd: number; state: 'idle' | 'move' | 'gather' | 'return' | 'build' | 'attackmove' | 'patrol';
   tx: number; ty: number; targetU: number; targetB: number; nodeId: number; buildId: number;
   carry: Carry; gatherT: number; anim: number; face: number; atkAnim: number; retarget: number; idleT: number; flash: number;
-  fmode?: 0 | 1 | 2;                              // изо-направление корпуса крестьянина: 0 сбоку, 1 спереди (к камере), 2 спина
-  wkind?: 'chop' | 'mine' | 'gather';             // текущая работа (для кадра анимации)
+  fmode?: 0 | 1 | 2;                              // изо-направление корпуса: 0 сбоку, 1 спереди (к камере), 2 спина
+  wkind?: 'chop' | 'mine' | 'gather';             // текущая работа крестьянина (для кадра анимации)
   wphase?: number;                                // фаза рабочего цикла 0..1
+  aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
   stance: 'aggressive' | 'defensive' | 'stand'; // боевая стойка
   homeX: number; homeY: number;                 // точка возврата (stand/patrol)
@@ -1989,6 +1990,7 @@ export class Game {
   updateSoldier(u: Unit, dt: number) {
     // монах-лекарь — не воюет, лечит союзников
     if (u.key === 'monk') { this.updateMonk(u, dt); return; }
+    if (u.key === 'archer') u.aiming = false; // сбрасываем; выставится при цели в зоне
     // validate targets
     let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
     let tb = u.targetB >= 0 ? this.blds.find(b => b.id === u.targetB) : undefined;
@@ -2010,6 +2012,7 @@ export class Game {
         const d = Math.hypot(tu.x - u.x, tu.y - u.y);
         if (d <= uRange + (tu.key === 'wolf' ? 4 : 6)) {
           if (Math.abs(tu.x - u.x) > 4) u.face = tu.x > u.x ? 1 : -1;
+          if (u.key === 'archer') u.aiming = true;
           if (u.cd <= 0) this.strike(u, tu, undefined);
         } else {
           this.moveToward(u, tu.x, tu.y, dt, uRange * 0.7);
@@ -2024,6 +2027,7 @@ export class Game {
       const ed = Math.hypot(overlapX, overlapY);
       if (ed <= uRange * 0.7 + 8) {
         if (Math.abs(tb.x - u.x) > 4) u.face = tb.x > u.x ? 1 : -1;
+        if (u.key === 'archer') u.aiming = true;
         if (u.cd <= 0) this.strike(u, undefined, tb);
       } else this.moveToward(u, tb.x, tb.y, dt, edge);
       return;

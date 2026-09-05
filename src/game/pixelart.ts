@@ -44,6 +44,17 @@ import uSBw3 from '../assets/sprites/units/sbw3.png';
 import uSBw4 from '../assets/sprites/units/sbw4.png';
 import uArcher from '../assets/sprites/units/archer.png';
 import uArcherW from '../assets/sprites/units/archer_w.png';
+// лучник: стрельба из лука и 4-фазная ходьба спереди/со спины
+import uAAim from '../assets/sprites/units/aaim.png';
+import uARelease from '../assets/sprites/units/arelease.png';
+import uAFw1 from '../assets/sprites/units/afw1.png';
+import uAFw2 from '../assets/sprites/units/afw2.png';
+import uAFw3 from '../assets/sprites/units/afw3.png';
+import uAFw4 from '../assets/sprites/units/afw4.png';
+import uABw1 from '../assets/sprites/units/abw1.png';
+import uABw2 from '../assets/sprites/units/abw2.png';
+import uABw3 from '../assets/sprites/units/abw3.png';
+import uABw4 from '../assets/sprites/units/abw4.png';
 import uSpearman from '../assets/sprites/units/spearman.png';
 import uSpearmanW from '../assets/sprites/units/spearman_w.png';
 import uKnight from '../assets/sprites/units/knight.png';
@@ -125,6 +136,20 @@ const SW_WALK_FRONT: [HTMLImageElement, string][] = [
 const SW_WALK_BACK: [HTMLImageElement, string][] = [
   [mk(uSBw1), 'sbw1'], [mk(uSBw2), 'sbw2'], [mk(uSBw3), 'sbw3'], [mk(uSBw4), 'sbw4'],
 ];
+// ── лучник (archer) ──
+// стрельба: aaim — лук натянут (прицеливание), arelease — стрела срывается (выпуск)
+const AR_AIM: [HTMLImageElement, string] = [mk(uAAim), 'aaim'];
+const AR_RELEASE: [HTMLImageElement, string] = [mk(uARelease), 'arelease'];
+// 4-фазная ходьба: сбоку (2 существующих кадра марша, чередуются), спереди, со спины
+const AR_WALK_SIDE: [HTMLImageElement, string][] = [
+  [mk(uArcher), 'archer'], [mk(uArcherW), 'archer_w'], [mk(uArcher), 'archer'], [mk(uArcherW), 'archer_w'],
+];
+const AR_WALK_FRONT: [HTMLImageElement, string][] = [
+  [mk(uAFw1), 'afw1'], [mk(uAFw2), 'afw2'], [mk(uAFw3), 'afw3'], [mk(uAFw4), 'afw4'],
+];
+const AR_WALK_BACK: [HTMLImageElement, string][] = [
+  [mk(uABw1), 'abw1'], [mk(uABw2), 'abw2'], [mk(uABw3), 'abw3'], [mk(uABw4), 'abw4'],
+];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
   const base = UNIT_IMAGES[u.key];
@@ -139,12 +164,16 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   let workSwing = 0;   // фаза удара инструментом 0..1 (для выпада на кадре работы)
   const isVill = u.key === 'villager';
   const isSword = u.key === 'swordsman';
-  const hasDirWalk = isVill || isSword; // у этих юнитов есть 4-кадровая направленная ходьба
+  const isArch = u.key === 'archer';
+  const hasDirWalk = isVill || isSword || isArch; // у этих юнитов есть 4-кадровая направленная ходьба
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
   const working = isVill && !!u.wkind && !move &&
     (u.state === 'gather' || u.state === 'build');
   // ополченец рубит мечом на месте (базовый кадр = замах/готовность, sslash = удар сверху-вниз)
   const slashing = isSword && !move && u.atkAnim > 0.45 && ready(SW_SLASH[0]);
+  // лучник стреляет: arelease — в момент выстрела (atkAnim высокий), aaim — натягивает/держит лук в зоне
+  const loosing = isArch && !move && u.atkAnim > 0.5 && ready(AR_RELEASE[0]);
+  const aiming = isArch && !move && !loosing && !!u.aiming && ready(AR_AIM[0]);
 
   if (working) {
     // кадр работы по виду деятельности: [замах, удар] переключаются фазой цикла
@@ -154,6 +183,10 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     anKey = strike ? pair[3] : pair[2];
     workSwing = strike ? Math.sin(Math.min(1, ((u.wphase ?? 0) - 0.62) / 0.38) * Math.PI) : 0;
     flip = f; // боковой кадр отражаем к ресурсу (инструмент в сторону дерева/руды)
+  } else if (loosing) {
+    im = AR_RELEASE[0]; anKey = AR_RELEASE[1]; flip = f;
+  } else if (aiming) {
+    im = AR_AIM[0]; anKey = AR_AIM[1]; flip = f;
   } else if (slashing) {
     im = SW_SLASH[0]; anKey = SW_SLASH[1]; flip = f;
   } else if (hasDirWalk && move) {
@@ -161,6 +194,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     const fmode = u.fmode ?? 0;
     const cyc = isVill
       ? (fmode === 1 ? VILL_WALK_FRONT : fmode === 2 ? VILL_WALK_BACK : VILL_WALK_SIDE)
+      : isArch
+      ? (fmode === 1 ? AR_WALK_FRONT   : fmode === 2 ? AR_WALK_BACK   : AR_WALK_SIDE)
       : (fmode === 1 ? SW_WALK_FRONT   : fmode === 2 ? SW_WALK_BACK   : SW_WALK_SIDE);
     const idx = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
     const [img0, key0] = cyc[idx];
@@ -183,8 +218,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const H = UNIT_TARGET_H[u.key] ?? 46;
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
-  // на готовых кадрах работы/рубки/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
-  const upright = working || slashing || (hasDirWalk && move);
+  // на готовых кадрах работы/рубки/стрельбы/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
+  const upright = working || slashing || loosing || aiming || (hasDirWalk && move);
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
@@ -623,10 +658,11 @@ export function diamondRingHalf(ctx: CanvasRenderingContext2D, ix: number, iy: n
 // Юниты: пиксель-арт с анимациями ходьбы и атаки
 // ─────────────────────────────────────────────────────────────────────────
 interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number; anim: number; atkAnim: number; state: string; carry?: { type: string; amt: number }; hp?: number; maxHp?: number; walk?: boolean; level?: number;
-  // изо-направление корпуса крестьянина: 0 — сбоку (по face), 1 — спереди (к камере), 2 — спина (от камеры)
+  // изо-направление корпуса: 0 — сбоку (по face), 1 — спереди (к камере), 2 — спина (от камеры)
   fmode?: 0 | 1 | 2;
-  wkind?: 'chop' | 'mine' | 'gather';   // текущая работа (для кадра)
+  wkind?: 'chop' | 'mine' | 'gather';   // текущая работа крестьянина (для кадра)
   wphase?: number;                      // фаза рабочего цикла 0..1 (замах→удар)
+  aiming?: boolean;                     // лучник в зоне выстрела (натягивает/держит лук)
 }
 
 const TEAM = {
