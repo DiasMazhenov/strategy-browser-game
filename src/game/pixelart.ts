@@ -16,8 +16,18 @@ import uVMine1 from '../assets/sprites/units/vmine1.png';
 import uVMine2 from '../assets/sprites/units/vmine2.png';
 import uVGather1 from '../assets/sprites/units/vgather1.png';
 import uVGather2 from '../assets/sprites/units/vgather2.png';
-import uVFront from '../assets/sprites/units/vfront.png';
-import uVBack from '../assets/sprites/units/vback.png';
+// 4-фазовые циклы ходьбы крестьянина: сбоку, спереди (на камеру), со спины (от камеры)
+import uVSW1 from '../assets/sprites/units/vsw1.png';
+import uVSW2 from '../assets/sprites/units/vsw2.png';
+import uVSW3 from '../assets/sprites/units/vsw3.png';
+import uVFW1 from '../assets/sprites/units/vfw1.png';
+import uVFW2 from '../assets/sprites/units/vfw2.png';
+import uVFW3 from '../assets/sprites/units/vfw3.png';
+import uVFW4 from '../assets/sprites/units/vfw4.png';
+import uVBW1 from '../assets/sprites/units/vbw1.png';
+import uVBW2 from '../assets/sprites/units/vbw2.png';
+import uVBW3 from '../assets/sprites/units/vbw3.png';
+import uVBW4 from '../assets/sprites/units/vbw4.png';
 import uSwordsman from '../assets/sprites/units/swordsman.png';
 import uSwordsmanW from '../assets/sprites/units/swordsman_w.png';
 import uSwordsmanW2 from '../assets/sprites/units/swordsman_walk2.png';
@@ -79,11 +89,17 @@ const VILL_WORK: Record<string, [HTMLImageElement, HTMLImageElement, string, str
   mine:    [mk(uVMine1),   mk(uVMine2),   'vmine1', 'vmine2'],    // кирка: золото/руда, стройка
   gather:  [mk(uVGather1), mk(uVGather2), 'vgather1', 'vgather2'],// сбор фруктов/урожая
 };
-// направления ходьбы крестьянина в изометрии: на «камеру» — спереди, от «камеры» — спина
-const VILL_DIR: Record<string, [HTMLImageElement, string]> = {
-  front: [mk(uVFront), 'vfront'],
-  back:  [mk(uVBack),  'vback'],
-};
+// направления ходьбы крестьянина в изометрии: 4-фазные циклы [контакт, пронос-внизу, контакт-2, пронос-вверху]
+//  — сбоку (отражается по face), спереди (на камеру), со спины (от камеры). Ключ = имя кадра/якоря.
+const VILL_WALK_SIDE: [HTMLImageElement, string][] = [
+  [mk(uVSW1), 'vsw1'], [mk(uVSW2), 'vsw2'], [mk(uVSW3), 'vsw3'], [mk(uVSW2), 'vsw2'],
+];
+const VILL_WALK_FRONT: [HTMLImageElement, string][] = [
+  [mk(uVFW1), 'vfw1'], [mk(uVFW2), 'vfw2'], [mk(uVFW3), 'vfw3'], [mk(uVFW4), 'vfw4'],
+];
+const VILL_WALK_BACK: [HTMLImageElement, string][] = [
+  [mk(uVBW1), 'vbw1'], [mk(uVBW2), 'vbw2'], [mk(uVBW3), 'vbw3'], [mk(uVBW4), 'vbw4'],
+];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
   const base = UNIT_IMAGES[u.key];
@@ -109,11 +125,16 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     anKey = strike ? pair[3] : pair[2];
     workSwing = strike ? Math.sin(Math.min(1, ((u.wphase ?? 0) - 0.62) / 0.38) * Math.PI) : 0;
     flip = f; // боковой кадр отражаем к ресурсу (инструмент в сторону дерева/руды)
-  } else if (isVill && move && (u.fmode === 1 || u.fmode === 2)) {
-    // ходьба вдоль изо-вертикали: на камеру — спереди, от камеры — спина (без отражения)
-    const d = VILL_DIR[u.fmode === 1 ? 'front' : 'back'];
-    if (ready(d[0])) { im = d[0]; anKey = d[1]; flip = 1; }
-    else { im = base!; anKey = u.key; }
+  } else if (isVill && move) {
+    // ходьба крестьянина: 4-фазный цикл по изо-направлению (сбоку / спереди / со спины)
+    const fmode = u.fmode ?? 0;
+    const cyc = fmode === 1 ? VILL_WALK_FRONT : fmode === 2 ? VILL_WALK_BACK : VILL_WALK_SIDE;
+    const idx = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
+    const [img0, key0] = cyc[idx];
+    if (ready(img0)) {
+      im = img0; anKey = key0;
+      flip = fmode === 0 ? f : 1; // бок — отражение по face; спереди/сзади — без
+    } else { im = base!; anKey = u.key; }
   } else {
     const wA = UNIT_WALK_A[u.key], wB = UNIT_WALK_B[u.key];
     if (move && ready(wA) && ready(wB)) {
@@ -129,7 +150,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const H = UNIT_TARGET_H[u.key] ?? 46;
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
-  const upright = working || (isVill && (u.fmode === 1 || u.fmode === 2)); // вид анфас/в работе — без крена
+  // крестьянин на кадрах работы/направленной ходьбы — без бокового крена (позы уже заданы спрайтом)
+  const upright = working || (isVill && move);
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
@@ -143,7 +165,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     // работа на месте: лёгкий присед в такт удару, без шага
     bob = workSwing * 2.2; rock = 0; lean = workSwing * 0.06; sway = 0;
   } else if (upright && move) {
-    // ходьба анфас/спиной: мягкий подскок, без бокового крена
+    // ходьба крестьянина на готовых кадрах цикла: мягкий подскок, без бокового крена
     bob = -stepAbs * 3; rock = 0; lean = 0; sway = 0;
   } else if (move) {
     if (mounted) { bob = -Math.abs(gait) * 7; rock = gait * 0.06; lean = 0.05; sway = gait * 2.0; }

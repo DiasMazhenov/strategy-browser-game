@@ -15,8 +15,8 @@ interface ScoreEntry { name: string; score: number; result: string; difficulty: 
 const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
-// При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.001 → 1.0.002 → 1.0.003 …
-export const GAME_VERSION = '1.0.002';
+// При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.002 → 1.0.003 → 1.0.004 …
+export const GAME_VERSION = '1.0.003';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
