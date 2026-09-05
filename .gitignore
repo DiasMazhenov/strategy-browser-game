@@ -3,3 +3,16 @@ dist/
 *.log
 .DS_Store
 .vite/
+raw/
+
+# scratch / dev tooling (не часть игры)
+plan.md
+scripts/build-sprites.cjs
+scripts/extract-sprites.cjs
+scripts/iso-check.cjs
+scripts/pixelart-preview.cjs
+scripts/process-art.cjs
+scripts/tile-test.cjs
+scripts/walk-sheet.cjs
+scripts/walk-strip.cjs
+tile-test.png
