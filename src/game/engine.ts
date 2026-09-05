@@ -1807,7 +1807,8 @@ export class Game {
       (u as Unit & { walk?: boolean }).walk = walk;
       // изо-направление корпуса крестьянина: мир-дельта → экранная дельта (toIso).
       // sx = dwx - dwy (право), sy = (dwx + dwy)/2 (вниз к камере). Вниз по экрану → спереди, вверх → спина.
-      if (u.key === 'villager' && walk) {
+      if (walk) {
+        // мировая дельта шага → изо-экранная (toIso): sx вправо, sy вниз к камере
         const dWx = u.x - px0, dWy = u.y - py0;
         const sxv = dWx - dWy, syv = (dWx + dWy) * 0.5;
         // сглаживаем вектор, чтобы режим не «дёргался» на диагоналях

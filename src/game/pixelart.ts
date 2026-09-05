@@ -31,6 +31,17 @@ import uVBW4 from '../assets/sprites/units/vbw4.png';
 import uSwordsman from '../assets/sprites/units/swordsman.png';
 import uSwordsmanW from '../assets/sprites/units/swordsman_w.png';
 import uSwordsmanW2 from '../assets/sprites/units/swordsman_walk2.png';
+// ополченец: рубящий удар мечом и 4-фазная ходьба (сбоку/спереди/со спины)
+import uSSlash from '../assets/sprites/units/sslash.png';
+import uSSw3 from '../assets/sprites/units/ssw3.png';
+import uSFw1 from '../assets/sprites/units/sfw1.png';
+import uSFw2 from '../assets/sprites/units/sfw2.png';
+import uSFw3 from '../assets/sprites/units/sfw3.png';
+import uSFw4 from '../assets/sprites/units/sfw4.png';
+import uSBw1 from '../assets/sprites/units/sbw1.png';
+import uSBw2 from '../assets/sprites/units/sbw2.png';
+import uSBw3 from '../assets/sprites/units/sbw3.png';
+import uSBw4 from '../assets/sprites/units/sbw4.png';
 import uArcher from '../assets/sprites/units/archer.png';
 import uArcherW from '../assets/sprites/units/archer_w.png';
 import uSpearman from '../assets/sprites/units/spearman.png';
@@ -100,6 +111,20 @@ const VILL_WALK_FRONT: [HTMLImageElement, string][] = [
 const VILL_WALK_BACK: [HTMLImageElement, string][] = [
   [mk(uVBW1), 'vbw1'], [mk(uVBW2), 'vbw2'], [mk(uVBW3), 'vbw3'], [mk(uVBW4), 'vbw4'],
 ];
+// ── ополченец (swordsman) ──
+// рубящий удар мечом (базовый кадр swordsman = замах/готовность; sslash = удар сверху-вниз)
+const SW_SLASH: [HTMLImageElement, string] = [mk(uSSlash), 'sslash'];
+// 4-фазная ходьба: сбоку (переиспользуем 2 кадра марша + новый контакт), спереди, со спины
+const SW_WALK_SIDE: [HTMLImageElement, string][] = [
+  [mk(uSwordsmanW), 'swordsman_w'], [mk(uSwordsmanW2), 'swordsman_walk2'],
+  [mk(uSSw3), 'ssw3'], [mk(uSwordsmanW2), 'swordsman_walk2'],
+];
+const SW_WALK_FRONT: [HTMLImageElement, string][] = [
+  [mk(uSFw1), 'sfw1'], [mk(uSFw2), 'sfw2'], [mk(uSFw3), 'sfw3'], [mk(uSFw4), 'sfw4'],
+];
+const SW_WALK_BACK: [HTMLImageElement, string][] = [
+  [mk(uSBw1), 'sbw1'], [mk(uSBw2), 'sbw2'], [mk(uSBw3), 'sbw3'], [mk(uSBw4), 'sbw4'],
+];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
   const base = UNIT_IMAGES[u.key];
@@ -113,9 +138,13 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   let flip = f;        // отражать ли по X (для вида спереди/сзади — нет)
   let workSwing = 0;   // фаза удара инструментом 0..1 (для выпада на кадре работы)
   const isVill = u.key === 'villager';
+  const isSword = u.key === 'swordsman';
+  const hasDirWalk = isVill || isSword; // у этих юнитов есть 4-кадровая направленная ходьба
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
   const working = isVill && !!u.wkind && !move &&
     (u.state === 'gather' || u.state === 'build');
+  // ополченец рубит мечом на месте (базовый кадр = замах/готовность, sslash = удар сверху-вниз)
+  const slashing = isSword && !move && u.atkAnim > 0.45 && ready(SW_SLASH[0]);
 
   if (working) {
     // кадр работы по виду деятельности: [замах, удар] переключаются фазой цикла
@@ -125,10 +154,14 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     anKey = strike ? pair[3] : pair[2];
     workSwing = strike ? Math.sin(Math.min(1, ((u.wphase ?? 0) - 0.62) / 0.38) * Math.PI) : 0;
     flip = f; // боковой кадр отражаем к ресурсу (инструмент в сторону дерева/руды)
-  } else if (isVill && move) {
-    // ходьба крестьянина: 4-фазный цикл по изо-направлению (сбоку / спереди / со спины)
+  } else if (slashing) {
+    im = SW_SLASH[0]; anKey = SW_SLASH[1]; flip = f;
+  } else if (hasDirWalk && move) {
+    // 4-фазная ходьба по изо-направлению: сбоку (отражается по face) / спереди / со спины
     const fmode = u.fmode ?? 0;
-    const cyc = fmode === 1 ? VILL_WALK_FRONT : fmode === 2 ? VILL_WALK_BACK : VILL_WALK_SIDE;
+    const cyc = isVill
+      ? (fmode === 1 ? VILL_WALK_FRONT : fmode === 2 ? VILL_WALK_BACK : VILL_WALK_SIDE)
+      : (fmode === 1 ? SW_WALK_FRONT   : fmode === 2 ? SW_WALK_BACK   : SW_WALK_SIDE);
     const idx = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
     const [img0, key0] = cyc[idx];
     if (ready(img0)) {
@@ -143,15 +176,15 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
       im = (useB ? wB : wA)!;
       anKey = (useB ? WALK_ANCHOR_B : WALK_ANCHOR_A)[u.key]!;
     } else {
-      im = base!; anKey = u.key; // покой/атака — боевой кадр
+      im = base!; anKey = u.key; // покой/готовность — боевой кадр
     }
   }
   const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
   const H = UNIT_TARGET_H[u.key] ?? 46;
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
-  // крестьянин на кадрах работы/направленной ходьбы — без бокового крена (позы уже заданы спрайтом)
-  const upright = working || (isVill && move);
+  // на готовых кадрах работы/рубки/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
+  const upright = working || slashing || (hasDirWalk && move);
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
