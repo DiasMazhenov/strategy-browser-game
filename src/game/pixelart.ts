@@ -9,6 +9,15 @@ import { UNIT_ANCHORS, UNIT_TARGET_H } from './sprite-art';
 // детальные AI-спрайты юнитов (боковой вид); _w/_walk2 — согласованные кадры шага
 import uVillager from '../assets/sprites/units/villager.png';
 import uVillagerW from '../assets/sprites/units/villager_w.png';
+// кадры работы крестьянина (вид сбоку) и направления ходьбы (спереди/сзади для изометрии)
+import uVChop1 from '../assets/sprites/units/vchop1.png';
+import uVChop2 from '../assets/sprites/units/vchop2.png';
+import uVMine1 from '../assets/sprites/units/vmine1.png';
+import uVMine2 from '../assets/sprites/units/vmine2.png';
+import uVGather1 from '../assets/sprites/units/vgather1.png';
+import uVGather2 from '../assets/sprites/units/vgather2.png';
+import uVFront from '../assets/sprites/units/vfront.png';
+import uVBack from '../assets/sprites/units/vback.png';
 import uSwordsman from '../assets/sprites/units/swordsman.png';
 import uSwordsmanW from '../assets/sprites/units/swordsman_w.png';
 import uSwordsmanW2 from '../assets/sprites/units/swordsman_walk2.png';
@@ -64,6 +73,17 @@ const WALK_ANCHOR_B: Partial<Record<UnitKey, string>> = {
   knight: 'knight_w', cavalry: 'cavalry_w', catapult: 'catapult_w', monk: 'monk_w', wolf: 'wolf_w',
   sheep: 'sheep_w', cow: 'cow_w', deer: 'deer_w',
 };
+// кадры работы крестьянина: пары [замах, удар] по виду деятельности (ключ якоря = имя файла)
+const VILL_WORK: Record<string, [HTMLImageElement, HTMLImageElement, string, string]> = {
+  chop:    [mk(uVChop1),   mk(uVChop2),   'vchop1', 'vchop2'],    // рубка леса
+  mine:    [mk(uVMine1),   mk(uVMine2),   'vmine1', 'vmine2'],    // кирка: золото/руда, стройка
+  gather:  [mk(uVGather1), mk(uVGather2), 'vgather1', 'vgather2'],// сбор фруктов/урожая
+};
+// направления ходьбы крестьянина в изометрии: на «камеру» — спереди, от «камеры» — спина
+const VILL_DIR: Record<string, [HTMLImageElement, string]> = {
+  front: [mk(uVFront), 'vfront'],
+  back:  [mk(uVBack),  'vback'],
+};
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
   const base = UNIT_IMAGES[u.key];
@@ -74,19 +94,42 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
 
   // ── выбор кадра ──
   let im: HTMLImageElement, anKey: string;
-  const wA = UNIT_WALK_A[u.key], wB = UNIT_WALK_B[u.key];
-  if (move && ready(wA) && ready(wB)) {
-    // два согласованных кадра шага, переключаются в такт фазе
-    const useB = Math.sin(u.anim) < 0;
-    im = (useB ? wB : wA)!;
-    anKey = (useB ? WALK_ANCHOR_B : WALK_ANCHOR_A)[u.key]!;
+  let flip = f;        // отражать ли по X (для вида спереди/сзади — нет)
+  let workSwing = 0;   // фаза удара инструментом 0..1 (для выпада на кадре работы)
+  const isVill = u.key === 'villager';
+  // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
+  const working = isVill && !!u.wkind && !move &&
+    (u.state === 'gather' || u.state === 'build');
+
+  if (working) {
+    // кадр работы по виду деятельности: [замах, удар] переключаются фазой цикла
+    const pair = VILL_WORK[u.wkind!] ?? VILL_WORK.chop;
+    const strike = (u.wphase ?? 0) > 0.62;
+    im = strike ? pair[1] : pair[0];
+    anKey = strike ? pair[3] : pair[2];
+    workSwing = strike ? Math.sin(Math.min(1, ((u.wphase ?? 0) - 0.62) / 0.38) * Math.PI) : 0;
+    flip = f; // боковой кадр отражаем к ресурсу (инструмент в сторону дерева/руды)
+  } else if (isVill && move && (u.fmode === 1 || u.fmode === 2)) {
+    // ходьба вдоль изо-вертикали: на камеру — спереди, от камеры — спина (без отражения)
+    const d = VILL_DIR[u.fmode === 1 ? 'front' : 'back'];
+    if (ready(d[0])) { im = d[0]; anKey = d[1]; flip = 1; }
+    else { im = base!; anKey = u.key; }
   } else {
-    im = base!; anKey = u.key; // покой/атака — боевой кадр
+    const wA = UNIT_WALK_A[u.key], wB = UNIT_WALK_B[u.key];
+    if (move && ready(wA) && ready(wB)) {
+      // два согласованных кадра шага, переключаются в такт фазе
+      const useB = Math.sin(u.anim) < 0;
+      im = (useB ? wB : wA)!;
+      anKey = (useB ? WALK_ANCHOR_B : WALK_ANCHOR_A)[u.key]!;
+    } else {
+      im = base!; anKey = u.key; // покой/атака — боевой кадр
+    }
   }
   const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
   const H = UNIT_TARGET_H[u.key] ?? 46;
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
+  const upright = working || (isVill && (u.fmode === 1 || u.fmode === 2)); // вид анфас/в работе — без крена
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
@@ -96,7 +139,13 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
   const gait = mounted || beast ? Math.sin(u.anim * 1.0) : step; // у галопа фаза та же, но выше амплитуда
   let bob: number, rock: number, lean: number, sway: number;
-  if (move) {
+  if (working) {
+    // работа на месте: лёгкий присед в такт удару, без шага
+    bob = workSwing * 2.2; rock = 0; lean = workSwing * 0.06; sway = 0;
+  } else if (upright && move) {
+    // ходьба анфас/спиной: мягкий подскок, без бокового крена
+    bob = -stepAbs * 3; rock = 0; lean = 0; sway = 0;
+  } else if (move) {
     if (mounted) { bob = -Math.abs(gait) * 7; rock = gait * 0.06; lean = 0.05; sway = gait * 2.0; }
     else if (beast) { bob = -Math.abs(gait) * 5; rock = gait * 0.05; lean = 0.12; sway = gait * 1.2; }
     else if (siege) { bob = -stepAbs * 1.5; rock = step * 0.02; lean = 0.02; sway = 0; }
@@ -104,13 +153,14 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   } else {
     bob = Math.sin(time * 2 + u.anim) * 0.9; rock = 0; lean = 0; sway = 0;
   }
-  const lunge = u.atkAnim > 0 ? u.atkAnim * 7 * f : 0;
+  // выпад: бой/удар инструментом — в сторону, куда смотрит (face); для анфас/спины — без сдвига
+  const lunge = working ? workSwing * 6 * f : (u.atkAnim > 0 ? u.atkAnim * 7 * f : 0);
   const fx = ix + lunge + sway * 0.3, fy = iy + 8 + bob; // точка опоры (ноги/копыта)
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.translate(fx, fy);
-  ctx.scale(f, 1);                       // разворот влево — отражение
-  ctx.rotate((lean + rock) * f);         // наклон вперёд + галопный крен
+  ctx.scale(flip, 1);                      // разворот влево — отражение (анфас/спина/работа — без)
+  ctx.rotate(upright ? lean : (lean + rock) * f); // наклон вперёд + галопный крен
   ctx.translate(-sway, 0);
   // якорь кадра: центр по X, ноги по Y
   ctx.drawImage(im, -an.ax * scale, -an.ay * scale, w, H);
@@ -517,7 +567,12 @@ export function diamondRingHalf(ctx: CanvasRenderingContext2D, ix: number, iy: n
 // ─────────────────────────────────────────────────────────────────────────
 // Юниты: пиксель-арт с анимациями ходьбы и атаки
 // ─────────────────────────────────────────────────────────────────────────
-interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number; anim: number; atkAnim: number; state: string; carry?: { type: string; amt: number }; hp?: number; maxHp?: number; walk?: boolean; level?: number }
+interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number; anim: number; atkAnim: number; state: string; carry?: { type: string; amt: number }; hp?: number; maxHp?: number; walk?: boolean; level?: number;
+  // изо-направление корпуса крестьянина: 0 — сбоку (по face), 1 — спереди (к камере), 2 — спина (от камеры)
+  fmode?: 0 | 1 | 2;
+  wkind?: 'chop' | 'mine' | 'gather';   // текущая работа (для кадра)
+  wphase?: number;                      // фаза рабочего цикла 0..1 (замах→удар)
+}
 
 const TEAM = {
   player: { tunic: '#3b82f6', tunicD: '#1d4ed8', trim: '#93c5fd', plume: '#60a5fa' },

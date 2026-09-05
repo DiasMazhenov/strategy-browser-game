@@ -82,6 +82,10 @@ interface Unit {
   cd: number; state: 'idle' | 'move' | 'gather' | 'return' | 'build' | 'attackmove' | 'patrol';
   tx: number; ty: number; targetU: number; targetB: number; nodeId: number; buildId: number;
   carry: Carry; gatherT: number; anim: number; face: number; atkAnim: number; retarget: number; idleT: number; flash: number;
+  fmode?: 0 | 1 | 2;                              // изо-направление корпуса крестьянина: 0 сбоку, 1 спереди (к камере), 2 спина
+  wkind?: 'chop' | 'mine' | 'gather';             // текущая работа (для кадра анимации)
+  wphase?: number;                                // фаза рабочего цикла 0..1
+  mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
   stance: 'aggressive' | 'defensive' | 'stand'; // боевая стойка
   homeX: number; homeY: number;                 // точка возврата (stand/patrol)
   patrolX: number; patrolY: number;             // вторая точка патруля
@@ -1801,6 +1805,20 @@ export class Game {
       const distMoved = Math.hypot(u.x - px0, u.y - py0);
       const walk = distMoved > 1.5;
       (u as Unit & { walk?: boolean }).walk = walk;
+      // изо-направление корпуса крестьянина: мир-дельта → экранная дельта (toIso).
+      // sx = dwx - dwy (право), sy = (dwx + dwy)/2 (вниз к камере). Вниз по экрану → спереди, вверх → спина.
+      if (u.key === 'villager' && walk) {
+        const dWx = u.x - px0, dWy = u.y - py0;
+        const sxv = dWx - dWy, syv = (dWx + dWy) * 0.5;
+        // сглаживаем вектор, чтобы режим не «дёргался» на диагоналях
+        u.mvx = (u.mvx ?? sxv) * 0.6 + sxv * 0.4;
+        u.mvy = (u.mvy ?? syv) * 0.6 + syv * 0.4;
+        if (Math.abs(u.mvy) > Math.abs(u.mvx) * 1.05 && Math.abs(u.mvy) > 0.4) {
+          u.fmode = u.mvy > 0 ? 1 : 2;  // вниз к камере — спереди; вверх от камеры — спина
+        } else {
+          u.fmode = 0;                  // преимущественно вбок — боковой вид (отражается по face)
+        }
+      }
       u.anim += dt * (walk ? 12 : stateMoving ? 7 : 2);
       // пыль из-под ног — синхронно с фазой шага
       if (walk) {
@@ -1825,15 +1843,22 @@ export class Game {
   }
 
   updateVillager(u: Unit, dt: number) {
-    if (u.state === 'idle') { u.idleT += dt; return; }
-    if (u.state === 'move') { if (this.moveToward(u, u.tx, u.ty, dt)) u.state = 'idle'; return; }
+    // в покое и на марше рабочие кадры не показываем
+    if (u.state === 'idle') { u.idleT += dt; u.wkind = undefined; return; }
+    if (u.state === 'move' || u.state === 'attackmove') { u.wkind = undefined; if (this.moveToward(u, u.tx, u.ty, dt)) u.state = 'idle'; return; }
     if (u.state === 'build') {
       const b = this.blds.find(b => b.id === u.buildId);
-      if (!b || b.done >= 1) { u.state = 'idle'; u.buildId = -1; return; }
+      if (!b || b.done >= 1) { u.state = 'idle'; u.buildId = -1; u.wkind = undefined; return; }
       const arrived = this.moveToward(u, u.tx, u.ty, dt, 10);
       if (arrived || dist2(u.x, u.y, b.x, b.y) < 95 * 95) {
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
+        u.wkind = 'mine'; // стройка — удары инструментом (кирка/молоток)
+        u.gatherT += dt;
+        if (u.gatherT > 0.5) u.gatherT = 0;
+        u.wphase = u.gatherT / 0.5;
         // hammer particles handled in building update
+      } else {
+        u.wkind = undefined;
       }
       return;
     }
@@ -1841,10 +1866,13 @@ export class Game {
       // farm?
       const fb = this.blds.find(b => b.id === u.buildId && b.key === 'farm');
       if (fb) {
-        if (dist2(u.x, u.y, fb.x, fb.y) > 60 * 60) { this.moveToward(u, u.tx, u.ty, dt); return; }
+        if (dist2(u.x, u.y, fb.x, fb.y) > 60 * 60) { u.wkind = undefined; this.moveToward(u, u.tx, u.ty, dt); return; }
         u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
-        if (u.gatherT > 0.55 / this.gatherMult()) {
-          u.gatherT = 0;
+        u.wkind = 'gather'; // сбор урожая на ферме — кадр сбора фруктов
+        const cyc = 0.55 / this.gatherMult();
+        u.wphase = u.gatherT / cyc;
+        if (u.gatherT > cyc) {
+          u.gatherT = 0; u.wphase = 0;
           u.carry = { type: 'food', amt: u.carry.amt + 2 * this.gatherMult() };
           this.burst(u.x, u.y - 8, 2, ['#a3e635', '#65a30d'], 50, 0.5);
           if (u.carry.amt >= this.carryCap()) { this.res.food += Math.floor(u.carry.amt); this.gatheredTotal += u.carry.amt; this.score += u.carry.amt * 0.35; this.floater(u.x, u.y - 24, `+${Math.floor(u.carry.amt)} 🍖`, '#fda4af', 13); u.carry.amt = 0; this.checkQuests(); }
@@ -1863,12 +1891,16 @@ export class Game {
         return;
       }
       const reach = n.r + 14;
-      if (dist2(u.x, u.y, n.x, n.y) > reach * reach) { this.moveToward(u, n.x, n.y, dt, reach * 0.7); return; }
+      if (dist2(u.x, u.y, n.x, n.y) > reach * reach) { u.wkind = undefined; this.moveToward(u, n.x, n.y, dt, reach * 0.7); return; }
       // chopping
       if (Math.abs(n.x - u.x) > 4) u.face = n.x > u.x ? 1 : -1;
+      // вид работы по типу ресурса: лес — топор, золото/руда — кирка, фрукты/ягоды — сбор
+      u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : 'gather';
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
-      if (u.gatherT >= 0.55 / this.gatherMult()) {
-        u.gatherT = 0;
+      const cycN = 0.55 / this.gatherMult();
+      u.wphase = u.gatherT / cycN;
+      if (u.gatherT >= cycN) {
+        u.gatherT = 0; u.wphase = 0;
         const take = Math.min(2.5 * this.gatherMult(), n.amount);
         n.amount -= take;
         u.carry.amt += take;

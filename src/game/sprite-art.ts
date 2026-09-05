@@ -89,6 +89,14 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
     "w": 97,
     "h": 150
   },
+  "vchop1": { "ax": 44.3, "ay": 149, "baseW": 87, "w": 87, "h": 150 },
+  "vchop2": { "ax": 44.8, "ay": 149, "baseW": 87, "w": 87, "h": 150 },
+  "vmine1": { "ax": 44.4, "ay": 149, "baseW": 87, "w": 87, "h": 150 },
+  "vmine2": { "ax": 44.2, "ay": 149, "baseW": 83, "w": 83, "h": 150 },
+  "vgather1": { "ax": 40.3, "ay": 149, "baseW": 83, "w": 83, "h": 150 },
+  "vgather2": { "ax": 38.5, "ay": 149, "baseW": 77, "w": 77, "h": 150 },
+  "vfront": { "ax": 40.0, "ay": 149, "baseW": 83, "w": 83, "h": 150 },
+  "vback": { "ax": 34.5, "ay": 149, "baseW": 71, "w": 71, "h": 150 },
   "swordsman": {
     "ax": 47,
     "ay": 149,
