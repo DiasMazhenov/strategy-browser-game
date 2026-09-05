@@ -57,6 +57,18 @@ import uABw3 from '../assets/sprites/units/abw3.png';
 import uABw4 from '../assets/sprites/units/abw4.png';
 import uSpearman from '../assets/sprites/units/spearman.png';
 import uSpearmanW from '../assets/sprites/units/spearman_w.png';
+// копейщик: 4-фазная ходьба (копьё вертикально на марше) — сбоку/спереди/со спины
+import uSPsw1 from '../assets/sprites/units/spsw1.png';
+import uSPsw2 from '../assets/sprites/units/spsw2.png';
+import uSPsw3 from '../assets/sprites/units/spsw3.png';
+import uSPfw1 from '../assets/sprites/units/spfw1.png';
+import uSPfw2 from '../assets/sprites/units/spfw2.png';
+import uSPfw3 from '../assets/sprites/units/spfw3.png';
+import uSPfw4 from '../assets/sprites/units/spfw4.png';
+import uSPbw1 from '../assets/sprites/units/spbw1.png';
+import uSPbw2 from '../assets/sprites/units/spbw2.png';
+import uSPbw3 from '../assets/sprites/units/spbw3.png';
+import uSPbw4 from '../assets/sprites/units/spbw4.png';
 import uKnight from '../assets/sprites/units/knight.png';
 import uKnightW from '../assets/sprites/units/knight_w.png';
 import uCavalry from '../assets/sprites/units/cavalry.png';
@@ -150,6 +162,18 @@ const AR_WALK_FRONT: [HTMLImageElement, string][] = [
 const AR_WALK_BACK: [HTMLImageElement, string][] = [
   [mk(uABw1), 'abw1'], [mk(uABw2), 'abw2'], [mk(uABw3), 'abw3'], [mk(uABw4), 'abw4'],
 ];
+// ── копейщик (spearman) ──
+// на марше копьё держит вертикально (бой — базовый кадр spearman с горизонтальным копьём + выпад atkAnim)
+// 4-фазная ходьба: сбоку, спереди (на камеру), со спины (от камеры); кадры h=104 как spearman_w
+const SP_WALK_SIDE: [HTMLImageElement, string][] = [
+  [mk(uSPsw1), 'spsw1'], [mk(uSPsw2), 'spsw2'], [mk(uSPsw3), 'spsw3'], [mk(uSPsw2), 'spsw2'],
+];
+const SP_WALK_FRONT: [HTMLImageElement, string][] = [
+  [mk(uSPfw1), 'spfw1'], [mk(uSPfw2), 'spfw2'], [mk(uSPfw3), 'spfw3'], [mk(uSPfw4), 'spfw4'],
+];
+const SP_WALK_BACK: [HTMLImageElement, string][] = [
+  [mk(uSPbw1), 'spbw1'], [mk(uSPbw2), 'spbw2'], [mk(uSPbw3), 'spbw3'], [mk(uSPbw4), 'spbw4'],
+];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
   const base = UNIT_IMAGES[u.key];
@@ -165,7 +189,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isVill = u.key === 'villager';
   const isSword = u.key === 'swordsman';
   const isArch = u.key === 'archer';
-  const hasDirWalk = isVill || isSword || isArch; // у этих юнитов есть 4-кадровая направленная ходьба
+  const isSpear = u.key === 'spearman';
+  const hasDirWalk = isVill || isSword || isArch || isSpear; // есть 4-кадровая направленная ходьба
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
   const working = isVill && !!u.wkind && !move &&
     (u.state === 'gather' || u.state === 'build');
@@ -196,6 +221,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
       ? (fmode === 1 ? VILL_WALK_FRONT : fmode === 2 ? VILL_WALK_BACK : VILL_WALK_SIDE)
       : isArch
       ? (fmode === 1 ? AR_WALK_FRONT   : fmode === 2 ? AR_WALK_BACK   : AR_WALK_SIDE)
+      : isSpear
+      ? (fmode === 1 ? SP_WALK_FRONT   : fmode === 2 ? SP_WALK_BACK   : SP_WALK_SIDE)
       : (fmode === 1 ? SW_WALK_FRONT   : fmode === 2 ? SW_WALK_BACK   : SW_WALK_SIDE);
     const idx = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
     const [img0, key0] = cyc[idx];
