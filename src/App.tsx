@@ -404,6 +404,13 @@ export default function App() {
                     {['towncenter', 'barracks', 'stable', 'blacksmith', 'market'].includes(hud.sel.bkey ?? '') && (
                       <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.rallyArmed = true; gm.pushHud(); } }} active={hud.rallyArmed} title="Кликните по точке сбора; если это ресурс — новые крестьяне сразу идут на работу"><Flag className="h-3 w-3" />Сбор</MiniBtn>
                     )}
+                    {hud.sel.bkey === 'wall' && (
+                      <MiniBtn onClick={() => g()?.buildGateOnWall(hud.sel.bid!)} title="Вставить ворота вместо этого участка стены (стоимость ворот)">🚪 Ворота</MiniBtn>
+                    )}
+                    <MiniBtn
+                      onClick={() => { const gm = g(); if (gm) gm.demolish(hud.sel.bid!); }}
+                      title={hud.sel.bkey === 'towncenter' ? 'Городской центр снести нельзя' : 'Снести строение (Delete) — возврат части ресурсов'}
+                    >⛏ Снести</MiniBtn>
                     <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕</MiniBtn>
                   </div>
                 </div>
@@ -828,6 +835,8 @@ function bldIcon(k: BuildingKey) {
   if (k === 'blacksmith') return '🔨';
   if (k === 'market') return '🏪';
   if (k === 'wonder') return '⭐';
+  if (k === 'wall') return '🧱';
+  if (k === 'gate') return '🚪';
   return '🌾';
 }
 

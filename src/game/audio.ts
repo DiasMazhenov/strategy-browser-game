@@ -246,6 +246,37 @@ export class SoundBank {
   arrow() { this.ensure(); if (!this.gate('arrow', 110)) return; this.tone(340, 0.12, 'triangle', 0.16, -180); this.noise(0.16, 0.12, 'bandpass', 2400, 0, 1); }
   // попадание: мягкий удар
   hit() { this.ensure(); if (!this.gate('hit', 70)) return; this.noise(0.07, 0.26, 'lowpass', 900); this.tone(200, 0.06, 'sine', 0.18, -60); }
+
+  // ── столкновение воинов: проигрывание батальной записи с РАЗНЫХ мест ──
+  //    трек длинный — каждая стычка стартует со случайной секунды (5..40с),
+  //    играет короткий плотный фрагмент, одновременно звучит не больше одного.
+  private battle: HTMLAudioElement | null = null;
+  private readonly BATTLE_URL = 'voices/battle-sword-fight.mp3';
+  battleClash() {
+    this.ensure();
+    if (this.muted) return;
+    if (!this.gate('battle', 900)) return; // не накладываем кашу: ~один фрагмент в ~0.9с
+    let a: HTMLAudioElement;
+    try { a = new Audio(this.BATTLE_URL); } catch { return; }
+    a.volume = 0.42;
+    a.preload = 'auto';
+    // старт со случайной секунды (зависит от фактической длительности трека)
+    const startAt = () => {
+      const dur = isFinite(a.duration) ? a.duration : 45;
+      const maxStart = Math.max(6, dur - 6);
+      a.currentTime = Math.min(maxStart, 5 + Math.random() * Math.min(35, maxStart - 5));
+      a.play().catch(() => { /* автоплей заблокирован — пропускаем */ });
+    };
+    if (a.readyState >= 1) startAt(); else a.addEventListener('loadedmetadata', startAt, { once: true });
+    // играем плотный фрагмент 2.2..4.0с, затем гасим
+    const clipLen = 2200 + Math.random() * 1800;
+    const stop = () => { try { a.pause(); } catch { /* noop */ } if (this.battle === a) this.battle = null; };
+    if (this.battle) { try { this.battle.pause(); } catch { /* noop */ } }
+    this.battle = a;
+    setTimeout(stop, clipLen);
+    a.addEventListener('ended', stop, { once: true });
+    a.addEventListener('error', stop, { once: true });
+  }
   death() { this.ensure(); if (!this.gate('death', 120)) return; this.tone(300, 0.28, 'sine', 0.16, -180); this.noise(0.18, 0.12, 'lowpass', 500); }
   // взрыв: саб-бас + низкий гул
   boom() { this.ensure(); if (!this.gate('boom', 200)) return; this.noise(0.5, 0.5, 'lowpass', 350); this.tone(65, 0.55, 'sine', 0.5, -25); }

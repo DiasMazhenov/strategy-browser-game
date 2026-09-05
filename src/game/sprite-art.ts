@@ -60,10 +60,10 @@ export const SPR_ANCHORS: Record<string, SprAnchor> = {
     "h": 206
   },
   "wall": {
-    "ax": 90.5,
+    "ax": 93,
     "ay": 75,
-    "baseW": 181,
-    "w": 181,
+    "baseW": 186,
+    "w": 186,
     "h": 150
   },
   "gate": {

@@ -16,3 +16,4 @@ scripts/tile-test.cjs
 scripts/walk-sheet.cjs
 scripts/walk-strip.cjs
 tile-test.png
+scripts/proc.cjs

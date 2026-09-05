@@ -13,6 +13,7 @@ import imgMarket from '../assets/sprites/market.png';
 import imgBlacksmith from '../assets/sprites/blacksmith.png';
 import imgWall from '../assets/sprites/wall.png';
 import imgGate from '../assets/sprites/gate.png';
+import imgWallCorner from '../assets/sprites/wall_corner.png';
 
 // ── Загрузка детальных AI-спрайтов зданий с автопосадкой на ромб клетки ──
 const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
@@ -49,6 +50,28 @@ function placeBld(k: BuildingKey, S: number) {
   const scale = (2 * S * fit) / sp.baseW;
   return sp.img.complete && sp.img.naturalWidth ? { sp, scale, ready: true } : { sp, scale, ready: false };
 }
+
+// ── угловой сегмент стены (зубчатый бастион-столб на стыке двух осей) ──
+function makeExtraSprite(url: string): BldSprite {
+  const im = new Image();
+  im.src = url;
+  const sp: BldSprite = { img: im, flash: null, ax: 0, ay: 0, baseW: 100 };
+  im.onload = () => {
+    sp.baseW = im.naturalWidth;
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+      const c = cv.getContext('2d')!;
+      c.drawImage(im, 0, 0);
+      c.globalCompositeOperation = 'source-atop';
+      c.fillStyle = 'rgba(239,68,68,0.5)';
+      c.fillRect(0, 0, cv.width, cv.height);
+      sp.flash = cv;
+    } catch { /* ignore */ }
+  };
+  return sp;
+}
+const CORNER_SPRITE = makeExtraSprite(imgWallCorner);
 
 export interface GameStats { score: number; kills: number; razed: number; gathered: number; timeSec: number; age: number; result: 'victory' | 'defeat'; difficulty: Difficulty; peakPop?: number; peakArmy?: number; built?: number; history?: { t: number; army: number; pop: number }[]; }
 export interface Banner { title: string; sub: string; t: number; dur: number; }
@@ -424,6 +447,8 @@ export class Game {
       e.preventDefault(); return;
     }
     if (this.paused || this.over) return;
+    // снос выделенного своего строения — Delete/Backspace
+    if ((k === 'delete' || k === 'backspace') && this.selBld >= 0) { this.demolish(this.selBld); e.preventDefault(); return; }
     // группы контроля: Ctrl/Cmd+1..5 — назначить, Alt+1..5 — выбрать (цифры без модификаторов — тренировка)
     const gi = ['1', '2', '3', '4', '5'].indexOf(k);
     if (gi >= 0 && (e.ctrlKey || e.metaKey)) { this.setGroup(gi); e.preventDefault(); return; }
@@ -1327,6 +1352,52 @@ export class Game {
     this.pushHud();
   }
 
+  // ── снести своё строение (возврат части ресурсов; ГЦ снести нельзя) ──
+  demolish(buildId: number) {
+    const b = this.blds.find(bl => bl.id === buildId);
+    if (!b || b.owner !== 'player') return;
+    if (b.key === 'towncenter') { this.floater(b.x, b.y - 50, 'Городской центр снести нельзя', '#f87171', 15); this.sound.error(); return; }
+    // выпустить гарнизон и освободить строителей до удаления
+    this.ungarrisonUnits(buildId, false);
+    const c = BUILDING_DEFS[b.key].cost;
+    this.res.wood += Math.floor(c.wood * 0.5);
+    this.res.food += Math.floor(c.food * 0.3);
+    this.res.gold += Math.floor(c.gold * 0.5);
+    const bx = b.x, by = b.y;
+    this.burst(bx, by - 18, 30, ['#a8a29e', '#78716c', '#d6d3d1', '#57534e'], 170, 1.0);
+    this.burst(bx, by, 14, ['#d6a45c', '#8b5e2e'], 120, 0.8);
+    this.sound.boom();
+    this.trauma = Math.min(1, this.trauma + 0.1);
+    this.floater(bx, by - 54, '🔨 Снесено', '#fca5a5', 15);
+    this.blds = this.blds.filter(x => x.id !== buildId);
+    if (this.selBld === buildId) this.selBld = -1;
+    for (const u of this.units) if (u.buildId === buildId) { u.buildId = -1; if (u.state === 'build') u.state = 'idle'; }
+    this.pushHud();
+  }
+
+  // ── заменить готовый участок стены на ворота (с сохранением оси) ──
+  buildGateOnWall(buildId: number): boolean {
+    const wall = this.blds.find(b => b.id === buildId);
+    if (!wall || wall.owner !== 'player' || wall.key !== 'wall') return false;
+    const cost = BUILDING_DEFS.gate.cost;
+    if (!this.afford(cost)) { this.floater(wall.x, wall.y - 50, 'Не хватает дерева на ворота!', '#f87171', 15); this.sound.error(); return false; }
+    this.pay(cost);
+    const wx = wall.x, wy = wall.y, axis = wall.axis, done = wall.done;
+    // освободить строителей старого сегмента
+    for (const u of this.units) if (u.buildId === wall.id) { u.buildId = -1; if (u.state === 'build') u.state = 'idle'; }
+    this.blds = this.blds.filter(b => b.id !== wall.id);
+    const gate = this.addBld('gate', 'player', wx, wy, Math.max(0.15, done));
+    gate.axis = axis; gate.gate = true;
+    // достраивается на чуть дольше, но сразу проходима для своих
+    gate.buildT = 0;
+    this.burst(gate.x, gate.y, 24, ['#d6a45c', '#8b5e2e', '#f6d47c'], 120);
+    this.sound.place();
+    this.floater(gate.x, gate.y - 50, '🚪 Ворота поставлены', '#f6d47c', 15);
+    this.selBld = gate.id;
+    this.pushHud();
+    return true;
+  }
+
   placementValid(x: number, y: number, key: BuildingKey): boolean {
     const isWallLike = key === 'wall' || key === 'gate';
     // стены/ворота выравниваем к шагу клеток, чтобы сегменты ложились ровно
@@ -2101,6 +2172,8 @@ export class Game {
       if (tu) this.damageUnit(tu, dmg, att);
       if (tb) this.damageBld(tb, dmg, att.owner);
       this.sound.sword();
+      // батальный шум рукопашной — с рандомного места длинной записи
+      this.sound.battleClash();
       const hx = tu ? tu.x : tb ? tb.x : att.x + att.face * 20, hy = (tu ? tu.y : tb ? tb.y : att.y) - 10;
       this.burst(hx, hy, 4, ['#fecaca', '#fff', '#f87171'], 90, 0.4);
     }
@@ -3228,6 +3301,20 @@ export class Game {
     }
   }
 
+  // стоит ли сегмент на углу: есть сосед-стена/ворота и вдоль мировой X, и вдоль Y
+  isWallCorner(b: Bld): boolean {
+    if (b.key !== 'wall') return false;
+    let hasX = false, hasY = false;
+    for (const o of this.blds) {
+      if (o.id === b.id || o.owner !== b.owner) continue;
+      if (o.key !== 'wall' && o.key !== 'gate') continue;
+      const dx = o.x - b.x, dy = o.y - b.y;
+      if (Math.abs(dy) < 10 && Math.abs(Math.abs(dx) - TILE_STEP) < 14) hasX = true;
+      if (Math.abs(dx) < 10 && Math.abs(Math.abs(dy) - TILE_STEP) < 14) hasY = true;
+    }
+    return hasX && hasY;
+  }
+
   // ориентация сегмента для одиночной установки — по ближайшим соседям-стенам
   wallAxisAt(x: number, y: number, key: BuildingKey): 'x' | 'y' {
     let xN = 0, yN = 0;
@@ -3269,20 +3356,29 @@ export class Game {
     // ── стены/ворота: детальный спрайт, посаженный от центра клетки ──
     const wallLike = b.key === 'wall' || b.key === 'gate';
     if (wallLike) {
-      // один спрайт на направление; вторая диагональ рисуется зеркально (drawWallSprite)
-      const wspr = BLD_SPRITES[b.key];
+      // угловой сегмент-бастион (стык двух осей) рисуем отдельным столбом
+      const isCorner = b.key === 'wall' && this.isWallCorner(b)
+        && CORNER_SPRITE.img.complete && CORNER_SPRITE.img.naturalWidth > 0;
+      const wspr = isCorner ? CORNER_SPRITE : BLD_SPRITES[b.key];
       const ready = !!wspr && wspr.img.complete && wspr.img.naturalWidth > 0;
       if (!ready || !wspr) { this.drawWallGate(b, ix, iy, selected); return; }
-      const scale = (2 * S * 1.0) / wspr.baseW; // ширина спрайта ≈ ромб клетки
+      const scale = (2 * S * (isCorner ? 0.9 : 1.0)) / wspr.baseW;
       const h = wspr.img.naturalHeight * scale;
       // тень
       ctx.fillStyle = 'rgba(8,14,8,0.3)';
-      ctx.beginPath(); ctx.ellipse(ix, iy + S / 2 - 3, S * 0.92, S * 0.30, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(ix, iy + S / 2 - 3, S * (isCorner ? 0.82 : 0.92), S * (isCorner ? 0.28 : 0.30), 0, 0, Math.PI * 2); ctx.fill();
       if (selected) diamondRingHalf(ctx, ix, iy, S * 1.05, S * 1.05 / 2, '#f6d47c', true);
       const img: HTMLImageElement | HTMLCanvasElement = (b.flash > 0.05 && wspr.flash) ? wspr.flash : wspr.img;
       if (b.done < 1) {
         drawConstruction(ctx, ix, iy, S, b.done);
-        this.drawWallSprite(b, wspr, scale, ix, iy, S, img, 0.35 + b.done * 0.65);
+        if (isCorner) { ctx.save(); ctx.globalAlpha = 0.35 + b.done * 0.65; ctx.imageSmoothingEnabled = false;
+          const pw = wspr.img.naturalWidth * scale;
+          ctx.drawImage(img, ix - pw / 2, iy + S / 2 - h, pw, h); ctx.restore(); }
+        else this.drawWallSprite(b, wspr, scale, ix, iy, S, img, 0.35 + b.done * 0.65);
+      } else if (isCorner) {
+        ctx.save(); ctx.globalAlpha = 1; ctx.imageSmoothingEnabled = false;
+        const pw = wspr.img.naturalWidth * scale;
+        ctx.drawImage(img, ix - pw / 2, iy + S / 2 - h, pw, h); ctx.restore();
       } else {
         this.drawWallSprite(b, wspr, scale, ix, iy, S, img, 1);
       }
