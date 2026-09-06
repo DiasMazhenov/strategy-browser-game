@@ -1,7 +1,7 @@
 import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries,
-  getHexTile, hexPath, hexCenter, screenToHex,
+  getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
   HEX_PTS, TCX, TCY,
   type HexKind,
   TILE_STEP } from './iso';
@@ -686,24 +686,33 @@ export class Game {
   drawFog() {
     const { ctx } = this;
     ctx.save();
-    const camIX = this.camIsoX(), camIY = this.camIsoY();
-    const halfW = this.vw / 2 / this.cam.zoom + 60;
-    const halfH = this.vh / 2 / this.cam.zoom + 60;
-    // диапазон гексов, чьи центры покрывают экран (с запасом)
-    const c0 = screenToHex(-halfW, -halfH), c1 = screenToHex(halfW, halfH);
-    const q0 = Math.floor(c0.q) - 2, q1 = Math.ceil(c1.q) + 2;
-    const r0 = Math.floor(c0.r) - 2, r1 = Math.ceil(c1.r) + 2;
-    for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) {
-      // изо-экранный и мировой центр гекса
-      const [hx, hy] = hexCenter(q, r);
-      const wx = hx / 2 + hy, wy = hy - hx / 2;
+    const margin = Math.max(this.vw, this.vh) / this.cam.zoom + 160;
+    // туман рисуем в АБСОЛЮТНЫХ изо-координатах (как земля): берём видимый мировой
+    // прямоугольник вокруг камеры и переводим его углы в аксиальные (q,r) — те же
+    // формулы, что в reliefGridHex, поэтому гекс тумана точно ложится на тайл земли.
+    const wx0 = this.cam.x - margin, wy0 = this.cam.y - margin;
+    const wx1 = this.cam.x + margin, wy1 = this.cam.y + margin;
+    // мировая точка → дробные аксиальные (flat-top): сначала в изо-экран, потом screenToHex
+    const w2q = (wx: number, wy: number) => {
+      const ix = wx - wy, iy = (wx + wy) * 0.5;
+      const c = screenToHex(ix, iy);
+      return c;
+    };
+    const cs = [w2q(wx0, wy0), w2q(wx1, wy0), w2q(wx1, wy1), w2q(wx0, wy1)];
+    const qA = Math.floor(Math.min(...cs.map(c => c.q))) - 1;
+    const qB = Math.ceil(Math.max(...cs.map(c => c.q))) + 1;
+    const rA = Math.floor(Math.min(...cs.map(c => c.r))) - 1;
+    const rB = Math.ceil(Math.max(...cs.map(c => c.r))) + 1;
+    for (let r = rA; r <= rB; r++) for (let q = qA; q <= qB; q++) {
+      const [wx, wy] = hexCenterWorld(q, r);
       if (wx < 0 || wy < 0 || wx > WORLD.w || wy > WORLD.h) continue;
       const gx = (wx / this.fogCell) | 0, gy = (wy / this.fogCell) | 0;
       if (gx < 0 || gy < 0 || gx >= this.fogGW || gy >= this.fogGH) continue;
       const idx = gy * this.fogGW + gx;
       if (this.fogVis[idx]) continue; // видно — без тумана
-      const sx = camIX + hx, sy = camIY + hy;
-      hexPath(ctx, sx, sy, 1.06);
+      // АБСОЛЮТНЫЕ изо-координаты центра (трансформ уже сдвинут на камеру)
+      const [hx, hy] = hexCenter(q, r);
+      hexPath(ctx, hx, hy, 1.06);
       ctx.fillStyle = this.fogExpl[idx] ? 'rgba(10,16,12,0.42)' : 'rgba(6,10,8,0.82)';
       ctx.fill();
     }
@@ -3156,33 +3165,30 @@ export class Game {
       face(vx(5), vx(0), up - upAtQ(q + 1, r - 1), cR, cB); // правое
     };
 
-    // видимый диапазон гексов: изо-экран камеры → дробные аксиальные координаты
+    // диапазон гексов берём из рельефной сетки: она уже покрывает видимую МИРОВУЮ область,
+    // поэтому её q/r — абсолютные аксиальные координаты вокруг камеры.
     const camIX = this.camIsoX(), camIY = this.camIsoY();
-    const halfW = this.vw / 2 / this.cam.zoom + 60;
-    const halfH = this.vh / 2 / this.cam.zoom + 60;
-    const corners = [
-      screenToHex(-halfW, -halfH), screenToHex(halfW, -halfH),
-      screenToHex(halfW, halfH), screenToHex(-halfW, halfH),
-    ];
-    const qMin = Math.floor(Math.min(...corners.map(c => c.q)));
-    const qMax = Math.ceil(Math.max(...corners.map(c => c.q)));
-    const rMin = Math.floor(Math.min(...corners.map(c => c.r))) - 1;
-    const rMax = Math.ceil(Math.max(...corners.map(c => c.r))) + 1;
+    const halfW = this.vw / 2 / this.cam.zoom + 80;
+    const halfH = this.vh / 2 / this.cam.zoom + 80;
+    const qMin = relief.q0, qMax = relief.q1, rMin = relief.r0, rMax = relief.r1;
 
     // painter's order: для flat-top проекции три передних соседа (q+1,r),(q,r+1),(q+1,r-1)
-    // имеют глубину s=2q+r ровно на 2 больше; идём по s снизу вверх, внутри s — по q.
-    const sMin = 2 * qMin + rMin - 3, sMax = 2 * qMax + rMax + 3;
+    // имеют глубину s=2q+r ровно на +1/+2 больше; идём по s снизу вверх, внутри s — по q.
+    // ВАЖНО: hexCenter(q,r) возвращает АБСОЛЮТНЫЕ изо-координаты (мировой масштаб), а
+    // трансформ канвы уже сдвинут на -camIX/-camIY — поэтому рисуем прямо в (hx,hy),
+    // БЕЗ повторного добавления камеры; для куллинга считаем экранное смещение (hx-camIX).
+    const sMin = 2 * qMin + rMin - 1, sMax = 2 * qMax + rMax + 1;
     for (let s = sMin; s <= sMax; s++) {
       // r = s - 2q; допустимые q в [qMin,qMax], r в [rMin,rMax]
       const qLo = Math.max(qMin, Math.ceil((s - rMax) / 2));
       const qHi = Math.min(qMax, Math.floor((s - rMin) / 2));
       for (let q = qLo; q <= qHi; q++) {
         const r = s - 2 * q;
-        const [hx, hy] = hexCenter(q, r);
-        const ix = hx + camIX, iy = hy + camIY;
-        // грубый куллинг по экранному прямоугольнику
-        if (ix < -halfW - 30 || ix > halfW + 30 || iy < -halfH - 24 || iy > halfH + 40) continue;
         const [wx, wy] = relief.worldAt(q, r);
+        const [hx, hy] = hexCenter(q, r);   // абсолютные изо-координаты центра гекса
+        // экранное смещение относительно центра вида (для куллинга)
+        const sx = hx - camIX, sy = hy - camIY;
+        if (sx < -halfW || sx > halfW || sy < -halfH || sy > halfH + 60) continue;
         const hash = ((wx * 73 - wy * 137) & 0xFFFF) ^ ((wx + wy) & 0xFFFF);
         const hv = hash & 0xFFFF;
         const isBase = (Math.abs(wx - HOME.x) < 190 && Math.abs(wy - HOME.y) < 190)
@@ -3206,8 +3212,8 @@ export class Game {
         }
         const tile = getHexTile(kind, hv);
         const up = upAtQ(q, r);
-        ctx.drawImage(tile, ix - TCX, iy - TCY - up);
-        drawCliffsHex(ix, iy, up, cls, q, r);
+        ctx.drawImage(tile, hx - TCX, hy - TCY - up);
+        drawCliffsHex(hx, hy, up, cls, q, r);
       }
     }
     // upAt для объектов (деревья/юниты/здания/декор) — высота гекса под мировой точкой
@@ -3262,10 +3268,9 @@ export class Game {
         }
         if (fi < 0 || nearPlaced(q, r, rad)) continue;
         placed.push(q + ',' + r);
-        const [fhx, fhy] = hexCenter(q, r);
-        const ix = camIX + fhx, iy0 = camIY + fhy;
-        const iy = iy0 - upAtQ(q, r);
-        drawList.push({ iy: iy0, draw: () => this.drawTerrainFeature(fi, ix, iy) });
+        const [fhx, fhy] = hexCenter(q, r);   // абсолютные изо-координаты
+        const iy = fhy - upAtQ(q, r);
+        drawList.push({ iy: fhy, draw: () => this.drawTerrainFeature(fi, fhx, iy) });
       }
     }
 
