@@ -1,12 +1,33 @@
 // ── Isometric coordinate helpers ──
 // World uses "flat" coords (wx, wy). We convert to iso screen coords.
 // Standard 2:1 isometric: toIso(wx,wy) = (wx - wy, (wx + wy) / 2)
-// With TILE_STEP=32 in world, a tile maps to a 64×32 pixel diamond.
-// Adjacent tiles at (wx+32, wy) → iso (wx-wy+32, (wx+wy)/2+16) — perfect tessellation.
+//
+// Земля вымощена ИЗОМЕТРИЧЕСКИМИ ШЕСТИУГОЛЬНИКАМИ (flat-top гекс в 2:1-проекции):
+// аксиальные координаты (q,r), центр гекса в изо-экране:
+//   ix = HQX * q,  iy = HQY * q + HY * r
+// Соседи: (q±1,r), (q,r±1), (q+1,r-1), (q-1,r+1) — 6 направлений, бесшовная мозаика.
 
-export const TILE_STEP = 32; // world-space tile size
-export const TILE_W = 64;    // iso pixel width of one diamond
-export const TILE_H = 32;    // iso pixel height of one diamond
+export const TILE_STEP = 32; // world-space шаг привязки стен (мировые единицы)
+export const TILE_W = 64;    // legacy-совместимость
+export const TILE_H = 32;
+
+// ── Гексагональная решётка (изо-проекция flat-top гекса со стороной 32 в мире) ──
+export const HQX = 26;                 // экранный шаг q по X  (3/4 стороны × 2:1 ≈ 26)
+export const HY = 16 * Math.sqrt(3);   // ≈27.71 — шаг r по Y
+export const HQY = HY / 2;             // ≈13.86 — наклон q по Y
+export const HEX_PAD = 3;              // припуск канваса тайла
+// канвас тайла: с запасом на перехлёст текстуры между гексами (плотная база — строго по гексу)
+export const TILE_CW = 40 + HEX_PAD * 2;   // 46
+export const TILE_CH = Math.ceil(2 * HQY) + HEX_PAD * 2 + 4; // ≈38
+export const TCX = TILE_CW / 2;
+export const TCY = TILE_CH / 2;
+// вершины гекса относительно ЦЕНТРА — Вороной-ячейка решётки (hexCenter), делит ребро
+// с каждым из 6 соседей. Порядок: TL, TR, R, BR, BL, L.
+const HX = (HQX * HQX + HQY * HQY) / (2 * HQX);   // ≈16.69 — правая/левая вершины
+const VX = (HQX * HQX - HQY * HQY) / (2 * HQX);     // ≈9.31 — x у верхних/нижних вершин
+export const HEX_PTS: [number, number][] = [
+  [-VX, -HQY], [VX, -HQY], [HX, 0], [VX, HQY], [-VX, HQY], [-HX, 0],
+];
 
 /** World XY → isometric screen XY */
 export function toIso(wx: number, wy: number): [number, number] {
@@ -18,14 +39,86 @@ export function fromIso(sx: number, sy: number): [number, number] {
   return [sx / 2 + sy, sy - sx / 2];
 }
 
-// ── Pre-built tile canvases (cached) ──
-const tileCache = new Map<string, HTMLCanvasElement>();
+/** изо-экранные координаты центра гекса (q,r) */
+export function hexCenter(q: number, r: number): [number, number] {
+  return [HQX * q, HQY * q + HY * r];
+}
 
-function getCachedTile(key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
+/** изо-экран → дробные аксиальные координаты гекса */
+export function screenToHex(ix: number, iy: number): { q: number; r: number } {
+  const q = ix / HQX;
+  const r = iy / HY - q / 2;
+  return { q, r };
+}
+
+/** округлить дробные аксиальные координаты до ближайшего гекса (cube rounding, flat-top) */
+export function hexRound(q: number, r: number): [number, number] {
+  const x = q, z = r, y = -x - z;
+  let rx = Math.round(x), ry = Math.round(y), rz = Math.round(z);
+  const dx = Math.abs(rx - x), dy = Math.abs(ry - y), dz = Math.abs(rz - z);
+  if (dx > dy && dx > dz) rx = -ry - rz;
+  else if (dz > dy) rz = -rx - ry;
+  return [rx, rz];
+}
+
+/** контур шестиугольника с центром (cx,cy), масштаб s */
+export function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, s = 1) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const [px, py] = HEX_PTS[i];
+    const x = cx + px * s, y = cy + py * s;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+// ── Гекс-тайлы (AI-текстуры, обрезанные по форме изометрического шестиугольника) ──
+// Квадратная бесшовная текстура 96×96 (gpt image, ужата скриптом process-hex.cjs)
+// кладётся с лёгким случайным сдвигом и обрезается по гекс-контуру. Под текстурой —
+// плотная заливка базового цвета биома, поэтому швов/щелей между гексами нет никогда.
+import texGrass from '../assets/sprites/terrain/hex/grass.png';
+import texDirt from '../assets/sprites/terrain/hex/dirt.png';
+import texWater from '../assets/sprites/terrain/hex/water.png';
+import texDeep from '../assets/sprites/terrain/hex/deep.png';
+import texSand from '../assets/sprites/terrain/hex/sand.png';
+import texDesert from '../assets/sprites/terrain/hex/desert.png';
+import texField from '../assets/sprites/terrain/hex/field.png';
+
+export type HexKind =
+  | 'grass' | 'dgrass' | 'dirt' | 'water' | 'deep' | 'sand'
+  | 'desert' | 'field' | 'forest' | 'mountain' | 'hill';
+
+const TEX_URL: Partial<Record<HexKind, string>> = {
+  grass: texGrass, dirt: texDirt, water: texWater, deep: texDeep,
+  sand: texSand, desert: texDesert, field: texField,
+};
+// плотная подложка под текстуру (базовый цвет биома)
+const BASE: Record<HexKind, string> = {
+  grass: '#5a8c42', dgrass: '#4a7c38', dirt: '#8a7048',
+  water: '#3a7fc0', deep: '#245a96', sand: '#d8c489', desert: '#d2ac5e',
+  field: '#a3ad4e', forest: '#3f6b2f', mountain: '#62606a', hill: '#7f8c52',
+};
+// цвет тинта текстуры (null — без тинта)
+const TINT: Partial<Record<HexKind, string>> = {
+  dgrass: 'rgba(40,90,30,0.35)',
+  forest: 'rgba(30,70,20,0.45)',
+  mountain: 'rgba(120,120,135,0.35)',
+  hill: 'rgba(120,130,70,0.30)',
+};
+
+const tileCache = new Map<string, HTMLCanvasElement>();
+const texCache = new Map<string, HTMLImageElement>();
+function texImg(url: string): HTMLImageElement {
+  let im = texCache.get(url);
+  if (!im) { im = new Image(); im.src = url; texCache.set(url, im); }
+  return im;
+}
+
+function getCachedTile(key: string, draw: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
   let c = tileCache.get(key);
   if (c) return c;
   c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = TILE_CW; c.height = TILE_CH;
   const g = c.getContext('2d')!;
   g.imageSmoothingEnabled = false;
   draw(g);
@@ -33,266 +126,110 @@ function getCachedTile(key: string, w: number, h: number, draw: (ctx: CanvasRend
   return c;
 }
 
-// Diamond path centered at (cx, cy) filling exactly TILE_W × TILE_H
-function diamondPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = TILE_W, h = TILE_H) {
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - h / 2);      // top
-  ctx.lineTo(cx + w / 2, cy);      // right
-  ctx.lineTo(cx, cy + h / 2);      // bottom
-  ctx.lineTo(cx - w / 2, cy);      // left
-  ctx.closePath();
+// детерминированный псевдослучайный сдвиг текстуры по варианту тайла
+function jitter(variant: number): number {
+  let h = (variant * 2654435761) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return (h % 1000) / 1000;
 }
 
-// Each tile canvas is TILE_W+2 × TILE_H+2 with the diamond centered at (TILE_W/2+1, TILE_H/2+1)
-// The +2 padding avoids sub-pixel clipping artifacts.
-const TW = TILE_W + 2;
-const TH = TILE_H + 2;
-const TCX = TW / 2;
-const TCY = TH / 2;
+/**
+ * Гекс-тайл биома. variant — хэш клетки (вариативность/сдвиг текстуры).
+ * Возвращает канвас TILE_CW×TILE_CH с гексом по центру (TCX,TCY).
+ * Пока AI-текстура не догрузилась — тайл собран из процедурной подложки,
+ * после загрузки канвас перестраивается с текстурой (кеш по ключу сбрасывается).
+ */
+export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
+  const v = variant & 0xffff;
+  const url = TEX_URL[kind];
+  const im = url ? texImg(url) : null;
+  const ready = !!im && im.complete && im.naturalWidth > 0;
+  const key = kind + ':' + (v % 4) + ':' + (ready ? 1 : 0);
+  const cached = tileCache.get(key);
+  if (cached) return cached;
 
-export function getGrassTile(): HTMLCanvasElement {
-  return getCachedTile('grass', TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = '#5a8c42';
+  const tile = getCachedTile(key, (g) => {
+    // 1) плотная база биома по форме гекса
+    hexPath(g, TCX, TCY);
+    g.fillStyle = BASE[kind];
     g.fill();
-    // subtle variation patches
-    diamondPath(g, TCX - 6, TCY - 2, 28, 14);
-    g.fillStyle = 'rgba(120,200,80,0.2)';
-    g.fill();
-    diamondPath(g, TCX + 8, TCY + 2, 22, 11);
-    g.fillStyle = 'rgba(80,150,50,0.15)';
-    g.fill();
-    // grass tufts
-    g.fillStyle = '#6da854';
-    for (let i = 0; i < 6; i++) {
-      const px = TCX + ((i * 17 + 5) % 44) - 22;
-      const py = TCY + ((i * 13 + 3) % 20) - 10;
-      g.fillRect(px, py, 2, 2);
+    // 2) AI-текстура с лёгким сдвигом, обрезанная по гексу
+    if (ready && im) {
+      g.save();
+      hexPath(g, TCX, TCY);
+      g.clip();
+      const tw = TILE_CW + 26, th = TILE_CH + 20;
+      const jx = jitter(v) * 12 - 6, jy = jitter(v + 7) * 8 - 4;
+      g.imageSmoothingEnabled = true; // мягкая усадка текстуры
+      g.drawImage(im, TCX - tw / 2 + jx, TCY - th / 2 + jy, tw, th);
+      g.imageSmoothingEnabled = false;
+      g.restore();
+    } else if (url) {
+      // текстура ещё грузится — после загрузки вытесним незаполненные тайлы из кеша
+      const him = im as HTMLImageElement & { _hexHooked?: boolean };
+      if (!him._hexHooked) {
+        him._hexHooked = true;
+        him.onload = () => { for (const k of [...tileCache.keys()]) if (k.endsWith(':0')) tileCache.delete(k); };
+      }
     }
-    g.fillStyle = '#4e8036';
-    for (let i = 0; i < 4; i++) {
-      const px = TCX + ((i * 23 + 11) % 40) - 20;
-      const py = TCY + ((i * 19 + 7) % 18) - 9;
-      g.fillRect(px, py, 2, 1);
+    // 3) тинт биома поверх текстуры (тёмная трава/лес/камень)
+    const tint = TINT[kind];
+    if (tint) {
+      g.save();
+      hexPath(g, TCX, TCY);
+      g.clip();
+      g.fillStyle = tint;
+      g.fillRect(0, 0, TILE_CW, TILE_CH);
+      g.restore();
     }
-  });
-}
-
-export function getDirtTile(): HTMLCanvasElement {
-  return getCachedTile('dirt', TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = '#8a7048';
-    g.fill();
-    // speckles
-    for (let i = 0; i < 10; i++) {
-      g.fillStyle = i % 3 === 0 ? '#9a8058' : '#7a6038';
-      const px = TCX + ((i * 17) % 40) - 20;
-      const py = TCY + ((i * 11) % 18) - 9;
-      g.fillRect(px, py, 2, 2);
+    // 4) процедурная детализация для тайлов без AI-текстуры
+    g.save();
+    hexPath(g, TCX, TCY);
+    g.clip();
+    if (kind === 'forest' || kind === 'dgrass') {
+      g.fillStyle = 'rgba(20,50,16,0.35)';
+      for (let i = 0; i < 7; i++) {
+        const px = TCX + ((i * 17 + v) % 44) - 22;
+        const py = TCY + ((i * 13 + (v >> 3)) % 20) - 10;
+        g.fillRect(px, py, 2, 2);
+      }
     }
-  });
-}
-
-export function getDarkGrassTile(): HTMLCanvasElement {
-  return getCachedTile('dgrass', TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = '#4a7c38';
-    g.fill();
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle = '#3e6a2e';
-      g.fillRect(TCX + ((i * 19) % 36) - 18, TCY + ((i * 11) % 16) - 8, 2, 2);
+    if (kind === 'mountain') {
+      for (let i = 0; i < 9; i++) {
+        g.fillStyle = i % 2 ? 'rgba(210,210,220,0.5)' : 'rgba(40,40,48,0.5)';
+        const px = TCX + ((i * 19 + v) % 48) - 24;
+        const py = TCY + ((i * 11 + (v >> 2)) % 22) - 11;
+        g.fillRect(px, py, 2, 2);
+      }
     }
-    diamondPath(g, TCX + 4, TCY + 1, 20, 10);
-    g.fillStyle = 'rgba(60,120,40,0.2)';
-    g.fill();
-  });
-}
-
-// ── Water tiles (river / lake): two animated-looking static variants ──
-export function getWaterTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('water' + (variant % 2), TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    const deep = variant % 2 === 0;
-    g.fillStyle = deep ? '#2f6fb0' : '#3a7fc0';
-    g.fill();
-    // мягкая светлая кромка у берега (верхняя грань ромба светлее)
-    diamondPath(g, TCX, TCY - 1, TILE_W - 8, TILE_H - 8);
-    g.fillStyle = deep ? 'rgba(96,165,220,0.25)' : 'rgba(125,190,235,0.28)';
-    g.fill();
-    // блики-рябь
-    g.strokeStyle = 'rgba(200,232,255,0.5)';
-    g.lineWidth = 1;
-    const off = deep ? 0 : 3;
-    g.beginPath();
-    g.moveTo(TCX - 14, TCY - 2 + off); g.lineTo(TCX - 4, TCY - 5 + off); g.lineTo(TCX + 6, TCY - 3 + off);
-    g.stroke();
-    g.beginPath();
-    g.moveTo(TCX + 2, TCY + 4 - off); g.lineTo(TCX + 12, TCY + 2 - off);
-    g.stroke();
-    g.fillStyle = 'rgba(255,255,255,0.35)';
-    g.fillRect(TCX - 8, TCY + 2, 3, 1);
-    g.fillRect(TCX + 8, TCY - 4, 3, 1);
-  });
-}
-
-// ── Hill tile (рельеф): каменистая площадка, свет по верхней кромке, обрыв в тени у нижней ──
-export function getHillTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('hill' + (variant % 3), TW, TH, (g) => {
-    // базовый ромб — тёмный камень (обрыв)
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = '#5f574a';
-    g.fill();
-    // верхняя площадка холма чуть меньше — приподнятая трава
-    diamondPath(g, TCX, TCY - 2, TILE_W - 6, TILE_H - 8);
-    g.fillStyle = variant % 3 === 0 ? '#8b965c' : '#7f8c52';
-    g.fill();
-    // каменистые вкрапления
-    for (let i = 0; i < 6; i++) {
-      const px = TCX + ((i * 17 + variant * 7) % 40) - 20;
-      const py = TCY + ((i * 13 + variant * 5) % 16) - 8;
-      g.fillStyle = i % 2 === 0 ? '#9a9066' : '#6f7a45';
-      g.fillRect(px, py, 2, 2);
+    if (kind === 'hill') {
+      for (let i = 0; i < 6; i++) {
+        g.fillStyle = i % 2 ? 'rgba(150,140,100,0.5)' : 'rgba(90,100,55,0.5)';
+        const px = TCX + ((i * 17 + v) % 44) - 22;
+        const py = TCY + ((i * 13 + (v >> 2)) % 20) - 10;
+        g.fillRect(px, py, 2, 2);
+      }
     }
-    // светлая грань — у верхнего ребра (дальний гребень)
-    g.strokeStyle = 'rgba(210,220,160,0.55)';
-    g.lineWidth = 1.5;
-    g.beginPath();
-    g.moveTo(TCX - TILE_W / 2 + 3, TCY + 1);
-    g.lineTo(TCX, TCY - TILE_H / 2 + 2);
-    g.lineTo(TCX + TILE_W / 2 - 3, TCY + 1);
-    g.stroke();
-    // тень обрыва — у нижнего ребра (к зрителю)
-    g.fillStyle = 'rgba(40,34,26,0.45)';
-    g.beginPath();
-    g.moveTo(TCX - TILE_W / 2 + 6, TCY - 1);
-    g.lineTo(TCX + TILE_W / 2 - 6, TCY - 1);
-    g.lineTo(TCX, TCY + TILE_H / 2 - 1);
-    g.closePath();
-    g.fill();
-  });
-}
-
-// ── Biome tiles (бесконечная карта): глубокая вода, берег, пустыня, поля, горы, лес ──
-export function getDeepWaterTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('dwater' + (variant % 2), TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = variant % 2 ? '#245a96' : '#1f528c';
-    g.fill();
-    g.strokeStyle = 'rgba(150,200,240,0.35)';
-    g.lineWidth = 1;
-    g.beginPath();
-    g.moveTo(TCX - 16, TCY - 1); g.lineTo(TCX - 6, TCY - 4); g.lineTo(TCX + 4, TCY - 2);
-    g.stroke();
-    g.fillStyle = 'rgba(255,255,255,0.22)';
-    g.fillRect(TCX + 6, TCY + 3, 4, 1);
-  });
-}
-
-export function getSandTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('sand' + (variant % 2), TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = variant % 2 ? '#d8c489' : '#d2bd7e';
-    g.fill();
-    for (let i = 0; i < 8; i++) {
-      g.fillStyle = i % 2 ? '#c9b072' : '#e4d29c';
-      const px = TCX + ((i * 19 + variant * 5) % 42) - 21;
-      const py = TCY + ((i * 13 + 3) % 18) - 9;
-      g.fillRect(px, py, 2, 1);
-    }
-  });
-}
-
-export function getDesertTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('desert' + (variant % 3), TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = variant % 3 === 0 ? '#d8b36a' : '#d2ac5e';
-    g.fill();
-    // дюны — дуги
-    g.strokeStyle = 'rgba(160,120,55,0.5)';
-    g.lineWidth = 1.5;
-    g.beginPath();
-    g.arc(TCX - 4, TCY + 1, 16, Math.PI * 1.15, Math.PI * 1.8);
-    g.stroke();
-    g.strokeStyle = 'rgba(230,205,140,0.6)';
-    g.beginPath();
-    g.arc(TCX + 6, TCY + 3, 12, Math.PI * 1.1, Math.PI * 1.7);
-    g.stroke();
-    for (let i = 0; i < 4; i++) {
-      g.fillStyle = '#c4a052';
-      g.fillRect(TCX + ((i * 23) % 40) - 20, TCY + ((i * 11) % 14) - 7, 2, 1);
-    }
-  });
-}
-
-export function getFieldTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('field' + (variant % 2), TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = variant % 2 ? '#9aa548' : '#a3ad4e';
-    g.fill();
-    // борозды грядок
-    g.strokeStyle = 'rgba(90,90,40,0.5)';
-    g.lineWidth = 1;
-    for (let i = -2; i <= 2; i++) {
+    g.restore();
+    // 5) свет по верхним трём граням (дальний гребень), тень по нижним (обрыв к зрителю)
+    const ridge = (a: number, b: number, color: string, w: number) => {
+      g.strokeStyle = color; g.lineWidth = w; g.lineJoin = 'round';
       g.beginPath();
-      g.moveTo(TCX - 18 + i * 9, TCY + 8);
-      g.lineTo(TCX + 6 + i * 9, TCY - 8);
+      const p0 = HEX_PTS[a], p1 = HEX_PTS[b];
+      g.moveTo(TCX + p0[0], TCY + p0[1]);
+      g.lineTo(TCX + p1[0], TCY + p1[1]);
       g.stroke();
-    }
-    g.fillStyle = 'rgba(220,200,90,0.5)';
-    for (let i = 0; i < 5; i++) {
-      g.fillRect(TCX + ((i * 17) % 38) - 19, TCY + ((i * 13) % 14) - 7, 2, 2);
-    }
+    };
+    // верхний гребень: ребро 0-1 (горизонт, дальняя кромка) + сходящиеся грани
+    ridge(0, 1, 'rgba(255,255,230,0.28)', 1.4);
+    ridge(5, 0, 'rgba(255,255,230,0.16)', 1);
+    ridge(1, 2, 'rgba(255,255,230,0.16)', 1);
+    // нижние грани — в тени
+    ridge(3, 4, 'rgba(0,0,0,0.28)', 1.4);
+    ridge(2, 3, 'rgba(0,0,0,0.18)', 1);
+    ridge(4, 5, 'rgba(0,0,0,0.18)', 1);
   });
-}
-
-export function getForestFloorTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('ffloor' + (variant % 2), TW, TH, (g) => {
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = variant % 2 ? '#3f6b2f' : '#457033';
-    g.fill();
-    g.fillStyle = 'rgba(40,80,30,0.5)';
-    diamondPath(g, TCX + 5, TCY + 2, 26, 13);
-    g.fill();
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle = '#356028';
-      g.fillRect(TCX + ((i * 17) % 40) - 20, TCY + ((i * 11) % 16) - 8, 2, 2);
-    }
-  });
-}
-
-// Горы: скалистые пики со снежной шапкой и тенью обрыва
-// Горная ПЛОЩАДКА (плоская вершина террасы): без пика на каждой плитке.
-// Редкие крупные вершины рисуются отдельно (engine.drawPeak) на локальных максимумах.
-export function getMountainTile(variant: number): HTMLCanvasElement {
-  return getCachedTile('mount' + (variant % 3), TW, TH, (g) => {
-    // каменистый ромб
-    diamondPath(g, TCX, TCY);
-    g.fillStyle = variant % 3 === 0 ? '#6b6a72' : '#62606a';
-    g.fill();
-    // осветлённая верхняя кромка (дальний гребень террасы)
-    g.strokeStyle = 'rgba(200,200,210,0.5)';
-    g.lineWidth = 1.5;
-    g.beginPath();
-    g.moveTo(TCX - TILE_W / 2 + 3, TCY + 1);
-    g.lineTo(TCX, TCY - TILE_H / 2 + 2);
-    g.lineTo(TCX + TILE_W / 2 - 3, TCY + 1);
-    g.stroke();
-    // каменная крошка / трещины (вариативно)
-    for (let i = 0; i < 7; i++) {
-      const px = TCX + ((i * 17 + variant * 7) % 44) - 22;
-      const py = TCY + ((i * 13 + variant * 5) % 18) - 9;
-      g.fillStyle = i % 2 === 0 ? '#7d7b85' : '#54525b';
-      g.fillRect(px, py, 2, 2);
-    }
-    // тень-обрыв у нижней (передней) кромки
-    g.fillStyle = 'rgba(28,27,32,0.4)';
-    g.beginPath();
-    g.moveTo(TCX - TILE_W / 2 + 6, TCY - 1);
-    g.lineTo(TCX + TILE_W / 2 - 6, TCY - 1);
-    g.lineTo(TCX, TCY + TILE_H / 2 - 1);
-    g.closePath();
-    g.fill();
-  });
+  return tile;
 }
 
 // ── Draw isometric box (building block) ──

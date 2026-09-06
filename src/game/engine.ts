@@ -1,8 +1,9 @@
 import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries,
-  getGrassTile, getDirtTile, getDarkGrassTile, getWaterTile, getHillTile,
-  getDeepWaterTile, getSandTile, getDesertTile, getFieldTile, getForestFloorTile, getMountainTile,
+  getHexTile, hexPath, hexCenter, screenToHex,
+  HQX, HY, HQY, HEX_PTS, TCX, TCY,
+  type HexKind,
   TILE_STEP } from './iso';
 import { Terrain } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
@@ -684,25 +685,25 @@ export class Game {
 
   drawFog() {
     const { ctx } = this;
-    const cell = this.fogCell;
-    // видимый диапазон мира
-    const m = Math.max(this.vw, this.vh) / this.cam.zoom + cell * 2;
-    const gx0 = clamp(Math.floor((this.cam.x - m) / cell), 0, this.fogGW - 1);
-    const gx1 = clamp(Math.ceil((this.cam.x + m) / cell), 0, this.fogGW - 1);
-    const gy0 = clamp(Math.floor((this.cam.y - m) / cell), 0, this.fogGH - 1);
-    const gy1 = clamp(Math.ceil((this.cam.y + m) / cell), 0, this.fogGH - 1);
     ctx.save();
-    for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) {
+    const camIX = this.camIsoX(), camIY = this.camIsoY();
+    const halfW = this.vw / 2 / this.cam.zoom + 60;
+    const halfH = this.vh / 2 / this.cam.zoom + 60;
+    // диапазон гексов, чьи центры покрывают экран (с запасом)
+    const c0 = screenToHex(-halfW, -halfH), c1 = screenToHex(halfW, halfH);
+    const q0 = Math.floor(c0.q) - 2, q1 = Math.ceil(c1.q) + 2;
+    const r0 = Math.floor(c0.r) - 2, r1 = Math.ceil(c1.r) + 2;
+    for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) {
+      // мировой центр гекса
+      const ix = HQX * q, iy = HQY * q + HY * r;
+      const wx = ix / 2 + iy, wy = iy - ix / 2;
+      if (wx < 0 || wy < 0 || wx > WORLD.w || wy > WORLD.h) continue;
+      const gx = (wx / this.fogCell) | 0, gy = (wy / this.fogCell) | 0;
+      if (gx < 0 || gy < 0 || gx >= this.fogGW || gy >= this.fogGH) continue;
       const idx = gy * this.fogGW + gx;
       if (this.fogVis[idx]) continue; // видно — без тумана
-      const wx = gx * cell, wy = gy * cell;
-      const [x0, y0] = toIso(wx, wy);
-      const [x1, y1] = toIso(wx + cell, wy);
-      const [x2, y2] = toIso(wx + cell, wy + cell);
-      const [x3, y3] = toIso(wx, wy + cell);
-      ctx.beginPath();
-      ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
-      ctx.closePath();
+      const sx = camIX + ix, sy = camIY + iy;
+      hexPath(ctx, sx, sy, 1.06);
       ctx.fillStyle = this.fogExpl[idx] ? 'rgba(10,16,12,0.42)' : 'rgba(6,10,8,0.82)';
       ctx.fill();
     }
@@ -3098,23 +3099,20 @@ export class Game {
     ctx.imageSmoothingEnabled = false; // чёткий пиксель-арт
     ctx.translate(-this.camIsoX(), -this.camIsoY());
 
-    // ── isometric ground tiles ──
-    // Tiles at world grid (wx, wy) with TILE_STEP=32.
-    // toIso(32,0) = (32,16), toIso(0,32) = (-32,16) → diamonds tessellate perfectly.
-    // Each cached tile canvas is (TILE_W+2) × (TILE_H+2) = 66×34, centered.
-    const grassTile = getGrassTile();
-    const dirtTile = getDirtTile();
-    const dkGrass = getDarkGrassTile();
-    const S = 32; // TILE_STEP in world units
+    // ── isometric ground tiles: ГЕКСАГОНАЛЬНАЯ мозаика (flat-top гексы в 2:1) ──
+    // Решётка аксиальная (q,r); центр гекса в изо-экране: ix=HQX*q, iy=HQY*q+HY*r.
+    // Каждый кеш-тайл — канвас TILE_CW×TILE_CH с гексом по центру (TCX,TCY).
+    // порядок отрисовки: r — внешний цикл (сверху вниз), q — внутренний (слева направо):
+    // корректный painter's order для гекс-решётки.
     const margin = Math.max(this.vw, this.vh) / this.cam.zoom + 120;
-    const cx0 = Math.floor((this.cam.x - margin) / S) * S;
-    const cx1 = Math.ceil((this.cam.x + margin) / S) * S;
-    const cy0 = Math.floor((this.cam.y - margin) / S) * S;
-    const cy1 = Math.ceil((this.cam.y + margin) / S) * S;
-    // сетка ступеней высоты на видимую область (перепад соседей ≤ 1 — плавная лесенка; вода плоская)
-    const hAt = this.terrain.reliefGrid(cx0 - S, cy0 - S, cx1 + S, cy1 + S, S);
-    const upAt = (wx: number, wy: number) => hAt(Math.round(wx / S) * S, Math.round(wy / S) * S) * RELIEF_STEP;
-    // палитра вертикальных граней-ступеней по биому (тёмный бок / светлее бок / тёмная кромка)
+    const cx0w = this.cam.x - margin, cx1w = this.cam.x + margin;
+    const cy0w = this.cam.y - margin, cy1w = this.cam.y + margin;
+    // сетка ступеней высоты на видимую область (6 соседей, перепад ≤ 1; вода плоская)
+    const relief = this.terrain.reliefGridHex(cx0w, cy0w, cx1w, cy1w);
+    const hAtQ = (q: number, r: number) => relief.at(q, r);
+    const upAtWorld = (wx: number, wy: number) => relief.hAtWorld(wx, wy) * RELIEF_STEP;
+    const upAtQ = (q: number, r: number) => hAtQ(q, r) * RELIEF_STEP;
+    // палитра вертикальных граней-ступеней по биому (светлый бок / тёмный бок / подошва)
     const cliffColors = (cls: string): [string, string, string] => {
       switch (cls) {
         case 'mountain': return ['#6e6e78', '#5c5c66', '#3f3f47'];
@@ -3127,66 +3125,93 @@ export class Game {
         default: return ['#4c7a33', '#40692b', '#2c4a1e']; // grass
       }
     };
-    // рисует две вертикальные грани (к камере), если плитка выше соседей спереди.
-    // углы поднятого ромба: R(ix+32,iy-up), L(ix-32,iy-up), B(ix,iy+16-up) — передний угол.
-    // rDrop/lDrop — вертикальный перепад до соседних плиток спереди (x+S и y+S).
-    const drawCliff = (ix: number, iy: number, up: number, cls: string, rDrop: number, lDrop: number) => {
+    // вертикальная грань-обрыв от ребра гекса вниз на drop px
+    const face = (p1: [number, number], p2: [number, number], drop: number, fill: string, cB: string) => {
+      if (drop <= 0) return;
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
+      ctx.lineTo(p2[0], p2[1] + drop); ctx.lineTo(p1[0], p1[1] + drop);
+      ctx.closePath(); ctx.fill();
+      // слойки-пласты
+      ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;
+      for (let k = 3; k < drop; k += 4) {
+        ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + k); ctx.lineTo(p2[0], p2[1] + k); ctx.stroke();
+      }
+      ctx.strokeStyle = cB; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + drop); ctx.lineTo(p2[0], p2[1] + drop); ctx.stroke();
+    };
+    // три ПЕРЕДНИЕ (нижние) грани обрыва гекса:
+    //   нижнее ребро BL→BR — общее с соседом r+1 (передняя грань, самая тёмная);
+    //   ребро R→BR — общее с соседом q+1 (правая грань);
+    //   ребро L→BL — общее с соседом q-1,r+1 (левая грань).
+    const drawCliffsHex = (ix: number, iy: number, up: number, cls: string, q: number, r: number) => {
       if (up <= 0) return;
-      const [cL, cR, cB] = cliffColors(cls);
-      const R = [ix + 32, iy - up], L = [ix - 32, iy - up], B = [ix, iy + 16 - up];
-      const face = (p1: number[], p2: number[], drop: number, fill: string) => {
-        if (drop <= 0) return;
-        ctx.fillStyle = fill;
-        ctx.beginPath();
-        ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
-        ctx.lineTo(p2[0], p2[1] + drop); ctx.lineTo(p1[0], p1[1] + drop);
-        ctx.closePath(); ctx.fill();
-        // слойки-пласты
-        ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;
-        for (let k = 3; k < drop; k += 4) {
-          ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + k); ctx.lineTo(p2[0], p2[1] + k); ctx.stroke();
-        }
-        // тёмная подошва
-        ctx.strokeStyle = cB; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + drop); ctx.lineTo(p2[0], p2[1] + drop); ctx.stroke();
-      };
-      face(R, B, rDrop, cR);   // правая грань (ребро R→B)
-      face(L, B, lDrop, cL);   // левая грань (ребро L→B)
+      const [cR, cL, cB] = cliffColors(cls);
+      const TL: [number, number] = [ix + HEX_PTS[0][0], iy + HEX_PTS[0][1] - up];
+      const TR: [number, number] = [ix + HEX_PTS[1][0], iy + HEX_PTS[1][1] - up];
+      const RR: [number, number] = [ix + HEX_PTS[2][0], iy + HEX_PTS[2][1] - up];
+      const BR: [number, number] = [ix + HEX_PTS[3][0], iy + HEX_PTS[3][1] - up];
+      const BL: [number, number] = [ix + HEX_PTS[4][0], iy + HEX_PTS[4][1] - up];
+      const LL: [number, number] = [ix + HEX_PTS[5][0], iy + HEX_PTS[5][1] - up];
+      void TL; void TR;
+      const dC = up - upAtQ(q, r + 1);       // сосед прямо вниз (ребро BL→BR)
+      const dE = up - upAtQ(q + 1, r);       // сосед справа-вниз (ребро R→BR)
+      const dW = up - upAtQ(q - 1, r + 1);   // сосед слева-вниз (ребро L→BL)
+      face(BL, BR, dC, cB, cB);  // передняя горизонтальная грань — самая тёмная
+      face(RR, BR, dE, cR, cB);  // правая наклонная грань
+      face(LL, BL, dW, cL, cB);  // левая наклонная грань
     };
 
-    for (let wy = cy0; wy <= cy1; wy += S) {
-      for (let wx = cx0; wx <= cx1; wx += S) {
-        const [ix, iy] = toIso(wx, wy);
-        const cx = wx + S / 2, cy = wy + S / 2; // центр клетки для террейна
+    // видимый диапазон гексов: изо-экран камеры → дробные аксиальные координаты
+    const camIX = this.camIsoX(), camIY = this.camIsoY();
+    const halfW = this.vw / 2 / this.cam.zoom + 60;
+    const halfH = this.vh / 2 / this.cam.zoom + 60;
+    const corners = [
+      screenToHex(-halfW, -halfH), screenToHex(halfW, -halfH),
+      screenToHex(halfW, halfH), screenToHex(-halfW, halfH),
+    ];
+    const qMin = Math.floor(Math.min(...corners.map(c => c.q)));
+    const qMax = Math.ceil(Math.max(...corners.map(c => c.q)));
+    const rMin = Math.floor(Math.min(...corners.map(c => c.r))) - 1;
+    const rMax = Math.ceil(Math.max(...corners.map(c => c.r))) + 1;
+
+    for (let r = rMin; r <= rMax; r++) {
+      for (let q = qMin; q <= qMax; q++) {
+        const [hx, hy] = hexCenter(q, r);
+        const ix = hx + camIX, iy = hy + camIY;
+        // грубый куллинг по экранному прямоугольнику
+        if (ix < -halfW - 30 || ix > halfW + 30 || iy < -halfH - 20 || iy > halfH + 30) continue;
+        const [wx, wy] = relief.worldAt(q, r);
         const hash = ((wx * 73 - wy * 137) & 0xFFFF) ^ ((wx + wy) & 0xFFFF);
         const hv = hash & 0xFFFF;
-        const isBase = (Math.abs(cx - HOME.x) < 190 && Math.abs(cy - HOME.y) < 190)
-          || (Math.abs(cx - RIVAL.x) < 190 && Math.abs(cy - RIVAL.y) < 190);
-        let tile;
-        let cls: string = isBase ? 'dirt' : this.terrain.classAt(wx, wy);
-        if (isBase) tile = dirtTile;
+        const isBase = (Math.abs(wx - HOME.x) < 190 && Math.abs(wy - HOME.y) < 190)
+          || (Math.abs(wx - RIVAL.x) < 190 && Math.abs(wy - RIVAL.y) < 190);
+        let kind: HexKind;
+        let cls: string;
+        if (isBase) { kind = 'dirt'; cls = 'dirt'; }
         else {
+          cls = this.terrain.classAt(wx, wy);
           switch (cls) {
-            case 'deep': tile = getDeepWaterTile(hv); break;
-            case 'water': tile = getWaterTile(hv); break;
-            case 'sand': tile = getSandTile(hv); break;
-            case 'desert': tile = getDesertTile(hv); break;
-            case 'field': tile = getFieldTile(hv); break;
-            case 'forest': tile = hv % 2 ? getForestFloorTile(hv) : dkGrass; break;
-            case 'mountain': tile = getMountainTile(hv); break; // каменистая площадка (без пика)
-            case 'hill': tile = getHillTile(hv); break;
-            default: cls = 'grass'; tile = hv % 5 === 0 ? dkGrass : grassTile;
+            case 'deep': kind = 'deep'; break;
+            case 'water': kind = 'water'; break;
+            case 'sand': kind = 'sand'; break;
+            case 'desert': kind = 'desert'; break;
+            case 'field': kind = 'field'; break;
+            case 'forest': kind = hv % 2 ? 'forest' : 'dgrass'; break;
+            case 'mountain': kind = 'mountain'; break;
+            case 'hill': kind = 'hill'; break;
+            default: cls = 'grass'; kind = hv % 5 === 0 ? 'dgrass' : 'grass';
           }
         }
-        const up = upAt(wx, wy);
-        // перепад до соседей спереди (x+S — за правым ребром, y+S — за левым)
-        const rDrop = up - upAt(wx + S, wy);
-        const lDrop = up - upAt(wx, wy + S);
-        // сначала верхняя площадка, затем грани к соседям спереди (рисуются поверх более дальних плиток)
-        ctx.drawImage(tile, ix - 33, iy - 17 - up);
-        drawCliff(ix, iy, up, cls, rDrop, lDrop);
+        const tile = getHexTile(kind, hv);
+        const up = upAtQ(q, r);
+        ctx.drawImage(tile, ix - TCX, iy - TCY - up);
+        drawCliffsHex(ix, iy, up, cls, q, r);
       }
     }
+    // upAt для объектов (деревья/юниты/здания/декор) — высота гекса под мировой точкой
+    const upAt = (wx: number, wy: number) => upAtWorld(wx, wy);
     // тинт биома поверх земли
     const tint = this.biomeTint();
     if (tint !== 'rgba(0,0,0,0)') {
@@ -3213,16 +3238,21 @@ export class Game {
     //    холмы-курганы. Ставятся только на локальных максимумах, прорежены и разнесены
     //    минимальной дистанцией — получается хребет с редкими пиками, а не частокол ──
     const placed: string[] = [];
-    const nearPlaced = (wx: number, wy: number, rad: number) => {
-      for (const k of placed) { const [px, py] = k.split(',').map(Number); if (Math.abs(px - wx) <= rad * S && Math.abs(py - wy) <= rad * S) return true; } return false;
+    const nearPlaced = (qx: number, ry: number, rad: number) => {
+      for (const k of placed) { const [px, py] = k.split(',').map(Number); if (Math.abs(px - qx) <= rad && Math.abs(py - ry) <= rad) return true; } return false;
     };
-    for (let wy = cy0; wy <= cy1; wy += S) {
-      for (let wx = cx0; wx <= cx1; wx += S) {
-        const lvl = hAt(wx, wy);
-        const cls = this.terrain.classAt(wx + S / 2, wy + S / 2);
-        const isMax = lvl >= hAt(wx + S, wy) && lvl >= hAt(wx - S, wy) && lvl >= hAt(wx, wy + S) && lvl >= hAt(wx, wy - S);
+    for (let r = rMin + 2; r <= rMax - 2; r++) {
+      for (let q = qMin + 2; q <= qMax - 2; q++) {
+        const lvl = hAtQ(q, r);
+        if (lvl <= 0) continue;
+        // локальный максимум по 6 соседям гекса
+        const n6 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+        let isMax = true;
+        for (const [dq, dr] of n6) if (hAtQ(q + dq, r + dr) > lvl) { isMax = false; break; }
         if (!isMax) continue;
-        const hc = ((wx * 73856093) ^ (wy * 19349663)) & 0xff;
+        const [wx, wy] = relief.worldAt(q, r);
+        const cls = this.terrain.classAt(wx, wy);
+        const hc = ((q * 73856093) ^ (r * 19349663)) & 0xff;
         let fi = -1, rad = 2;
         if (cls === 'mountain') {
           if (lvl >= 5 && hc > 232) { fi = F_PEAK_SNOW; rad = 5; }
@@ -3230,10 +3260,10 @@ export class Game {
         } else if (cls === 'hill' && lvl >= 2 && hc > 200) {
           fi = hc % 2 ? F_HILL_ROCK : F_HILL_GRASS; rad = 3;
         }
-        if (fi < 0 || nearPlaced(wx, wy, rad)) continue;
-        placed.push(wx + ',' + wy);
-        const [ix, iy0] = toIso(wx, wy);
-        const iy = iy0 - upAt(wx, wy);
+        if (fi < 0 || nearPlaced(q, r, rad)) continue;
+        placed.push(q + ',' + r);
+        const ix = camIX + HQX * q, iy0 = camIY + HQY * q + HY * r;
+        const iy = iy0 - upAtQ(q, r);
         drawList.push({ iy: iy0, draw: () => this.drawTerrainFeature(fi, ix, iy) });
       }
     }
@@ -3364,7 +3394,6 @@ export class Game {
         const [x1, y1] = this.snapWall(d.x1, d.y1);
         const dx = x1 - x0, dy = y1 - y0;
         const steps = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / TILE_STEP));
-        const hw = 32, hh = 16;
         for (let i = 0; i <= steps; i++) {
           const t = i / steps;
           const sx = Math.round((x0 + dx * t) / TILE_STEP) * TILE_STEP;
@@ -3372,7 +3401,7 @@ export class Game {
           const ok = this.placementValid(sx, sy, key) && this.afford(BUILDING_DEFS[key].cost);
           const [gx, gy] = toIso(sx, sy);
           ctx.globalAlpha = 0.55;
-          ctx.beginPath(); ctx.moveTo(gx, gy - hh); ctx.lineTo(gx + hw, gy); ctx.lineTo(gx, gy + hh); ctx.lineTo(gx - hw, gy); ctx.closePath();
+          hexPath(ctx, gx, gy, 0.62);
           ctx.fillStyle = ok ? 'rgba(163,230,53,0.45)' : 'rgba(239,68,68,0.35)';
           ctx.fill();
           ctx.strokeStyle = ok ? '#a3e635' : '#ef4444'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -3388,16 +3417,16 @@ export class Game {
         const [gx, gy] = toIso(mw.x, mw.y);
         ctx.globalAlpha = 0.55;
         const sz = BUILDING_DEFS[this.placement].size;
-        // iso diamond outline
-        const hw = sz * 0.7, hh = sz * 0.35;
-        ctx.beginPath(); ctx.moveTo(gx, gy - hh); ctx.lineTo(gx + hw, gy); ctx.lineTo(gx, gy + hh); ctx.lineTo(gx - hw, gy); ctx.closePath();
+        // изометрический шестиугольник-фундамент (пропорционально размеру здания)
+        const hsc = sz / 52;
+        hexPath(ctx, gx, gy, hsc);
         ctx.fillStyle = ok ? 'rgba(163,230,53,0.4)' : 'rgba(239,68,68,0.4)';
         ctx.fill();
         ctx.strokeStyle = ok ? '#a3e635' : '#ef4444'; ctx.lineWidth = 2; ctx.stroke();
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#fff'; ctx.font = '800 13px Inter';
         const tip = this.placement === 'wall' || this.placement === 'gate' ? 'Клик — поставить, зажмите и тяните' : 'Клик — поставить';
-        ctx.fillText(ok ? tip : 'Занято!', gx, gy - hh - 10);
+        ctx.fillText(ok ? tip : 'Занято!', gx, gy - 20 * hsc - 10);
         if (this.placement === 'tower') {
           ctx.strokeStyle = ok ? 'rgba(246,212,124,0.4)' : 'rgba(248,113,113,0.4)'; ctx.lineWidth = 1.5;
           isoEllipse(ctx, gx, gy, BUILDING_DEFS.tower.attack!.range * 0.7, BUILDING_DEFS.tower.attack!.range * 0.7);

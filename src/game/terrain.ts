@@ -170,6 +170,97 @@ export class Terrain {
     };
   }
 
+  /**
+   * ГЕКСАГОНАЛЬНАЯ сетка ступеней рельефа для видимой области (изо-гексы).
+   * Строит прямоугольник аксиальных ячеек (q,r), покрывающий мировой прямоугольник
+   * [wx0,wx1]×[wy0,wy1] с запасом pad ячеек, выравнивает высоты distance-transform'ом
+   * по 6 соседям (перепад соседей ≤ 1 — плавная лесенка). Возвращает функции:
+   *   at(q,r)  — ступень 0..5 в ячейке;
+   *   world(q,r) — мировые координаты ЦЕНТРА гекса (wx,wy);
+   *   hAtWorld(wx,wy) — ступень в гексе, которому принадлежит мировая точка.
+   */
+  reliefGridHex(wx0: number, wy0: number, wx1: number, wy1: number, pad = 8) {
+    // изо-экраны углов → аксиальные дробные координаты → целочисленные границы
+    const s2h = (sx: number, sy: number) => {
+      const q = sx / 26;                       // HQX
+      const r = sy / (16 * Math.sqrt(3)) - q / 2; // HY, HQY
+      return [q, r];
+    };
+    const corners = [
+      s2h(wx0 - wy0, (wx0 + wy0) * 0.5),
+      s2h(wx1 - wy0, (wx1 + wy0) * 0.5),
+      s2h(wx1 - wy1, (wx1 + wy1) * 0.5),
+      s2h(wx0 - wy1, (wx0 + wy1) * 0.5),
+    ];
+    let q0 = Math.floor(Math.min(...corners.map(c => c[0]))) - pad;
+    let q1 = Math.ceil(Math.max(...corners.map(c => c[0]))) + pad;
+    let r0 = Math.floor(Math.min(...corners.map(c => c[1]))) - pad;
+    let r1 = Math.ceil(Math.max(...corners.map(c => c[1]))) + pad;
+    const W = q1 - q0 + 1, H = r1 - r0 + 1;
+    const idx = (q: number, r: number) => (r - r0) * W + (q - q0);
+    // мир → изо-экран (дублирует toIso, чтобы не тянуть зависимость iso↔terrain)
+    const worldAt = (q: number, r: number): [number, number] => {
+      const ix = 26 * q, iy = (16 * Math.sqrt(3) / 2) * q + 16 * Math.sqrt(3) * r;
+      const wx = ix / 2 + iy, wy = iy - ix / 2;
+      return [wx, wy];
+    };
+    const raw = new Int16Array(W * H);
+    for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) {
+      const [wx, wy] = worldAt(q, r);
+      raw[idx(q, r)] = this.rawRelief(wx, wy);
+    }
+    // distance-transform по 6 соседям: высота ≤ расстояние до любой низины
+    const dist = new Int16Array(W * H).fill(99);
+    const dat = (q: number, r: number) =>
+      q < q0 || q > q1 || r < r0 || r > r1 ? 99 : dist[idx(q, r)];
+    // Chamfer distance transform по гекс-сетке (6 соседей): два прохода —
+    // прямой (смотрим трёх «предыдущих» соседей) и обратный (трёх «последующих»).
+    // Высота ≤ расстояние до низины ⇒ перепад соседей ≤ 1, подъём плавной лесенкой.
+    for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) {
+      const i = idx(q, r);
+      if (raw[i] === 0) { dist[i] = 0; continue; }
+      let v = dist[i];
+      for (const [dq, dr] of <[number, number][]>[[-1, 0], [0, -1], [1, -1]]) {
+        const n = dat(q + dq, r + dr);
+        if (n + 1 < v) v = n + 1;
+      }
+      dist[i] = v;
+    }
+    for (let r = r1; r >= r0; r--) for (let q = q1; q >= q0; q--) {
+      const i = idx(q, r);
+      if (raw[i] === 0) { dist[i] = 0; continue; }
+      let v = dist[i];
+      for (const [dq, dr] of <[number, number][]>[[1, 0], [0, 1], [-1, 1]]) {
+        const n = dat(q + dq, r + dr);
+        if (n + 1 < v) v = n + 1;
+      }
+      dist[i] = v;
+    }
+    const hAt = (q: number, r: number) => {
+      if (q < q0 || q > q1 || r < r0 || r > r1) return 0;
+      const i = idx(q, r);
+      return Math.max(0, Math.min(raw[i], dist[i]));
+    };
+    return {
+      q0, q1, r0, r1, worldAt,
+      at: hAt,
+      hAtWorld: (wx: number, wy: number) => {
+        const ix = wx - wy, iy = (wx + wy) * 0.5;
+        let q = ix / 26;
+        const r = iy / (16 * Math.sqrt(3)) - q / 2;
+        q = Math.round(q); let rr = Math.round(r);
+        // cube rounding
+        const x = q, z = rr, y = -x - z;
+        let rx = x, ry = y, rz = z;
+        const dx = Math.abs(rx - x), dy = Math.abs(ry - y), dz = Math.abs(rz - z);
+        if (dx > dy && dx > dz) rx = -ry - rz;
+        else if (dz > dy) rz = -rx - ry;
+        rr = rz; q = rx;
+        return hAt(q, rr);
+      },
+    };
+  }
+
   /** можно ли ставить контент/ходить (горы и вода — нет для спавна ресурсов/животных) */
   isLand(wx: number, wz: number): boolean {
     if (this.inSafe(wx, wz)) return true;
