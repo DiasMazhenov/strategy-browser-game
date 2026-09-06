@@ -3109,10 +3109,11 @@ export class Game {
     ctx.translate(-this.camIsoX(), -this.camIsoY());
 
     // ── isometric ground tiles: ГЕКСАГОНАЛЬНАЯ мозаика (flat-top гексы в 2:1) ──
-    // Решётка аксиальная (q,r); центр гекса в изо-экране — hexCenter(q,r): q=(44,0), r=(22,29).
+    // Решётка аксиальная (q,r); абсолютный изо-центр гекса — hexCenter(q,r);
+    // мировой центр — relief.worldAt(q,r): wx=30q, wy=√3·20·(q/2+r).
     // Каждый кеш-тайл — канвас TILE_CW×TILE_CH с гексом по центру (TCX,TCY).
-    // порядок отрисовки: r — внешний цикл (сверху вниз), q — внутренний (слева направо):
-    // корректный painter's order для гекс-решётки.
+    // Рисуем в абсолютных (hx,hy) внутри translate(-camIsoX,-camIsoY) — камеру
+    // НЕ добавляем; куллинг по экранному смещению (hx-camIX,hy-camIY).
     const margin = Math.max(this.vw, this.vh) / this.cam.zoom + 120;
     const cx0w = this.cam.x - margin, cx1w = this.cam.x + margin;
     const cy0w = this.cam.y - margin, cy1w = this.cam.y + margin;
