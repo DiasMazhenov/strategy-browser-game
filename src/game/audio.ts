@@ -205,11 +205,16 @@ export class SoundBank {
     a.addEventListener('ended', done);
     a.addEventListener('error', () => {
       done();
-      // NFD-фолбэк: декодируем имя файла, разлагаем в NFD, кодируем обратно
+      // NFD-фолбэк (macOS/веб-загрузки дают имя в NFD: «ё» = «е» + ◌̈).
+      // Слеши пути НЕ кодируем (иначе подпапка kaz-voises/ превращается в %2F).
       try {
-        const u = decodeURIComponent(url.slice('voices/'.length));
-        const nfd = u.normalize('NFD');
-        if (nfd !== u && !this.missingClips.has(url)) { this.playUrl('voices/' + encodeURIComponent(nfd)); return; }
+        const rel = decodeURIComponent(url.slice('voices/'.length));
+        const nfd = rel.normalize('NFD');
+        if (nfd !== rel && !this.missingClips.has(url)) {
+          const nfdUrl = 'voices/' + nfd.split('/').map(seg => encodeURIComponent(seg)).join('/');
+          this.playUrl(nfdUrl);
+          return;
+        }
       } catch { /* noop */ }
       this.missingClips.add(url); // реально нет/битый — больше не дёргаем
     }, { once: true });
