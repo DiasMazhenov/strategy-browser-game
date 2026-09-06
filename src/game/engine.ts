@@ -152,6 +152,12 @@ interface Unit {
   hidden?: number;        // id здания-укрытия (гарнизон)
   relicTarget?: number;   // id реликвии, за которой идёт монах
   xp?: number; level?: number; kills?: number; // опыт и ранг героя
+  // ── обход препятствий (A* по сетке): waypoints в мире ──
+  path?: { x: number; y: number }[]; // маршрут вокруг стен (мировые точки)
+  pathGoal?: { x: number; y: number };   // цель, под которую посчитан путь
+  stuckT?: number;                        // время у стены (для пере-прокладки)
+  lastX?: number; lastY?: number;         // позиция в прошлой проверке застревания
+  noPathT?: number;                       // антиспам пере-прокладки, когда пути нет
 }
 // опыт для следующего уровня: 3 убийства → ур.2, далее +2 за ранг
 function xpForLevel(level: number): number { return (level + 2) * 3; }
@@ -1048,12 +1054,12 @@ export class Game {
     // own construction → assist
     if (tb && tb.owner === 'player' && tb.done < 1 && hasVill) {
       for (const v of us.filter(u => u.key === 'villager')) { v.state = 'build'; v.buildId = tb.id; v.tx = tb.x + rand(-60, 60); v.ty = tb.y + rand(-50, 50); }
-      this.sound.move(); this.sound.say('За работу'); this.spawnRing(x, y, '#f6d47c'); return;
+      this.sound.move(); this.sound.playPhrase('за работу'); this.spawnRing(x, y, '#f6d47c'); return;
     }
     // own DAMAGED building → repair
     if (tb && tb.owner === 'player' && tb.done >= 1 && tb.hp < tb.maxHp - 1 && hasVill) {
       for (const v of us.filter(u => u.key === 'villager')) { v.state = 'build'; v.buildId = tb.id; v.tx = tb.x + rand(-50, 50); v.ty = tb.y + rand(-46, 46); }
-      this.sound.move(); this.sound.say('За работу'); this.floater(tb.x, tb.y - 60, '🔧 Ремонт!', '#7dd3fc', 15); this.spawnRing(x, y, '#7dd3fc'); return;
+      this.sound.move(); this.sound.playPhrase('за работу'); this.floater(tb.x, tb.y - 60, '🔧 Ремонт!', '#7dd3fc', 15); this.spawnRing(x, y, '#7dd3fc'); return;
     }
     // default: military attack-move, villagers move
     if (hasMil && !hasVill) this.orderAttackMove(us, x, y);
@@ -1455,7 +1461,7 @@ export class Game {
     const crew = vills.slice(0, 4);
     if (!crew.length) { this.floater(b.x, b.y - 60, 'Нет свободных крестьян', '#f87171', 14); this.sound.error(); return; }
     for (const v of crew) { v.state = 'build'; v.buildId = b.id; v.tx = b.x + rand(-50, 50); v.ty = b.y + rand(-46, 46); }
-    this.sound.move(); this.sound.say('За работу');
+    this.sound.move(); this.sound.playPhrase('за работу');
     this.floater(b.x, b.y - 60, `🔧 Ремонт: ${crew.length} кр.`, '#7dd3fc', 15);
     this.pushHud();
   }
@@ -1593,7 +1599,7 @@ export class Game {
       if (d < bd) { bd = d; best = u; }
     }
     if (!best) { let bd2 = 1e12; for (const u of this.units) { if (u.owner !== 'player' || u.key !== 'villager') continue; const d = dist2(u.x, u.y, x, y); if (d < bd2) { bd2 = d; best = u; } } }
-    if (best) { best.state = 'build'; best.buildId = b.id; best.tx = x + rand(-50, 50); best.ty = y + rand(-46, 46); this.sound.say('За работу'); }
+    if (best) { best.state = 'build'; best.buildId = b.id; best.tx = x + rand(-50, 50); best.ty = y + rand(-46, 46); this.sound.playPhrase('за работу'); }
     if (key === 'barracks') { this.barracksBuilt++; this.checkQuests(); }
     if (!this.keys.has('shift')) this.placement = null;
     this.pushHud();
@@ -2004,14 +2010,166 @@ export class Game {
     return false;
   }
 
+  // ── ОБХОД ПРЕПЯТСТВИЙ: A* по сетке с последующим движением по waypoint'ам ──
+  // Препятствия — стены/ворота (для непроходящих) и готовые здания; ресурсы/террейн
+  // не блокируют. Ворота проходящего владельца свободны. Возвращает мировые точки
+  // маршрута (без старта) или null, если в локальной области пути нет.
+  private computePath(sx: number, sy: number, gx: number, gy: number, owner: Unit['owner']): { x: number; y: number }[] | null {
+    const CELL = 26, PAD = 9;
+    const minX = Math.min(sx, gx) - 120, maxX = Math.max(sx, gx) + 120;
+    const minY = Math.min(sy, gy) - 120, maxY = Math.max(sy, gy) + 120;
+    const cx0 = Math.floor(minX / CELL) - PAD, cy0 = Math.floor(minY / CELL) - PAD;
+    const cx1 = Math.ceil(maxX / CELL) + PAD, cy1 = Math.ceil(maxY / CELL) + PAD;
+    const W = cx1 - cx0 + 1, H = cy1 - cy0 + 1;
+    if (W * H > 26000) return null; // слишком большая область — не считаем (просто прямо)
+    const blockWalls: { x: number; y: number; r: number }[] = [];
+    const blockBlds: { x: number; y: number; r: number }[] = [];
+    for (const b of this.blds) {
+      const isWall = b.key === 'wall' || b.key === 'gate';
+      // ворота своего владельца — проходной проход; вражеские/нейтральные ворота = стена
+      const gatePass = b.key === 'gate' && b.owner === owner;
+      const blocking = isWall ? !gatePass : b.done >= 0.6;
+      if (!blocking) continue;
+      const r = isWall ? 15 : b.size / 2 + 8;
+      (isWall ? blockWalls : blockBlds).push({ x: b.x, y: b.y, r });
+    }
+    const blocked = (wx: number, wy: number): boolean => {
+      for (const o of blockWalls) { const dx = wx - o.x, dy = wy - o.y; if (dx * dx + dy * dy < o.r * o.r) return true; }
+      for (const o of blockBlds) { const dx = wx - o.x, dy = wy - o.y; if (Math.abs(dx) < o.r && Math.abs(dy) < o.r) return true; }
+      return false;
+    };
+    const gc = (wx: number, wy: number) => ({ cx: Math.floor(wx / CELL), cy: Math.floor(wy / CELL) });
+    const sC = gc(sx, sy), gC = gc(gx, gy);
+    const ci = (cx: number, cy: number) => (cy - cy0) * W + (cx - cx0);
+    const cellCenter = (cx: number, cy: number): [number, number] => [(cx + 0.5) * CELL, (cy + 0.5) * CELL];
+    // не блокируем старт и цель (чтобы юнит у основания здания мог дойти до точки сбора)
+    const free = (cx: number, cy: number): boolean => {
+      if (cx < cx0 || cx > cx1 || cy < cy0 || cy > cy1) return false;
+      const [wx, wy] = cellCenter(cx, cy);
+      if (cx === sC.cx && cy === sC.cy) return true;
+      if (cx === gC.cx && cy === gC.cy) return true;
+      return !blocked(wx, wy);
+    };
+    const startFree = free(sC.cx, sC.cy);
+    const goalFree = free(gC.cx, gC.cy);
+    if (!startFree || !goalFree) {
+      // подобрать ближайшую свободную клетку (BFS по малому радиусу)
+      const nearest = (tcx: number, tcy: number): [number, number] | null => {
+        for (let rad = 1; rad <= 12; rad++) {
+          for (let cy = tcy - rad; cy <= tcy + rad; cy++) for (let cx = tcx - rad; cx <= tcx + rad; cx++) {
+            if (Math.max(Math.abs(cx - tcx), Math.abs(cy - tcy)) !== rad) continue;
+            if (free(cx, cy)) return [cx, cy];
+          }
+        }
+        return null;
+      };
+      if (!startFree) { const n = nearest(sC.cx, sC.cy); if (!n) return null; sC.cx = n[0]; sC.cy = n[1]; }
+      if (!goalFree) { const n = nearest(gC.cx, gC.cy); if (!n) return null; gC.cx = n[0]; gC.cy = n[1]; }
+    }
+    // A*
+    const came = new Map<number, number>();
+    const gScore = new Map<number, number>();
+    const h = (cx: number, cy: number) => Math.hypot(cx - gC.cx, cy - gC.cy);
+    const sIdx = ci(sC.cx, sC.cy), gIdx = ci(gC.cx, gC.cy);
+    gScore.set(sIdx, 0);
+    const open: number[] = [sIdx];
+    const fScore = new Map<number, number>([[sIdx, h(sC.cx, sC.cy)]]);
+    const seen = new Set<number>([sIdx]);
+    const N8: [number, number, number][] = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [-1, 1, 1.414], [1, -1, 1.414], [-1, -1, 1.414]];
+    let guard = 6000;
+    while (open.length && guard-- > 0) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if ((fScore.get(open[i]) ?? Infinity) < (fScore.get(open[bi]) ?? Infinity)) bi = i;
+      const cur = open.splice(bi, 1)[0];
+      if (cur === gIdx) {
+        // восстановить путь в мировых координатах
+        const cells: number[] = [cur];
+        let c = cur;
+        while (came.has(c)) { c = came.get(c)!; cells.push(c); }
+        cells.reverse();
+        const path = cells.slice(1).map(idx => {
+          const cx = (idx % W) + cx0, cy = Math.floor(idx / W) + cy0;
+          const [wx, wy] = cellCenter(cx, cy);
+          return { x: wx, y: wy };
+        });
+        path.push({ x: gx, y: gy }); // финальная точка — точная цель
+        return path;
+      }
+      const ccx = (cur % W) + cx0, ccy = Math.floor(cur / W) + cy0;
+      for (const [dx, dy, cost] of N8) {
+        const nx = ccx + dx, ny = ccy + dy;
+        if (!free(nx, ny)) continue;
+        // не режем углы сквозь стены по диагонали
+        if (dx !== 0 && dy !== 0 && (!free(ccx + dx, ccy) || !free(ccx, ccy + dy))) continue;
+        const nIdx = ci(nx, ny);
+        const tg = (gScore.get(cur) ?? Infinity) + cost;
+        if (tg < (gScore.get(nIdx) ?? Infinity)) {
+          came.set(nIdx, cur); gScore.set(nIdx, tg);
+          fScore.set(nIdx, tg + h(nx, ny));
+          if (!seen.has(nIdx)) { seen.add(nIdx); open.push(nIdx); }
+        }
+      }
+    }
+    return null;
+  }
+
+  // движение к цели с автообходом препятствий; возвращает true при прибытии
+  moveTowardPath(u: Unit, tx: number, ty: number, dt: number, arrive = 6): boolean {
+    const dxg = tx - u.x, dyg = ty - u.y;
+    if (Math.hypot(dxg, dyg) < arrive) { u.path = undefined; u.pathGoal = undefined; u.stuckT = 0; return true; }
+    // нужен ли путь: прямая линия перекрыта стеной/зданием?
+    const lineBlocked = (): boolean => {
+      const seg = 8;
+      for (let i = 1; i < seg; i++) {
+        const wx = u.x + dxg * (i / seg), wy = u.y + dyg * (i / seg);
+        for (const b of this.blds) {
+          const isWall = b.key === 'wall' || b.key === 'gate';
+          const gatePass = b.key === 'gate' && b.owner === u.owner;
+          if (isWall) { if (!gatePass) { const ddx = wx - b.x, ddy = wy - b.y; if (ddx * ddx + ddy * ddy < 15 * 15) return true; } }
+          else if (b.done >= 0.6) { const h2 = b.size / 2 + 4; if (Math.abs(wx - b.x) < h2 && Math.abs(wy - b.y) < h2) return true; }
+        }
+      }
+      return false;
+    };
+    const goalMoved = !u.pathGoal || Math.hypot(u.pathGoal.x - tx, u.pathGoal.y - ty) > 48;
+    if (goalMoved || !u.path) {
+      if (!lineBlocked()) { // прямой путь свободен — идём прямо
+        u.path = undefined; u.pathGoal = { x: tx, y: ty };
+        return this.moveToward(u, tx, ty, dt, arrive);
+      }
+      // пере-прокладка не чаще раза в ~0.5с, когда цели нет
+      const now = this.time;
+      if (u.noPathT && now - u.noPathT < 0.5) return false;
+      const p = this.computePath(u.x, u.y, tx, ty, u.owner);
+      u.pathGoal = { x: tx, y: ty };
+      if (p && p.length) { u.path = p; u.noPathT = 0; u.stuckT = 0; }
+      else { u.path = undefined; u.noPathT = now; return this.moveToward(u, tx, ty, dt, arrive); } // не нашли — прём прямо
+    }
+    // идём по первому waypoint'у; пройденный — выкидываем
+    const wp = u.path[0];
+    const wdx = wp.x - u.x, wdy = wp.y - u.y;
+    const wd = Math.hypot(wdx, wdy);
+    if (wd < 8) { u.path.shift(); if (!u.path.length) { u.path = undefined; return false; } return false; }
+    const moved = !this.moveToward(u, wp.x, wp.y, dt, 6);
+    // детекция застревания (юнит у стены, но не продвигается) — перепроложить
+    if (moved) {
+      const lm = Math.hypot(u.x - (u.lastX ?? u.x), u.y - (u.lastY ?? u.y));
+      u.stuckT = u.stuckT ?? 0;
+      if (lm < u.speed * dt * 0.5) u.stuckT += dt; else u.stuckT = Math.max(0, u.stuckT - dt);
+      u.lastX = u.x; u.lastY = u.y;
+      if (u.stuckT > 0.7) { u.stuckT = 0; u.path = undefined; u.pathGoal = undefined; u.noPathT = 0; }
+    }
+    return false;
+  }
+
   updateVillager(u: Unit, dt: number) {
     // в покое и на марше рабочие кадры не показываем
     if (u.state === 'idle') { u.idleT += dt; u.wkind = undefined; return; }
-    if (u.state === 'move' || u.state === 'attackmove') { u.wkind = undefined; if (this.moveToward(u, u.tx, u.ty, dt)) u.state = 'idle'; return; }
+    if (u.state === 'move' || u.state === 'attackmove') { u.wkind = undefined; if (this.moveTowardPath(u, u.tx, u.ty, dt)) u.state = 'idle'; return; }
     if (u.state === 'build') {
       const b = this.blds.find(b => b.id === u.buildId);
       if (!b || b.done >= 1) { u.state = 'idle'; u.buildId = -1; u.wkind = undefined; return; }
-      const arrived = this.moveToward(u, u.tx, u.ty, dt, 10);
+      const arrived = this.moveTowardPath(u, u.tx, u.ty, dt, 10);
       if (arrived || dist2(u.x, u.y, b.x, b.y) < 95 * 95) {
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
         u.wkind = 'mine'; // стройка — удары инструментом (кирка/молоток)
@@ -2028,7 +2186,7 @@ export class Game {
       // farm?
       const fb = this.blds.find(b => b.id === u.buildId && b.key === 'farm');
       if (fb) {
-        if (dist2(u.x, u.y, fb.x, fb.y) > 60 * 60) { u.wkind = undefined; this.moveToward(u, u.tx, u.ty, dt); return; }
+        if (dist2(u.x, u.y, fb.x, fb.y) > 60 * 60) { u.wkind = undefined; this.moveTowardPath(u, u.tx, u.ty, dt); return; }
         u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
         u.wkind = 'gather'; // сбор урожая на ферме — кадр сбора фруктов
         const cyc = 0.55 / this.gatherMult();
@@ -2053,7 +2211,7 @@ export class Game {
         return;
       }
       const reach = n.r + 14;
-      if (dist2(u.x, u.y, n.x, n.y) > reach * reach) { u.wkind = undefined; this.moveToward(u, n.x, n.y, dt, reach * 0.7); return; }
+      if (dist2(u.x, u.y, n.x, n.y) > reach * reach) { u.wkind = undefined; this.moveTowardPath(u, n.x, n.y, dt, reach * 0.7); return; }
       // chopping
       if (Math.abs(n.x - u.x) > 4) u.face = n.x > u.x ? 1 : -1;
       // вид работы по типу ресурса: лес — топор, золото/руда — кирка, фрукты/ягоды — сбор
@@ -2093,7 +2251,7 @@ export class Game {
         }
         return;
       }
-      this.moveToward(u, tc.x + rand(-4, 4), tc.y + rand(-4, 4), dt, 80);
+      this.moveTowardPath(u, tc.x + rand(-4, 4), tc.y + rand(-4, 4), dt, 80);
     }
   }
 
@@ -2207,7 +2365,7 @@ export class Game {
           if (u.key === 'archer') u.aiming = true;
           if (u.cd <= 0) this.strike(u, tu, undefined);
         } else {
-          this.moveToward(u, tu.x, tu.y, dt, uRange * 0.7);
+          this.moveTowardPath(u, tu.x, tu.y, dt, uRange * 0.7);
         }
         return;
       }
@@ -2221,12 +2379,12 @@ export class Game {
         if (Math.abs(tb.x - u.x) > 4) u.face = tb.x > u.x ? 1 : -1;
         if (u.key === 'archer') u.aiming = true;
         if (u.cd <= 0) this.strike(u, undefined, tb);
-      } else this.moveToward(u, tb.x, tb.y, dt, edge);
+      } else this.moveTowardPath(u, tb.x, tb.y, dt, edge);
       return;
     }
     if (u.state === 'patrol') {
       // идём к текущей точке патруля; при прибытии — пауза и разворот
-      if (this.moveToward(u, u.tx, u.ty, dt, 14)) {
+      if (this.moveTowardPath(u, u.tx, u.ty, dt, 14)) {
         u.waitT += dt;
         if (u.waitT > 1.2) {
           u.waitT = 0;
@@ -2246,7 +2404,7 @@ export class Game {
     if (u.owner === 'neutral' && u.tribe && !u.targetU && u.targetB < 0) {
       if (dist2(u.x, u.y, u.homeX, u.homeY) > 120 * 120) {
         u.state = 'move'; u.tx = u.homeX; u.ty = u.homeY;
-        this.moveToward(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
+        this.moveTowardPath(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
         return;
       }
       u.state = 'idle';
@@ -2259,7 +2417,7 @@ export class Game {
           u.targetU = -1; u.targetB = -1; u.state = 'move'; u.tx = u.homeX; u.ty = u.homeY;
         }
       }
-      if (this.moveToward(u, u.tx, u.ty, dt)) {
+      if (this.moveTowardPath(u, u.tx, u.ty, dt)) {
         // разозлённый воин племени, догнавший точку, продолжает искать обидчика у лагеря
         if (u.tribe && u.aggro) {
           const f = this.acquireEnemy(u, 240);
@@ -2292,7 +2450,7 @@ export class Game {
   updateMonk(u: Unit, dt: number) {
     // добрался ли до точки движения
     if (u.state === 'move' || u.state === 'attackmove') {
-      if (this.moveToward(u, u.tx, u.ty, dt)) u.state = 'idle';
+      if (this.moveTowardPath(u, u.tx, u.ty, dt)) u.state = 'idle';
       // по пути тоже подлечиваем
     }
     u.cd -= dt;
@@ -2563,7 +2721,7 @@ export class Game {
           this.burst(b.x, b.y - 30, 24, ['#f6d47c', '#a16207', '#fff'], 140, 0.8);
           this.floater(b.x, b.y - 60, `${def.name}: готово!`, '#a3e635', 16);
           if (b.owner === 'player') {
-            this.sound.say('Сделаю в лучшем виде'); // рабочий рапортует о постройке
+            this.sound.playPhrase('сделаю в лучшем виде'); // рабочий рапортует о постройке
             for (const u of this.units) if (u.buildId === b.id && u.owner === 'player') { u.buildId = -1; u.state = 'idle'; }
             if (b.key === 'wonder') { // Чудо света достроено — отсчёт удержания до победы!
               this.wonderT = this.WONDER_HOLD;
@@ -3738,7 +3896,13 @@ export class Game {
     ctx.globalAlpha = alpha;
     ctx.imageSmoothingEnabled = false;
     const left = ix - w / 2, top = iy + S / 2 - h;
-    if (b.axis === 'x') {
+    // ВАЖНО: спрайт ВОРОТ «встроен» в стену, идущую по ДРУГОЙ изо-диагонали, чем
+    // спрайт сегмента стены (у ворот боковые пролёты перпендикулярны длинной оси
+    // стены). Поэтому ворота зеркалим ПО ПРОТИВОПОЛОЖНОМУ условию, иначе проёмы
+    // не стыкуются со стеной и та встаёт «не слитно».
+    const isGate = b.key === 'gate';
+    const flipX = isGate ? b.axis !== 'x' : b.axis === 'x';
+    if (flipX) {
       // вторая изо-диагональ — зеркалим спрайт по X относительно центра клетки
       ctx.translate(ix, 0);
       ctx.scale(-1, 1);

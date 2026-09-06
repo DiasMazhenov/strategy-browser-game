@@ -110,18 +110,25 @@ const TEX_URL: Partial<Record<HexKind, string>> = {
   sand: texSand, desert: texDesert, field: texField,
   forest: texForest, mountain: texMountain, hill: texHill,
 };
-// плотная подложка под текстуру (базовый цвет биома)
+// плотная подложка под текстуру (базовый цвет биома) — осветлена, чтобы земля
+// не выглядела тёмной и юниты на ней читались
 const BASE: Record<HexKind, string> = {
-  grass: '#5a8c42', dgrass: '#4a7c38', dirt: '#8a7048',
-  water: '#3a7fc0', deep: '#245a96', sand: '#d8c489', desert: '#d2ac5e',
-  field: '#a3ad4e', forest: '#3f6b2f', mountain: '#62606a', hill: '#7f8c52',
+  grass: '#6fa84f', dgrass: '#5e9442', dirt: '#9c8157',
+  water: '#4f93d4', deep: '#2f6bab', sand: '#e6d39a', desert: '#e0bd6f',
+  field: '#b8c25e', forest: '#52843c', mountain: '#7e7c88', hill: '#92a062',
 };
-// цвет тинта текстуры (null — без тинта); лёгкий, чтобы AI-текстура читалась
+// ОСВЕТЛЯЮЩИЙ тинт поверх AI-текстуры (мягкая светлая вуаль — земли стали ярче);
+// вода/глубина не трогаются. Тёмные тинты убраны — они «съедали» свет текстуры.
 const TINT: Partial<Record<HexKind, string>> = {
-  dgrass: 'rgba(40,90,30,0.28)',
-  forest: 'rgba(25,60,18,0.22)',
-  mountain: 'rgba(110,110,128,0.18)',
-  hill: 'rgba(110,120,65,0.16)',
+  grass: 'rgba(190,225,150,0.10)',
+  dgrass: 'rgba(170,215,135,0.08)',
+  dirt: 'rgba(230,205,160,0.10)',
+  sand: 'rgba(245,235,190,0.12)',
+  desert: 'rgba(240,220,160,0.10)',
+  field: 'rgba(220,230,150,0.10)',
+  forest: 'rgba(150,200,120,0.08)',
+  mountain: 'rgba(200,200,210,0.08)',
+  hill: 'rgba(190,205,140,0.08)',
 };
 
 const tileCache = new Map<string, HTMLCanvasElement>();
@@ -201,17 +208,18 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       g.restore();
     }
     // 4) процедурная детализация только для тайлов без AI-текстуры (тёмная трава dgrass)
+    //    осветлена: светлые вкрапления вместо тёмных пятен
     if (!url) {
       g.save();
       hexPath(g, TCX, TCY);
       g.clip();
-      g.fillStyle = 'rgba(20,50,16,0.35)';
+      g.fillStyle = 'rgba(255,255,210,0.10)';
       for (let i = 0; i < 8; i++) {
         const px = TCX + ((i * 17 + v) % 44) - 22;
         const py = TCY + ((i * 13 + (v >> 3)) % 36) - 18;
         g.fillRect(px, py, 2, 2);
       }
-      g.fillStyle = 'rgba(120,170,90,0.30)';
+      g.fillStyle = 'rgba(150,200,120,0.35)';
       for (let i = 0; i < 5; i++) {
         const px = TCX + ((i * 23 + v) % 40) - 20;
         const py = TCY + ((i * 11 + (v >> 4)) % 34) - 17;
@@ -228,14 +236,14 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       g.lineTo(TCX + p1[0], TCY + p1[1]);
       g.stroke();
     };
-    // ЗАДНИЕ рёбра (дальний гребень, обращены от камеры) — светлый кант
-    ridge(2, 3, 'rgba(255,255,230,0.22)', 1.2);
-    ridge(3, 4, 'rgba(255,255,230,0.22)', 1.2);
-    ridge(4, 5, 'rgba(255,255,230,0.12)', 1);
-    // ПЕРЕДНИЕ рёбра (обрыв к зрителю) — тень
-    ridge(0, 1, 'rgba(0,0,0,0.28)', 1.2);
-    ridge(1, 2, 'rgba(0,0,0,0.28)', 1.2);
-    ridge(5, 0, 'rgba(0,0,0,0.16)', 1);
+    // ЗАДНИЕ рёбра (дальний гребень) — светлый кант (ярче, чтобы земля читалась)
+    ridge(2, 3, 'rgba(255,255,235,0.30)', 1.2);
+    ridge(3, 4, 'rgba(255,255,235,0.30)', 1.2);
+    ridge(4, 5, 'rgba(255,255,235,0.18)', 1);
+    // ПЕРЕДНИЕ рёбра (обрыв к зрителю) — мягкая тень (ОСЛАБЛЕНА, земля стала светлее)
+    ridge(0, 1, 'rgba(30,40,20,0.16)', 1.2);
+    ridge(1, 2, 'rgba(30,40,20,0.16)', 1.2);
+    ridge(5, 0, 'rgba(30,40,20,0.10)', 1);
   });
   return tile;
 }
