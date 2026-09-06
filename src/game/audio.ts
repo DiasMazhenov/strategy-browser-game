@@ -24,6 +24,15 @@ const KZ_CLIPS: Record<string, string[]> = {
   'к бою':    ['kaz-voises/К бою - каз.mp3'],
   'за короля':['kaz-voises/За короля - каз.mp3', 'kaz-voises/За короля2 - каз.mp3'],
   'честь':    ['kaz-voises/Клянёмся честью - каз.mp3', 'kaz-voises/Клянёмся честью2 - каз.mp3'],
+  // ── казахские голоса РАБОЧИХ (подпапка worker-kaz) ──
+  'слушаю':   ['kaz-voises/worker-kaz/слушаю - kaz.mp3', 'kaz-voises/worker-kaz/слушаю2 - kaz.mp3'],
+  'чего изволите': ['kaz-voises/worker-kaz/Чего изволите - kaz.mp3'],
+  'за работу':     ['kaz-voises/worker-kaz/За работу - kaz.mp3'],
+  'добываю':       ['kaz-voises/worker-kaz/Добываю - kaz.mp3'],
+  'беремся за дело': ['kaz-voises/worker-kaz/Берёмся за дело - kaz.mp3'],
+  'сделаю в лучшем виде': ['kaz-voises/worker-kaz/Сделаю в лучшем виде - kaz.mp3'],
+  'сейчас сделаю': ['kaz-voises/worker-kaz/Сейчас сделаю - kaz.mp3'],
+  'отобьемся':     ['kaz-voises/worker-kaz/Отобьёмся - kaz.mp3'],
 };
 const KZ_CLIP_URLS: Record<string, string[]> = {};
 for (const [key, paths] of Object.entries(KZ_CLIPS)) {
@@ -34,7 +43,7 @@ for (const [key, paths] of Object.entries(KZ_CLIPS)) {
 }
 // казахские реплики по юнитам/событиям (ключи из KZ_CLIPS); пустой список → откат на русскую запись
 const KZ_PHRASES: Record<string, { select: string[]; move: string[]; attack: string[]; gather: string[] }> = {
-  villager:  { select: ['готов'], move: [], attack: [], gather: [] },
+  villager:  { select: ['слушаю', 'чего изволите'], move: ['сейчас сделаю', 'сделаю в лучшем виде'], attack: ['отобьемся'], gather: ['за работу', 'добываю', 'беремся за дело'] },
   swordsman: { select: ['готов', 'к бою'], move: ['вперед', 'к бою'], attack: ['в атаку', 'за короля'], gather: [] },
   spearman:  { select: ['к бою', 'готов'], move: ['вперед', 'к бою'], attack: ['в атаку', 'за короля'], gather: [] },
   archer:    { select: ['готов', 'к бою'], move: ['вперед'], attack: ['в атаку', 'за короля'], gather: [] },
