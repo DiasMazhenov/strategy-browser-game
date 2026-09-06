@@ -18,20 +18,34 @@ import imgBlacksmith from '../assets/sprites/blacksmith.png';
 import imgWall from '../assets/sprites/wall.png';
 import imgGate from '../assets/sprites/gate.png';
 import imgWallCorner from '../assets/sprites/wall_corner.png';
+// казахская раса (player): средневековая восточная архитектура, дома — юрты
+import kzImgTowncenter from '../assets/sprites/kz/kz_towncenter.png';
+import kzImgHouse from '../assets/sprites/kz/kz_house.png';
+import kzImgBarracks from '../assets/sprites/kz/kz_barracks.png';
+import kzImgTower from '../assets/sprites/kz/kz_tower.png';
+import kzImgFarm from '../assets/sprites/kz/kz_farm.png';
+import kzImgStable from '../assets/sprites/kz/kz_stable.png';
+import kzImgMarket from '../assets/sprites/kz/kz_market.png';
+import kzImgBlacksmith from '../assets/sprites/kz/kz_blacksmith.png';
 
 // ── Загрузка детальных AI-спрайтов зданий с автопосадкой на ромб клетки ──
 const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
   towncenter: imgTowncenter, house: imgHouse, barracks: imgBarracks, tower: imgTower, farm: imgFarm,
   stable: imgStable, market: imgMarket, blacksmith: imgBlacksmith, wall: imgWall, gate: imgGate,
 };
+// казахская раса игрока: восточные здания-замены (стены/ворота остаются общими)
+const KZ_SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
+  towncenter: kzImgTowncenter, house: kzImgHouse, barracks: kzImgBarracks, tower: kzImgTower, farm: kzImgFarm,
+  stable: kzImgStable, market: kzImgMarket, blacksmith: kzImgBlacksmith,
+};
 interface BldSprite { img: HTMLImageElement; flash: HTMLCanvasElement | null; ax: number; ay: number; baseW: number }
 const BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
-for (const k of Object.keys(SPRITE_URLS) as BuildingKey[]) {
-  const url = SPRITE_URLS[k];
-  if (!url) continue;
+const KZ_BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
+function loadBldSprite(anchorKey: string, url: string): BldSprite {
   const im = new Image();
   im.src = url;
-  const a = SPR_ANCHORS[k];
+  const a = SPR_ANCHORS[anchorKey];
+  const sp: BldSprite = { img: im, flash: null, ax: a?.ax ?? 0, ay: a?.ay ?? 0, baseW: a?.baseW ?? 100 };
   im.onload = () => {
     // красная версия для вспышки урона
     try {
@@ -42,14 +56,24 @@ for (const k of Object.keys(SPRITE_URLS) as BuildingKey[]) {
       c.globalCompositeOperation = 'source-atop';
       c.fillStyle = 'rgba(239,68,68,0.5)';
       c.fillRect(0, 0, cv.width, cv.height);
-      (BLD_SPRITES[k] as BldSprite).flash = cv;
+      sp.flash = cv;
     } catch { /* ignore */ }
   };
-  BLD_SPRITES[k] = { img: im, flash: null, ax: a?.ax ?? 0, ay: a?.ay ?? 0, baseW: a?.baseW ?? 100 };
+  return sp;
 }
-// посадка: рисуем спрайт так, чтобы его фундамент лёг на ромб клетки (2S×S изо)
-function placeBld(k: BuildingKey, S: number) {
-  const sp = BLD_SPRITES[k]!;
+for (const k of Object.keys(SPRITE_URLS) as BuildingKey[]) {
+  const url = SPRITE_URLS[k];
+  if (url) BLD_SPRITES[k] = loadBldSprite(k, url);
+}
+for (const k of Object.keys(KZ_SPRITE_URLS) as BuildingKey[]) {
+  const url = KZ_SPRITE_URLS[k];
+  if (url) KZ_BLD_SPRITES[k] = loadBldSprite(`kz_${k}`, url);
+}
+// посадка: рисуем спрайт так, чтобы его фундамент лёг на ромб клетки (2S×S изо).
+// игрок (казахская раса) получает восточные здания, прочие — штатные.
+function placeBld(b: Bld, S: number) {
+  const kz = b.owner === 'player' && KZ_BLD_SPRITES[b.key];
+  const sp = (kz ? KZ_BLD_SPRITES[b.key]! : BLD_SPRITES[b.key]!) || BLD_SPRITES[b.key]!;
   const fit = 1.02;
   const scale = (2 * S * fit) / sp.baseW;
   return sp.img.complete && sp.img.naturalWidth ? { sp, scale, ready: true } : { sp, scale, ready: false };
@@ -3602,7 +3626,7 @@ export class Game {
     // Чудо света рисуется процедурно (золотой монумент)
     if (b.key === 'wonder') { this.drawWonder(b, ix, iy, selected); return; }
 
-    const { sp, scale, ready } = placeBld(b.key, S);
+    const { sp, scale, ready } = placeBld(b, S);
 
     // контактная тень-ромб на земле (точно по фундаменту)
     ctx.fillStyle = 'rgba(8,14,8,0.30)';

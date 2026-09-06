@@ -3,6 +3,15 @@
 // Юниты: ax — центр по X, ay — низ (ноги); w,h — размеры.
 export interface SprAnchor { ax: number; ay: number; baseW: number; w: number; h: number }
 export const SPR_ANCHORS: Record<string, SprAnchor> = {
+  // ── казахская раса (восточная средневековая архитектура, владелец player) ──
+  "kz_towncenter": { "ax": 153,   "ay": 215, "baseW": 307, "w": 307, "h": 217 },
+  "kz_house":       { "ax": 173,   "ay": 298, "baseW": 347, "w": 347, "h": 300 },
+  "kz_barracks":    { "ax": 181.5, "ay": 248, "baseW": 362, "w": 364, "h": 249 },
+  "kz_tower":       { "ax": 78.5,  "ay": 361, "baseW": 152, "w": 155, "h": 362 },
+  "kz_farm":        { "ax": 191.5, "ay": 204, "baseW": 368, "w": 380, "h": 205 },
+  "kz_stable":      { "ax": 189,   "ay": 217, "baseW": 377, "w": 379, "h": 218 },
+  "kz_market":      { "ax": 179.5, "ay": 247, "baseW": 360, "w": 360, "h": 248 },
+  "kz_blacksmith":  { "ax": 184.5, "ay": 315, "baseW": 370, "w": 370, "h": 317 },
   "towncenter": {
     "ax": 164,
     "ay": 379,
