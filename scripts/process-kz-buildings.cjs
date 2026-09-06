@@ -74,8 +74,12 @@ function process(key) {
   // magenta/пурпур фона (включая тёмно-пурпурный ромб-подложку и кайму): R и B высокие и близкие, G заметно ниже
   const isMag = (c) => { const mn = Math.min(c[0], c[2]); return c[0] > 60 && c[2] > 70 && c[1] < mn - 22 && Math.abs(c[0] - c[2]) < 70; };
   const isPurp = (c) => { const mn = Math.min(c[0], c[2]); return c[0] > 12 && c[2] > 12 && c[1] < mn - 12 && Math.abs(c[0] - c[2]) < 45; };
-  // маска фона (magenta) flood-fill от краёв
-  const bg = new Uint8Array(W * H); const stack = [];
+  const isHotMag = (c) => c[0] > 140 && c[2] > 140 && c[1] < 115 && Math.abs(c[0] - c[2]) < 55;
+  // маска фона (magenta): сначала глобально вырезаем яркую заливку, застрявшую внутри силуэта (двор/ниша)
+  const bg = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) { if (isHotMag(px(i % W, (i / W) | 0))) bg[i] = 1; }
+  // затем flood-fill от краёв для остальной magenta/пурпурной подложки
+  const stack = [];
   const push = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const i = y * W + x; if (!bg[i] && isMag(px(x, y))) { bg[i] = 1; stack.push(i); } };
   for (let x = 0; x < W; x += 2) { push(x, 0); push(x, H - 1); }
   for (let y = 0; y < H; y += 2) { push(0, y); push(W - 1, y); }
@@ -144,8 +148,11 @@ function process(key) {
       const c = px(x0 + sx, y0 + sy); out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; out[o + 3] = 255;
     }
   }
-  // чистка пурпурной каймы: 3 прохода эрозии — пурпурный пиксель рядом с прозрачным удаляется (внутренние фиолетовые детали не трогаем)
   const cbuf = (i) => [out[i * 4], out[i * 4 + 1], out[i * 4 + 2], out[i * 4 + 3]];
+  // глобально вырезаем ЯРКУЮ magenta, застрявшую внутри силуэта (залитый фоном двор/ниша) — такого цвета в постройках нет
+  for (let i = 0; i < dw * dh; i++) { const o = i * 4; if (out[o + 3] === 0) continue;
+    if (isHotMag([out[o], out[o + 1], out[o + 2]])) out[o + 3] = 0; }
+  // чистка пурпурной каймы: 3 прохода эрозии — пурпурный пиксель рядом с прозрачным удаляется (внутренние фиолетовые детали не трогаем)
   for (let pass = 0; pass < 3; pass++) {
     const kill = new Uint8Array(dw * dh);
     for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) {
@@ -159,6 +166,20 @@ function process(key) {
       if (nearBg) kill[i] = 1;
     }
     for (let i = 0; i < dw * dh; i++) if (kill[i]) out[i * 4 + 3] = 0;
+  }
+  // финальная чистка пыли: удаляем мелкие оторванные непрозрачные компоненты (<8 px) на выводе
+  {
+    const seen2 = new Uint8Array(dw * dh), dust = new Uint8Array(dw * dh);
+    for (let i = 0; i < dw * dh; i++) {
+      if (out[i * 4 + 3] === 0 || seen2[i]) continue;
+      const comp = []; const qq = [i]; seen2[i] = 1;
+      while (qq.length) { const j = qq.pop(); comp.push(j); const cx = j % dw, cy = (j / dw) | 0;
+        for (const [ddx, ddy] of [[1,0],[-1,0],[0,1],[0,-1]]) { const nx = cx + ddx, ny = cy + ddy;
+          if (nx < 0 || ny < 0 || nx >= dw || ny >= dh) continue; const k = ny * dw + nx;
+          if (!seen2[k] && out[k * 4 + 3] !== 0) { seen2[k] = 1; qq.push(k); } } }
+      if (comp.length < 8) for (const j of comp) dust[j] = 1;
+    }
+    for (let i = 0; i < dw * dh; i++) if (dust[i]) out[i * 4 + 3] = 0;
   }
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, `kz_${key}.png`), encodePNG(dw, dh, out));
