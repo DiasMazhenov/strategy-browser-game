@@ -1,11 +1,11 @@
 import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
-import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries,
+import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
   getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
   HEX_PTS, TCX, TCY,
   type HexKind,
   TILE_STEP } from './iso';
-import { Terrain } from './terrain';
+import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import imgTowncenter from '../assets/sprites/towncenter.png';
@@ -195,7 +195,7 @@ interface Bld {
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
 }
-interface Node { id: number; kind: 'wood' | 'gold' | 'food'; x: number; y: number; amount: number; max: number; r: number; phase: number }
+interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
 interface Proj { x: number; y: number; vx: number; vy: number; tx: number; ty: number; targetU: number; targetB: number; dmg: number; owner: 'player' | 'enemy' | 'neutral'; life: number; kind: 'arrow' | 'bolt' | 'rock'; srcU?: number; }
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; shape: 'rect' | 'circle' | 'spark'; rot: number; vr: number }
@@ -233,6 +233,7 @@ export interface HudSnapshot {
   dmgFlash: number; ageAfford: boolean; ageCost: string;
   hint: string;
   atWar: boolean; grievance: number; casusBelli: number; morale: number;
+  tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   playerPow: number; enemyPow: number; wonderT: number; wonderHold: number;
   techTree: TechTreeRow[];
 }
@@ -240,8 +241,9 @@ export interface HudSnapshot {
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => v < a ? a : v > b ? b : v;
 const dist2 = (ax: number, ay: number, bx: number, by: number) => { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
-// высота одной ступени рельефа в экранных iso-px (плитки поднимаются лесенкой)
-const RELIEF_STEP = 10;
+// высота одной ступени рельефа в экранных iso-px (плитки поднимаются лесенкой).
+// Максимум 30 ступеней → ~150px на пике (шаг 5): горы заметно возвышаются, но не улетают.
+const RELIEF_STEP = 5;
 
 export class Game {
   canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
@@ -289,6 +291,13 @@ export class Game {
   peaceT = 0;                    // время с прошлой войны (для требований мира)
   dipTimer = 0;                  // накопитель пересчёта
   morale = 1;                    // боевой дух армии ИИ (штраф за несправедливую войну)
+  // ── расширенная дипломатия ──
+  tradeRoute = false;            // действующий торговый договор с соседом
+  tradeT = 0;                    // таймер начисления дохода с торговли
+  napT = 0;                      // оставшееся время пакта о ненападении (сек)
+  condemned = false;             // игрок публично ОСУДИЛ соседа (готов почву к войне)
+  tributeT = 0;                  // время, оставшееся до выплаты дани соседом (сек, 0 = нет дани)
+  tributeGold = 0;               // размер периодической дани
   wonderT = 0;                   // таймер удержания Чуда света (0 = нет активного Чуда)
   readonly WONDER_HOLD = 180;    // сколько секунд нужно удержать Чудо до победы
   raf = 0; last = 0; hudT = 0; aiT = 0; hintT = 0;
@@ -383,8 +392,8 @@ export class Game {
     return b;
   }
 
-  addNode(kind: 'wood' | 'gold' | 'food', x: number, y: number, amount: number): Node {
-    const n: Node = { id: this.nextId++, kind, x, y, amount, max: amount, r: kind === 'wood' ? 20 : 24, phase: rand(0, 9) };
+  addNode(kind: 'wood' | 'gold' | 'food' | 'fish', x: number, y: number, amount: number): Node {
+    const n: Node = { id: this.nextId++, kind, x, y, amount, max: amount, r: kind === 'wood' ? 20 : kind === 'fish' ? 18 : 24, phase: rand(0, 9) };
     this.nodes.push(n);
     return n;
   }
@@ -444,9 +453,50 @@ export class Game {
     }
     this.addUnit('swordsman', 'enemy', E.x - 120, E.y + 40);
     this.addUnit('swordsman', 'enemy', E.x - 150, E.y - 20);
+    // ── РАВНОУДАЛЁННЫЕ базы нейтральных племён: детерминированная сетка по всему
+    // миру (с лёгким джиттером), отсечённая по суше/расстоянию от стартов. Карта
+    // огромная — лагерей много, но они разнесены примерно на одинаковый шаг ──
+    this.planTribeCamps();
     // пред-генерим чанки вокруг стартов и на линии к сопернику — мир сразу живой
     this.ensureChunks(P.x, P.y, 2);
     this.ensureChunks(E.x, E.y, 1);
+  }
+
+  // равномерная раскладка лагерей племён по сетке (узлы гексагональной решётки,
+  // чтобы расстояния были максимально равными), каждый узел джиттерится детерм.
+  private planTribeCamps() {
+    const STEP = 1500;          // расстояние между соседними лагерями
+    // аксиальная сетка узлов (как гексы) поверх мира — равные расстояния по 6 осям
+    const rowH = STEP * Math.sqrt(3) / 2; // вертикальный шаг рядов
+    let placed = 0;
+    for (let row = -12; row <= 12; row++) {
+      for (let col = -12; col <= 12; col++) {
+        // базовый центр узла в мире (центр мира — середина WORLD)
+        let bx = WORLD.w / 2 + col * STEP * 1.5;
+        let by = WORLD.h / 2 + row * rowH + (col % 2 ? rowH / 2 : 0);
+        // детерминированный джиттер узла (по его индексам)
+        const h = ((col * 73856093) ^ (row * 19349663) ^ (this.terrain.seed * 83492791)) >>> 0;
+        const rng = mulberry32Like(h);
+        bx += (rng() - 0.5) * STEP * 0.5;
+        by += (rng() - 0.5) * STEP * 0.5;
+        // не за краями
+        if (bx < 300 || by < 300 || bx > WORLD.w - 300 || by > WORLD.h - 300) continue;
+        // не вплотную к стартовым базам
+        if (dist2(bx, by, HOME.x, HOME.y) < (STEP * 0.85) ** 2) continue;
+        if (dist2(bx, by, RIVAL.x, RIVAL.y) < (STEP * 0.85) ** 2) continue;
+        // ищем ровную сушу рядом с узлом (несколько попыток вокруг)
+        let spot: [number, number] | null = null;
+        for (let t = 0; t < 10; t++) {
+          const a = rng() * Math.PI * 2, rad = t === 0 ? 0 : 120 + rng() * 320;
+          const tx = bx + Math.cos(a) * rad, ty = by + Math.sin(a) * rad;
+          if (this.terrain.isBuildable(tx, ty)
+            && !this.blds.some(b => dist2(b.x, b.y, tx, ty) < 500 * 500)) { spot = [tx, ty]; break; }
+        }
+        if (!spot) continue;
+        this.spawnTribeCamp(spot[0], spot[1], rng);
+        placed++;
+      }
+    }
   }
 
   // ── чанковая генерация контента ──
@@ -484,7 +534,6 @@ export class Game {
     // рядом со стартовыми базами чанк «зарезервирован» — контент там уже стоит вручную
     if (distHome < C * 0.9) return;
     const land = (x: number, y: number) => this.terrain.isLand(x, y);
-    const buildable = (x: number, y: number) => this.terrain.isBuildable(x, y);
     const biomeAt = (x: number, y: number) => this.terrain.classAt(x, y);
 
     // деревья: лесные биомы — густо, прочая суша — редкие рощицы
@@ -516,6 +565,29 @@ export class Game {
       const p = this.chunkPoint(cx, cz, rng, (x, y) => { const b = biomeAt(x, y); return b === 'field' || b === 'grass' || b === 'forest'; });
       if (p) this.addNode('food', p[0] + (rng() - 0.5) * 80, p[1] + (rng() - 0.5) * 80, 550);
     }
+    // рыбалка (как в AoE): косяки рыбы на МЕЛКОЙ воде у берега — рабочий стоит на
+    // суше/мелководье и «собирает» еду. Ищем воду, рядом с которой есть суша.
+    if (rng() < 0.55) {
+      const shoreWater = (x: number, y: number) => {
+        const b = biomeAt(x, y);
+        if (b !== 'water') return false;
+        // рядом в радиусе ~90 есть суша (куда встать рабочему)?
+        for (let a = 0; a < 8; a++) {
+          const ang = (a / 8) * Math.PI * 2;
+          if (land(x + Math.cos(ang) * 90, y + Math.sin(ang) * 90)) return true;
+        }
+        return false;
+      };
+      const p = this.chunkPoint(cx, cz, rng, shoreWater);
+      if (p) {
+        // 1–3 косяка в этом прибрежном чанке
+        const schools = 1 + ((rng() * 2) | 0);
+        for (let i = 0; i < schools; i++) {
+          const fx = p[0] + (rng() - 0.5) * 180, fy = p[1] + (rng() - 0.5) * 180;
+          if (biomeAt(fx, fy) === 'water') this.addNode('fish', fx, fy, 600);
+        }
+      }
+    }
     // дикие животные: стаи на суше
     const spawnPack = (kind: UnitKey, prob: number, size: [number, number]) => {
       if (rng() > prob) return;
@@ -540,12 +612,7 @@ export class Game {
       this.decor.push({ x, y, k: (rng() * 3) | 0, s: 2 + rng() * 3, c: cols[(rng() * cols.length) | 0] });
     }
 
-    // нейтральное племя: лагерь достаточно далеко от стартов, на ровной суше
-    if (distHome > C * 3.2 && rng() < 0.10) {
-      const cp = this.chunkPoint(cx, cz, rng, (x, y) => buildable(x, y)
-        && dist2(x, y, HOME.x, HOME.y) > (C * 3) ** 2 && dist2(x, y, RIVAL.x, RIVAL.y) > (C * 3) ** 2);
-      if (cp) this.spawnTribeCamp(cp[0], cp[1], rng);
-    }
+    // нейтральные племена планируются централизованно (planTribeCamps) — здесь не спавним.
     // редкая реликвия
     if (rng() < 0.06) {
       const p = this.chunkPoint(cx, cz, rng, land);
@@ -895,11 +962,10 @@ export class Game {
 
   minimapJump(px: number, py: number) {
     const { x, y, w, h } = this.minimap;
-    // региональная миникарта: центр = камера, смещение по доле карты
-    const fx = (px - x) / w - 0.5, fy = (py - y) / h - 0.5;
-    const RANGE = 4200;
-    this.cam.x = this.cam.x + fx * RANGE * 2;
-    this.cam.y = this.cam.y + fy * RANGE * 2;
+    // МИРОВАЯ миникарта: точка на карте = мировой координате (не смещение от камеры)
+    const fx = clamp((px - x) / w, 0, 1), fy = clamp((py - y) / h, 0, 1);
+    this.cam.x = fx * WORLD.w;
+    this.cam.y = fy * WORLD.h;
     this.clampCam();
   }
 
@@ -1077,7 +1143,7 @@ export class Game {
     if (v.carry.amt > 0 && v.carry.type !== n.kind) this.deposit(v);
     v.state = 'gather'; v.nodeId = nodeId; v.buildId = -1; v.targetU = -1; v.targetB = -1;
     v.tx = n.x + rand(-8, 8); v.ty = n.y + rand(-8, 8);
-    v.carry.type = n.kind;
+    v.carry.type = n.kind === 'fish' ? 'food' : n.kind;
   }
 
   orderAttack(us: Unit[], target: Unit) {
@@ -1260,9 +1326,10 @@ export class Game {
       cam: this.cam, tech: this.tech, questsDone: this.questsDone,
       units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0 })),
       blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null })),
-      nodes: this.nodes.map(n => ({ kind: n.kind, x: n.x, y: n.y, amount: n.amount, r: n.r })),
+      nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       relicsHeld: this.relicsHeld,
-      dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT },
+      dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
+        tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT },
     };
     return JSON.stringify(data);
   }
@@ -1299,7 +1366,7 @@ export class Game {
         if ((bd.key === 'wall' || bd.key === 'gate') && bd.axis) b.axis = bd.axis;
         bMap.set(i, b.id);
       });
-      (d.nodes || []).forEach((nd: { kind: 'wood'|'gold'|'food'; x: number; y: number; amount: number; r: number }) => this.addNode(nd.kind, nd.x, nd.y, nd.amount));
+      (d.nodes || []).forEach((nd: { kind: 'wood'|'gold'|'food'|'fish'; x: number; y: number; amount: number; r: number }) => this.addNode(nd.kind, nd.x, nd.y, nd.amount));
       // цели не сохраняем — юниты перенацелятся сами; декор оставляем от genWorld
       void uMap; void bMap;
       this.time = d.time || 0; this.age = d.age || 0; this.eage = d.eage || 0;
@@ -1312,7 +1379,8 @@ export class Game {
       // восстановить взятые реликвии как убранные с карты
       if (this.relicsHeld > 0) for (let i = 0; i < Math.min(this.relics.length, this.relicsHeld); i++) this.relics[i].taken = true;
       this.tech = d.tech || {}; this.questsDone = d.questsDone || {};
-      if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0; }
+      if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
+        this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
       return true;
@@ -1659,12 +1727,21 @@ export class Game {
     if (n) { this.sound.move(); this.voiceSel('gather'); this.floater(this.cam.x, this.cam.y - 80, `${n} крестьян отправлено на работу!`, '#a3e635', 17); }
     this.pushHud();
   }
-  nearestNode(x: number, y: number, kind: 'wood' | 'food' | 'gold'): Node | null {
+  nearestNode(x: number, y: number, kind: 'wood' | 'food' | 'gold' | 'fish'): Node | null {
     let best: Node | null = null; let bd = 1e12;
     for (const n of this.nodes) { if (n.kind !== kind || n.amount <= 0) continue; const d = dist2(x, y, n.x, n.y); if (d < bd) { bd = d; best = n; } }
     return best;
   }
   centerTC() { const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter'); if (tc) this.centerOn(tc.x, tc.y); }
+  // камера к центру группы выделенных юнитов (кнопка «к выделению»)
+  focusSelection() {
+    const us = this.selUnits();
+    if (!us.length) { this.floater(this.cam.x, this.cam.y - 80, 'Никого не выбрано', '#94a3b8', 13); return; }
+    let x = 0, y = 0;
+    for (const u of us) { x += u.x; y += u.y; }
+    this.centerOn(x / us.length, y / us.length);
+    this.sound.select();
+  }
 
   // циклический прыжок по свободным крестьянам (как клавиша «.» в AoE)
   jumpToIdleVillager() {
@@ -2226,8 +2303,9 @@ export class Game {
         u.carry.amt += take;
         if (n.kind === 'wood') { this.burst(n.x + rand(-10, 10), n.y - 6, 3, ['#a16207', '#65a30d', '#d6a45c'], 80, 0.55); if (Math.random() < 0.5) this.sound.chop(); }
         else if (n.kind === 'gold') { this.burst(n.x, n.y - 8, 3, ['#fde047', '#facc15', '#fff'], 70, 0.5); this.spark(n.x, n.y - 10, '#fef08a'); if (Math.random() < 0.4) this.sound.mine(); }
+        else if (n.kind === 'fish') { this.burst(n.x, n.y - 2, 4, ['#7dd3fc', '#38bdf8', '#e0f2fe'], 70, 0.5); if (Math.random() < 0.3) this.sound.gatherFood(); }
         else { this.burst(n.x, n.y - 6, 3, ['#f472b6', '#fb7185', '#a3e635'], 60, 0.5); if (Math.random() < 0.3) this.sound.gatherFood(); }
-        if (n.amount <= 0) { this.burst(n.x, n.y, 14, n.kind === 'wood' ? ['#65a30d', '#3f6212'] : n.kind === 'gold' ? ['#facc15'] : ['#fb7185'], 110, 0.7); }
+        if (n.amount <= 0) { this.burst(n.x, n.y, 14, n.kind === 'wood' ? ['#65a30d', '#3f6212'] : n.kind === 'gold' ? ['#facc15'] : n.kind === 'fish' ? ['#7dd3fc','#38bdf8'] : ['#fb7185'], 110, 0.7); }
         if (u.carry.amt >= this.carryCap()) { u.state = 'return'; this.sendToDrop(u); }
       }
       return;
@@ -2575,8 +2653,10 @@ export class Game {
       if (tu) this.damageUnit(tu, dmg, att);
       if (tb) this.damageBld(tb, dmg, att.owner);
       this.sound.sword();
-      // батальный шум рукопашной — с рандомного места длинной записи
-      this.sound.battleClash();
+      // батальный шум рукопашной — ТОЛЬКО против разумных юнитов (воины/войска/племя),
+      // не против зверей (волки/скот/дичь): охота на животных звучит иначе
+      const vsAnimal = tu && tu.owner === 'neutral' && !tu.tribe;
+      if (!vsAnimal) this.sound.battleClash();
       const hx = tu ? tu.x : tb ? tb.x : att.x + att.face * 20, hy = (tu ? tu.y : tb ? tb.y : att.y) - 10;
       this.burst(hx, hy, 4, ['#fecaca', '#fff', '#f87171'], 90, 0.4);
     }
@@ -2787,7 +2867,7 @@ export class Game {
             const rallyN = b.rallyNode >= 0 ? this.nodes.find(n => n.id === b.rallyNode) : undefined;
             if (owner === 'player' && q.key === 'villager' && rallyN && rallyN.amount > 0) {
               u.state = 'gather'; u.nodeId = rallyN.id; u.buildId = -1;
-              u.tx = rallyN.x; u.ty = rallyN.y; u.carry.type = rallyN.kind; u.gatherT = 0;
+              u.tx = rallyN.x; u.ty = rallyN.y; u.carry.type = rallyN.kind === 'fish' ? 'food' : rallyN.kind; u.gatherT = 0;
             } else {
               u.tx = b.rallyX; u.ty = b.rallyY; u.state = 'move';
             }
@@ -2931,6 +3011,8 @@ export class Game {
       // война без оправдания → боевой дух армии ИИ слабеет (усталость + несправедливость)
       this.morale = 0.72 + 0.4 * this.casusBelli - Math.min(0.18, this.warT * 0.004);
       this.morale = Math.max(0.55, Math.min(1.15, this.morale));
+      // во время войны торговля/дань/пакт заморожены
+      this.tradeRoute = false; this.tributeT = 0;
       // если войну объявили незаслуженно, а мы слабее — ИИ готов к миру
       if (this.warT > 45 && this.casusBelli < 0.4 && em < pm * 1.15) {
         this.sueForPeace(true);
@@ -2938,8 +3020,35 @@ export class Game {
       return;
     }
 
-    // ── МИР: копим неприязнь ──
+    // ── МИР: таймеры дипломатии ──
     this.peaceT += 5;
+    // пакт о ненападении отсчитывает время
+    if (this.napT > 0) this.napT = Math.max(0, this.napT - 5);
+    // торговый договор: пассивный доход обеим сторонам (золото), лёгкое потепление
+    if (this.tradeRoute) {
+      this.tradeT += 5;
+      if (this.tradeT >= 8) {
+        this.tradeT -= 8;
+        this.res.gold += 6;
+        this.eres.gold += 4;
+        if (Math.random() < 0.5) this.sound.coin();
+        // торговля медленно снижает неприязнь
+        this.grievance = Math.max(0, this.grievance - 1.2);
+      }
+    }
+    // дань с соседа: сильный игрок собирает золото, сосед злится
+    if (this.tributeT > 0) {
+      this.tributeT -= 5;
+      if (this.tributeT <= 0) {
+        this.tributeT = 0;
+        this.res.gold += this.tributeGold;
+        this.floater(this.cam.x, this.cam.y - 110, `💰 Дань: +${this.tributeGold}🪙`, '#fde047', 16, true);
+        this.sound.coin();
+        // унижение данью копит неприязнь (повод для будущей войны)
+        this.grievance = Math.min(100, this.grievance + 6);
+        this.casusBelli = Math.max(this.casusBelli, 0.35);
+      }
+    }
     const diff = DIFF[this.difficulty];
     let g = 0;
     // соперник не любит сильных соседей
@@ -2952,7 +3061,7 @@ export class Game {
     // воинственность игрока: много армии при слабом противнике
     const army = this.units.filter(u => u.owner === 'player' && u.key !== 'villager' && u.key !== 'wolf').length;
     if (army > 24) g += diff.aiAggression * 0.4;
-    // лёгкий фоновый дрейф с течением времени
+    // лёгкий фоновый дрейф с течением времени (торговля гасит неприязнь — уже учтена выше)
     g += 0.25 + diff.aiAggression * 0.15;
     this.grievance = Math.min(100, this.grievance + g);
 
@@ -2961,9 +3070,13 @@ export class Game {
     if (pm > em * 1.6) this.casusBelli = Math.max(this.casusBelli, 0.75);
     if (wonder) this.casusBelli = Math.max(this.casusBelli, 1.0);
     if (this.peaceT > 260) this.casusBelli = Math.min(1, this.casusBelli + 0.08); // «старые счёты»
+    // ОСУЖДЕНИЕ игрока: сосед копит обиду, но публичное порицание лишает его «чистого
+    // повода» — casus belli режется вдвое (его агрессия выглядит безосновательной)
+    if (this.condemned) this.casusBelli = Math.min(this.casusBelli, 0.5);
 
-    // объявление войны: высокая неприязнь + достаточно повода + мы не сильно слабее
-    const wantsWar = this.grievance >= 62 && this.casusBelli >= 0.5 && em >= pm * 0.7;
+    // объявление войны: высокая неприязнь + достаточно повода + мы не сильно слабее.
+    // Пакт о ненападении полностью запрещает ИИ объявлять войну, пока действует.
+    const wantsWar = this.napT <= 0 && this.grievance >= 62 && this.casusBelli >= 0.5 && em >= pm * 0.7;
     if (wantsWar) {
       let reason = 'вам объявили войну';
       if (wonder) reason = 'ваше Чудо света угрожает их господству';
@@ -2978,6 +3091,9 @@ export class Game {
   declareWar(reason: string, cb: number) {
     if (this.over) return;
     this.atWar = true;
+    // пакт о ненападении нарушен — у стороны-жертвы полное право на войну,
+    // торговля и дань прекращаются
+    this.tradeRoute = false; this.tributeT = 0;
     this.casusBelli = cb;
     this.warT = 0;
     // боевой дух: при справедливой причине армия ИИ сильнее, при надуманной — слабее
@@ -3009,6 +3125,68 @@ export class Game {
     return true;
   }
 
+  // ── ТОРГОВЫЙ ДОГОВОР между городами: пассивное золото + медленное потепление ──
+  openTradeRoute(): boolean {
+    if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Нельзя торговать во время войны', '#f87171', 15); this.sound.error(); return false; }
+    if (this.tradeRoute) { this.floater(this.cam.x, this.cam.y - 100, 'Торговля уже идёт', '#94a3b8', 14); return false; }
+    if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен Рынок для торговли!', '#f87171', 15); this.sound.error(); return false; }
+    const cost = 60;
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙 на караван`, '#f87171', 15); this.sound.error(); return false; }
+    this.res.gold -= cost;
+    this.tradeRoute = true; this.tradeT = 0;
+    this.grievance = Math.max(0, this.grievance - 10);
+    this.sound.coin();
+    this.pushBanner('🐪 Торговый договор заключён', 'Караваны ходят между городами: пассивное золото обеим сторонам и рост доверия', 4);
+    this.pushHud();
+    return true;
+  }
+
+  // ── ПАКТ О НЕНАПАДЕНИИ: ИИ не объявляет войну, пока действует; нарушение = большой повод у игрока ──
+  signNAP(): boolean {
+    if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Сначала заключите мир', '#f87171', 15); this.sound.error(); return false; }
+    if (this.napT > 0) { this.floater(this.cam.x, this.cam.y - 100, `Пакт действует ещё ${Math.ceil(this.napT)}с`, '#94a3b8', 14); return false; }
+    const cost = 120;
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙 на посольство`, '#f87171', 15); this.sound.error(); return false; }
+    this.res.gold -= cost;
+    this.napT = 120; // 2 минуты гарантированного мира
+    this.grievance = Math.max(0, this.grievance - 6);
+    this.sound.quest();
+    this.pushBanner('📜 Пакт о ненападении подписан', 'Сосед не нападёт ~2 минуты. Если он всё же нарушит слово — у вас будет полное право на войну', 4.5);
+    this.pushHud();
+    return true;
+  }
+
+  // ── ОСУДИТЬ соседа: публичное порицание. Лишает ИИ «чистого повода» (его будущая
+  //    агрессия несправедлива → низкий боевой дух), но слегка поднимает неприязнь ──
+  condemnNeighbor(): boolean {
+    if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Осуждение имеет смысл в мирное время', '#94a3b8', 14); return false; }
+    if (this.condemned) { this.floater(this.cam.x, this.cam.y - 100, 'Сосед уже осуждён', '#94a3b8', 14); return false; }
+    this.condemned = true;
+    this.grievance = Math.min(100, this.grievance + 12);
+    this.casusBelli = Math.min(this.casusBelli, 0.5);
+    this.sound.ack('soldier');
+    this.pushBanner('📢 Сосед ОСУЖДЁН', 'Ваше порицание озвучено публично: теперь у соседа нет «чистого повода» для войны (его атака будет вероломной → низкий боевой дух), но он раздражён', 4.5);
+    this.pushHud();
+    return true;
+  }
+
+  // ── ПОТРЕБОВАТЬ ДАНЬ: сильная империя выжимает золото у соседа (сразу + со временем).
+  //    Доступно при военном превосходстве; унижение копит обиду соседа ──
+  demandTribute(): boolean {
+    if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Дань требуют с позиции силы в мирное время', '#94a3b8', 14); return false; }
+    const pm = this.milStrength('player'), em = this.milStrength('enemy');
+    if (pm < em * 1.25) { this.floater(this.cam.x, this.cam.y - 100, 'Сосед не считает вас сильнее — наберите армию', '#f87171', 15); this.sound.error(); return false; }
+    const immediate = 80 + Math.min(120, Math.round((pm - em) / 25));
+    this.res.gold += immediate;
+    this.tributeT = 30; this.tributeGold = Math.round(immediate * 0.6);
+    this.grievance = Math.min(100, this.grievance + 14);
+    this.casusBelli = Math.max(this.casusBelli, 0.4);
+    this.sound.coin();
+    this.pushBanner('💰 Дань получена', `Сосед выплачивает +${immediate}🪙 сразу и будет платить ещё. Но унижение не забыто — копится обида`, 4);
+    this.pushHud();
+    return true;
+  }
+
   // заключить мир (по кнопке игрока, платно; или авто, когда ИИ несправедлив и слаб)
   sueForPeace(auto = false) {
     if (this.over || !this.atWar) return false;
@@ -3021,6 +3199,8 @@ export class Game {
     this.grievance = Math.max(8, this.grievance - 45);
     this.casusBelli = 0;
     this.morale = 1;
+    // мир обнуляет взаимные претензии: осуждение снимается, пакт/дань/торговля сброшены
+    this.condemned = false; this.napT = 0; this.tributeT = 0; this.tradeRoute = false;
     this.sound.quest();
     this.pushBanner('🕊️ Мир заключён', auto ? 'Соперник сам предложил мир — война была несправедливой' : 'Переговоры успешны — у вас снова мир', 4);
     // вражеские войска возвращаются к обороне
@@ -3187,6 +3367,8 @@ export class Game {
       ageCost: next?.cost ? `${next.cost.food}🍖${next.cost.gold ? ` ${next.cost.gold}🪙` : ''}` : 'MAX',
       hint: this.hint,
       atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale,
+      tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
+      hasMarket: this.marketCount() > 0,
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
       techTree: this.techTreeData(),
@@ -3635,6 +3817,7 @@ export class Game {
     const { ctx } = this;
     if (n.kind === 'wood') drawIsoTree(ctx, ix, iy, this.time, n.phase, n.amount < n.max * 0.35);
     else if (n.kind === 'gold') drawIsoGold(ctx, ix, iy, this.time, n.phase, n.amount / n.max);
+    else if (n.kind === 'fish') drawIsoFish(ctx, ix, iy, this.time, n.phase, n.amount / n.max);
     else drawIsoBerries(ctx, ix, iy, n.phase, n.amount / n.max);
     // depletion bar
     if (n.amount < n.max) {
@@ -4039,86 +4222,121 @@ export class Game {
   }
 
 
+  // кэш фона мини-карты (террейн статичен — перерисовываем редко/при ресайзе)
+  minimapBg: HTMLCanvasElement | null = null;
+  minimapBgW = 0; minimapBgH = 0;
   drawMinimap(ctx: CanvasRenderingContext2D) {
-    // minimap uses flat world coords still (top-down view for clarity)
-    const W = clamp(this.vw * 0.34, 120, 190);
+    // МИРОВАЯ мини-карта: показывает ВЕСЬ мир (0..WORLD), а не регион вокруг камеры.
+    // Кликабельная (minimapJump переводит долю → мировую координату), с рамкой обзора.
+    const W = clamp(this.vw * 0.30, 168, 232);
     const H = (W * WORLD.h) / WORLD.w;
     const m = 12;
     const x = this.vw - W - m, y = this.vh - H - m - (this.vw < 640 ? 118 : 0);
     this.minimap = { x, y, w: W, h: H };
+    const sx = W / WORLD.w, sy = H / WORLD.h;
+    const toMap = (wx: number, wy: number): [number, number] => [x + wx * sx, y + wy * sy];
+
+    // ── фон террейна: рисуем в оффскрин раз и переиспользуем (дешево каждый кадр) ──
+    if (!this.minimapBg || this.minimapBgW !== Math.round(W) || this.minimapBgH !== Math.round(H)) {
+      const bg = document.createElement('canvas');
+      bg.width = Math.max(2, Math.round(W)); bg.height = Math.max(2, Math.round(H));
+      const c = bg.getContext('2d')!;
+      c.fillStyle = '#2f5226'; c.fillRect(0, 0, bg.width, bg.height);
+      // сэмпл террейна пиксель-в-пиксель по размеру карты (террейн статичен)
+      const pw = Math.ceil(bg.width), ph = Math.ceil(bg.height);
+      for (let py = 0; py < ph; py++) {
+        for (let px = 0; px < pw; px++) {
+          const wx = (px / pw) * WORLD.w, wy = (py / ph) * WORLD.h;
+          const tc = this.terrain.classAt(wx, wy);
+          let col: string | null = null;
+          if (tc === 'water' || tc === 'deep') col = tc === 'deep' ? '#1d4e89' : '#2f6fb0';
+          else if (tc === 'sand') col = '#d8c489';
+          else if (tc === 'desert') col = '#c9a456';
+          else if (tc === 'field') col = '#9aa548';
+          else if (tc === 'forest') col = '#2c5a26';
+          else if (tc === 'mountain') col = '#8a8a92';
+          else if (tc === 'hill') col = '#7c7a5c';
+          if (!col) continue;
+          c.fillStyle = col;
+          c.fillRect(px, py, 1.4, 1.4);
+        }
+      }
+      this.minimapBg = bg; this.minimapBgW = Math.round(W); this.minimapBgH = Math.round(H);
+    }
+
     ctx.save();
-    ctx.globalAlpha = 0.94;
-    ctx.fillStyle = 'rgba(8,12,10,0.85)';
+    ctx.globalAlpha = 0.96;
+    ctx.fillStyle = 'rgba(8,12,10,0.88)';
     ctx.beginPath(); ctx.roundRect(x - 5, y - 5, W + 10, H + 10, 10); ctx.fill();
-    ctx.strokeStyle = 'rgba(212,175,55,0.5)'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(212,175,55,0.55)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.roundRect(x - 5, y - 5, W + 10, H + 10, 10); ctx.stroke();
+    ctx.save();
     ctx.beginPath(); ctx.rect(x, y, W, H); ctx.clip();
-    // региональная миникарта: показывает область RANGE вокруг камеры (мир бесконечный)
-    const RANGE = 4200; // world-единиц от центра камеры до края миникарты
-    const sx = W / (RANGE * 2), sy = H / (RANGE * 2);
-    const toMap = (wx: number, wy: number): [number, number] =>
-      [x + (wx - this.cam.x) * sx + W / 2, y + (wy - this.cam.y) * sy + H / 2];
-    // фон — трава
-    ctx.fillStyle = '#33582b'; ctx.fillRect(x, y, W, H);
-    // рельеф сэмплируем по сетке в видимой области
-    const gstep = 150;
-    for (let wy = this.cam.y - RANGE; wy <= this.cam.y + RANGE; wy += gstep) {
-      for (let wx = this.cam.x - RANGE; wx <= this.cam.x + RANGE; wx += gstep) {
-        const tc = this.terrain.classAt(wx, wy);
-        let col: string | null = null;
-        if (tc === 'water' || tc === 'deep') col = tc === 'deep' ? '#1d4e89' : '#3b82f6';
-        else if (tc === 'sand') col = '#d8c489';
-        else if (tc === 'desert') col = '#c9a456';
-        else if (tc === 'field') col = '#9aa548';
-        else if (tc === 'forest') col = '#2c5a26';
-        else if (tc === 'mountain') col = '#8a8a92';
-        else if (tc === 'hill') col = '#7c7a5c';
-        if (!col) continue;
-        ctx.fillStyle = col;
-        const [mx, my] = toMap(wx, wy);
-        const cw = Math.max(2, gstep * sx) + 1, ch = Math.max(2, gstep * sy) + 1;
-        ctx.fillRect(mx - cw / 2, my - ch / 2, cw, ch);
+    if (this.minimapBg) ctx.drawImage(this.minimapBg, x, y, W, H);
+
+    // туман войны: неисследованное — затемняем (по сетке fogCell)
+    if (this.settings.fogOfWar) {
+      ctx.fillStyle = 'rgba(5,9,7,0.78)';
+      const step = this.fogCell;
+      for (let gy = 0; gy < this.fogGH; gy++) {
+        for (let gx = 0; gx < this.fogGW; gx++) {
+          if (this.fogExpl[gy * this.fogGW + gx]) continue;
+          const wx = gx * step, wy = gy * step;
+          const [mx, my] = toMap(wx, wy);
+          ctx.fillRect(mx, my, Math.max(2, step * sx) + 1, Math.max(2, step * sy) + 1);
+        }
       }
     }
-    // объекты — только в диапазоне
-    const inRange = (wx: number, wy: number) => Math.abs(wx - this.cam.x) < RANGE && Math.abs(wy - this.cam.y) < RANGE;
+
+    // ресурсы (мелкие точки) — только в исследованной области
     for (const n of this.nodes) {
-      if (n.amount <= 0 || !inRange(n.x, n.y)) continue;
-      ctx.fillStyle = n.kind === 'wood' ? '#22c55e' : n.kind === 'gold' ? '#facc15' : '#fb7185';
+      if (n.amount <= 0) continue;
+      if (this.settings.fogOfWar && !this.fogAt(n.x, n.y).expl) continue;
+      ctx.fillStyle = n.kind === 'wood' ? '#22c55e' : n.kind === 'gold' ? '#facc15' : n.kind === 'fish' ? '#38bdf8' : '#fb7185';
       const [mx, my] = toMap(n.x, n.y);
-      ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
+      ctx.fillRect(mx - 1, my - 1, 2.2, 2.2);
     }
     for (const r of this.relics) {
-      if (r.taken || !inRange(r.x, r.y)) continue;
+      if (r.taken) continue;
+      if (this.settings.fogOfWar && !this.fogAt(r.x, r.y).expl) continue;
       const [mx, my] = toMap(r.x, r.y);
-      ctx.fillStyle = '#fde047';
-      ctx.fillRect(mx - 2, my - 2, 4, 4);
+      ctx.fillStyle = '#fde047'; ctx.fillRect(mx - 1.6, my - 1.6, 3.2, 3.2);
     }
+    // здания
     for (const b of this.blds) {
       if (b.owner !== 'player' && !this.canSeeEnemy(b.x, b.y)) continue;
-      if (!inRange(b.x, b.y)) continue;
-      ctx.fillStyle = b.owner === 'player' ? '#60a5fa' : b.tribe ? '#e0b050' : '#f87171';
-      const s = b.key === 'towncenter' ? 6 : 4;
+      ctx.fillStyle = b.owner === 'player' ? '#7cb7ff' : b.tribe ? '#e0b050' : '#f87171';
+      const s = b.key === 'towncenter' ? 6 : b.tribe ? 5 : 3.4;
       const [mx, my] = toMap(b.x, b.y);
       ctx.fillRect(mx - s / 2, my - s / 2, s, s);
     }
+    // юниты
     for (const u of this.units) {
-      if (!inRange(u.x, u.y)) continue;
+      if (u.hidden) continue;
       const [mx, my] = toMap(u.x, u.y);
-      if (u.owner === 'player') { ctx.fillStyle = '#dbeafe'; ctx.fillRect(mx - 1, my - 1, 2, 2); }
+      if (u.owner === 'player') { ctx.fillStyle = '#eaf4ff'; ctx.fillRect(mx - 1.4, my - 1.4, 2.8, 2.8); }
       else {
         if (!this.canSeeEnemy(u.x, u.y)) continue;
         ctx.fillStyle = u.tribe ? '#e0b050' : u.owner === 'neutral' ? '#eab308' : '#fecaca';
-        ctx.fillRect(mx - 1, my - 1, 2, 2);
+        ctx.fillRect(mx - 1.2, my - 1.2, 2.4, 2.4);
       }
     }
-    // рамка вьюпорта — центр миникарты
-    const vw = (this.vw / this.cam.zoom) * sx, vh = (this.vh / this.cam.zoom) * sy;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2;
-    ctx.strokeRect(x + W / 2 - vw / 2, y + H / 2 - vh / 2, vw, vh);
+    // базы игрока/врага — крупные метки с подписью
+    const homeM = toMap(HOME.x, HOME.y), rivM = toMap(RIVAL.x, RIVAL.y);
+    ctx.strokeStyle = '#7cb7ff'; ctx.lineWidth = 1.5; ctx.strokeRect(homeM[0] - 5, homeM[1] - 5, 10, 10);
+    if (!this.settings.fogOfWar || this.fogAt(RIVAL.x, RIVAL.y).expl) {
+      ctx.strokeStyle = '#f87171'; ctx.strokeRect(rivM[0] - 5, rivM[1] - 5, 10, 10);
+    }
+    // рамка текущего вьюпорта
+    const halfW = (this.vw / this.cam.zoom) / 2, halfH = (this.vh / this.cam.zoom) / 2;
+    const [vx0, vy0] = toMap(this.cam.x - halfW, this.cam.y - halfH);
+    const [vx1, vy1] = toMap(this.cam.x + halfW, this.cam.y + halfH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2;
+    ctx.strokeRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
     ctx.restore();
-    ctx.fillStyle = 'rgba(253,230,138,0.85)'; ctx.font = '700 9px Inter';
-    ctx.textAlign = 'left'; ctx.fillText('КАРТА — нажмите, чтобы прыгнуть', x - 2, y - 8);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(253,230,138,0.9)'; ctx.font = '700 9px Inter';
+    ctx.textAlign = 'left'; ctx.fillText('🗺 КАРТА МИРА — клик/перетаскивание для перехода', x - 2, y - 8);
   }
 }
 

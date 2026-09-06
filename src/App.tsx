@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Axe, Coins, Drumstick, TreePine, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
-  ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles,
+  ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock,
 } from 'lucide-react';
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
@@ -16,7 +16,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.031';
+export const GAME_VERSION = '1.0.032';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -204,7 +204,23 @@ export default function App() {
                   <span className="text-[10px] text-slate-300" title="Неприязнь соперника: высокая — скоро война. Повод (casus belli) влияет на боевой дух врага">
                     неприязнь <b className={hud && hud.grievance > 55 ? 'text-red-400' : 'text-amber-300'}>{hud?.grievance ?? 0}</b>/100
                   </span>
-                  <button onClick={() => g()?.bribe()} title="Отправить дары (75 🪙) — снизить неприязнь" className="rounded bg-sky-600/40 px-1.5 py-0.5 text-[10px] font-bold text-sky-100 hover:bg-sky-600/70">🤝 Дары (75🪙)</button>
+                  <button onClick={() => g()?.bribe()} title="Отправить дары (75 🪙) — снизить неприязнь" className="rounded bg-sky-600/40 px-1.5 py-0.5 text-[10px] font-bold text-sky-100 hover:bg-sky-600/70">🤝 Дары</button>
+                  <button onClick={() => g()?.openTradeRoute()} disabled={hud?.tradeRoute || !hud?.hasMarket} title="Торговый договор между городами (нужен Рынок, 60 🪙): пассивное золото и рост доверия"
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${hud?.tradeRoute ? 'bg-emerald-600/60 text-emerald-50' : hud?.hasMarket ? 'bg-teal-600/40 text-teal-100 hover:bg-teal-600/70' : 'bg-slate-700/40 text-slate-500'}`}>
+                    🐪 {hud?.tradeRoute ? 'Торговля ✓' : 'Торговля'}
+                  </button>
+                  <button onClick={() => g()?.signNAP()} disabled={(hud?.napT ?? 0) > 0} title="Пакт о ненападении (120 🪙): сосед не нападёт ~2 минуты"
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${(hud?.napT ?? 0) > 0 ? 'bg-indigo-600/60 text-indigo-50' : 'bg-indigo-600/40 text-indigo-100 hover:bg-indigo-600/70'}`}>
+                    📜 {hud?.napT ? `Пакт ${hud.napT}с` : 'Пакт'}
+                  </button>
+                  <button onClick={() => g()?.condemnNeighbor()} disabled={hud?.condemned} title="Осуждение: лишает соседа «чистого повода» — его будущая атака будет вероломной (низкий боевой дух), но слегка поднимает неприязнь"
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${hud?.condemned ? 'bg-rose-700/70 text-rose-50' : 'bg-rose-600/35 text-rose-100 hover:bg-rose-600/65'}`}>
+                    📢 {hud?.condemned ? 'Осуждён ✓' : 'Осуждать'}
+                  </button>
+                  <button onClick={() => g()?.demandTribute()} title="Потребовать дань: нужно военное превосходство (сила ≥1.25× соседа). Золото сразу и со временем, но сосед затаит обиду"
+                    className="rounded bg-amber-600/40 px-1.5 py-0.5 text-[10px] font-bold text-amber-100 hover:bg-amber-600/70">
+                    💰 Дань
+                  </button>
                 </>
               )}
               <span className="hidden text-[10px] text-slate-400 lg:inline" title="Соотношение сил: вы / соперник">⚖️{hud?.playerPow ?? 0} vs {hud?.enemyPow ?? 0}</span>
@@ -288,8 +304,9 @@ export default function App() {
             <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
             <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
           </div>
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-2 gap-1">
             <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />Центр</MiniBtn>
+            <MiniBtn onClick={() => g()?.focusSelection()} title="Камера к выделенному юниту/группе"><Crosshair className="h-3.5 w-3.5" />К юниту</MiniBtn>
             <MiniBtn active={hud?.attackArmed} onClick={() => { const gm = g(); if (gm) { gm.attackArmed = !gm.attackArmed; gm.pushHud(); } }}><Flag className="h-3.5 w-3.5" />Атака</MiniBtn>
             <MiniBtn active={hud?.panMode} onClick={() => { const gm = g(); if (gm) { gm.panMode = !gm.panMode; gm.pushHud(); } }}><Hand className="h-3.5 w-3.5" />{hud?.panMode ? 'Кам.' : 'Рамка'}</MiniBtn>
           </div>

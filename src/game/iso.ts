@@ -304,6 +304,40 @@ export function isoEllipse(ctx: CanvasRenderingContext2D, cx: number, cy: number
   ctx.ellipse(cx, cy, rx, ry * 0.5, 0, 0, Math.PI * 2);
 }
 
+// ── Draw isometric fish school (fishing resource) on water with ripples ──
+export function drawIsoFish(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number, phase: number, ratio: number) {
+  // мягкое тёмное пятно-«тень» косяка под водой + круги ряби
+  ctx.fillStyle = 'rgba(20,70,110,0.28)';
+  isoEllipse(ctx, cx, cy + 2, 18, 12); ctx.fill();
+  // расходящиеся круги ряби (анимация)
+  const rp = (time * 0.7 + phase) % 1.6;
+  for (let k = 0; k < 2; k++) {
+    const t = (rp + k * 0.8) % 1.6;
+    const rr = 6 + t * 14;
+    ctx.strokeStyle = `rgba(220,240,255,${0.30 * (1 - t / 1.6)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(cx, cy + 1, rr, rr * 0.5, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  // 3 маленькие рыбки (прыгают/блестят) — кол-во по неисчерпанности
+  const n = Math.ceil(ratio * 3);
+  const cols = ['#7dd3fc', '#bae6fd', '#e0f2fe'];
+  for (let i = 0; i < n; i++) {
+    const a = phase * 1.7 + i * 2.1;
+    const ox = Math.cos(a) * 9, oy = Math.sin(a) * 5;
+    const bob = Math.sin(time * 2.5 + i * 2 + phase) * 2;
+    const fx = cx + ox, fy = cy + oy + bob - 2;
+    // тельце
+    ctx.fillStyle = cols[i % cols.length];
+    ctx.beginPath(); ctx.ellipse(fx, fy, 4.5, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+    // хвост
+    ctx.beginPath();
+    ctx.moveTo(fx - 4, fy); ctx.lineTo(fx - 8, fy - 2.6); ctx.lineTo(fx - 8, fy + 2.6);
+    ctx.closePath(); ctx.fill();
+    // блик
+    if (Math.sin(time * 4 + i) > 0.7) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(fx - 1, fy - 2, 1.6, 1.6); }
+  }
+}
+
 // ── Draw isometric tree ──
 export function drawIsoTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, time: number, phase: number, depleted: boolean) {
   const sway = Math.sin(time * 1.2 + phase) * 1;
