@@ -172,6 +172,139 @@ export function getHillTile(variant: number): HTMLCanvasElement {
   });
 }
 
+// ── Biome tiles (бесконечная карта): глубокая вода, берег, пустыня, поля, горы, лес ──
+export function getDeepWaterTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('dwater' + (variant % 2), TW, TH, (g) => {
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = variant % 2 ? '#245a96' : '#1f528c';
+    g.fill();
+    g.strokeStyle = 'rgba(150,200,240,0.35)';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(TCX - 16, TCY - 1); g.lineTo(TCX - 6, TCY - 4); g.lineTo(TCX + 4, TCY - 2);
+    g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.22)';
+    g.fillRect(TCX + 6, TCY + 3, 4, 1);
+  });
+}
+
+export function getSandTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('sand' + (variant % 2), TW, TH, (g) => {
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = variant % 2 ? '#d8c489' : '#d2bd7e';
+    g.fill();
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle = i % 2 ? '#c9b072' : '#e4d29c';
+      const px = TCX + ((i * 19 + variant * 5) % 42) - 21;
+      const py = TCY + ((i * 13 + 3) % 18) - 9;
+      g.fillRect(px, py, 2, 1);
+    }
+  });
+}
+
+export function getDesertTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('desert' + (variant % 3), TW, TH, (g) => {
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = variant % 3 === 0 ? '#d8b36a' : '#d2ac5e';
+    g.fill();
+    // дюны — дуги
+    g.strokeStyle = 'rgba(160,120,55,0.5)';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(TCX - 4, TCY + 1, 16, Math.PI * 1.15, Math.PI * 1.8);
+    g.stroke();
+    g.strokeStyle = 'rgba(230,205,140,0.6)';
+    g.beginPath();
+    g.arc(TCX + 6, TCY + 3, 12, Math.PI * 1.1, Math.PI * 1.7);
+    g.stroke();
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle = '#c4a052';
+      g.fillRect(TCX + ((i * 23) % 40) - 20, TCY + ((i * 11) % 14) - 7, 2, 1);
+    }
+  });
+}
+
+export function getFieldTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('field' + (variant % 2), TW, TH, (g) => {
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = variant % 2 ? '#9aa548' : '#a3ad4e';
+    g.fill();
+    // борозды грядок
+    g.strokeStyle = 'rgba(90,90,40,0.5)';
+    g.lineWidth = 1;
+    for (let i = -2; i <= 2; i++) {
+      g.beginPath();
+      g.moveTo(TCX - 18 + i * 9, TCY + 8);
+      g.lineTo(TCX + 6 + i * 9, TCY - 8);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(220,200,90,0.5)';
+    for (let i = 0; i < 5; i++) {
+      g.fillRect(TCX + ((i * 17) % 38) - 19, TCY + ((i * 13) % 14) - 7, 2, 2);
+    }
+  });
+}
+
+export function getForestFloorTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('ffloor' + (variant % 2), TW, TH, (g) => {
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = variant % 2 ? '#3f6b2f' : '#457033';
+    g.fill();
+    g.fillStyle = 'rgba(40,80,30,0.5)';
+    diamondPath(g, TCX + 5, TCY + 2, 26, 13);
+    g.fill();
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle = '#356028';
+      g.fillRect(TCX + ((i * 17) % 40) - 20, TCY + ((i * 11) % 16) - 8, 2, 2);
+    }
+  });
+}
+
+// Горы: скалистые пики со снежной шапкой и тенью обрыва
+export function getMountainTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('mount' + (variant % 3), TW, TH, (g) => {
+    // тень-обрыв у нижней кромки
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = '#4a4640';
+    g.fill();
+    // скальный массив — пик треугольником по центру ромба
+    g.fillStyle = variant % 3 === 0 ? '#6f6a62' : '#66615a';
+    g.beginPath();
+    g.moveTo(TCX - 20, TCY + 10);
+    g.lineTo(TCX - 6, TCY - 12);
+    g.lineTo(TCX + 2, TCY - 16);
+    g.lineTo(TCX + 18, TCY + 10);
+    g.closePath();
+    g.fill();
+    // второй пик
+    g.fillStyle = '#7b756c';
+    g.beginPath();
+    g.moveTo(TCX - 2, TCY + 10);
+    g.lineTo(TCX + 12, TCY - 8);
+    g.lineTo(TCX + 24, TCY + 10);
+    g.closePath();
+    g.fill();
+    // снежные шапки
+    g.fillStyle = '#eef2f5';
+    g.beginPath();
+    g.moveTo(TCX - 8, TCY - 8);
+    g.lineTo(TCX - 6, TCY - 12);
+    g.lineTo(TCX + 2, TCY - 16);
+    g.lineTo(TCX + 5, TCY - 9);
+    g.lineTo(TCX - 1, TCY - 11);
+    g.closePath();
+    g.fill();
+    // тень на склоне
+    g.fillStyle = 'rgba(30,28,25,0.35)';
+    g.beginPath();
+    g.moveTo(TCX + 2, TCY - 16);
+    g.lineTo(TCX + 18, TCY + 10);
+    g.lineTo(TCX + 4, TCY + 10);
+    g.closePath();
+    g.fill();
+  });
+}
+
 // ── Draw isometric box (building block) ──
 // cx,cy = base center on screen. w,d = top-face pixel dims. h = pixel height.
 export function isoBox(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, d: number, h: number, topColor: string, leftColor: string, rightColor: string) {

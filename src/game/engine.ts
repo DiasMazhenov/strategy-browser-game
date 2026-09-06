@@ -1,6 +1,9 @@
-import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
+import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
-import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, getGrassTile, getDirtTile, getDarkGrassTile, getWaterTile, getHillTile, TILE_STEP } from './iso';
+import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries,
+  getGrassTile, getDirtTile, getDarkGrassTile, getWaterTile, getHillTile,
+  getDeepWaterTile, getSandTile, getDesertTile, getFieldTile, getForestFloorTile, getMountainTile,
+  TILE_STEP } from './iso';
 import { Terrain } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
@@ -89,6 +92,8 @@ interface Unit {
   aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
   stance: 'aggressive' | 'defensive' | 'stand'; // боевая стойка
+  tribe?: boolean;   // воин нейтрального племени (пассивен, пока не атакован)
+  aggro?: boolean;   // племя разозлено (атакует обидчика)
   homeX: number; homeY: number;                 // точка возврата (stand/patrol)
   patrolX: number; patrolY: number;             // вторая точка патруля
   waitT: number;                                // ожидание в точке патруля
@@ -123,7 +128,7 @@ function dmgMult(att: UnitKey, target: UnitKey): number {
   return 1;
 }
 interface Bld {
-  id: number; key: BuildingKey; owner: 'player' | 'enemy';
+  id: number; key: BuildingKey; owner: 'player' | 'enemy' | 'neutral';
   x: number; y: number; size: number; hp: number; maxHp: number;
   done: number; buildT: number; queue: { key: UnitKey; t: number; total: number }[];
   cd: number; rallyX: number; rallyY: number; rallyNode: number; flash: number; smokeT: number;
@@ -131,6 +136,7 @@ interface Bld {
   garrison: number[];                                           // id юнитов внутри (оборона)
   gate: boolean;                                                // ворота (проходны для игрока)
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
+  tribe?: boolean;                                              // постройка нейтрального племени
 }
 interface Node { id: number; kind: 'wood' | 'gold' | 'food'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
@@ -190,6 +196,10 @@ export class Game {
   projs: Proj[] = []; parts: Particle[] = []; floaters: Floater[] = []; corpses: Corpse[] = [];
   decor: Decor[] = [];
   terrain = new Terrain((Math.random() * 1e9) | 0);
+  // бесконечный мир: чанки контента (ресурсы/животные/племена), генерятся лениво по мере исследования
+  static readonly CHUNK = 1600;
+  chunksGen = new Set<string>();
+  chunkT = 0;
   res = { wood: 260, food: 260, gold: 140 };
   eres = { wood: 300, food: 300, gold: 160 };
   age = 0; eage = 0;
@@ -199,7 +209,7 @@ export class Game {
   // история по минутам для графика (ресурсы/армия)
   history: { t: number; army: number; pop: number }[] = []; histT = 0;
   time = 0; wave = 0; waveT: number;
-  cam = { x: 380, y: 1620, zoom: 1 };
+  cam = { x: HOME.x, y: HOME.y, zoom: 1 };
   keys = new Set<string>();
   selected = new Set<number>(); selBld = -1;
   groups: number[][] = [[], [], [], [], []]; // группы контроля Ctrl/Alt+1..5 (id юнитов игрока)
@@ -262,7 +272,7 @@ export class Game {
     this.genWorld();
     if (opts.loadSave && this.loadFromSave()) { /* восстановлено из сохранения */ }
     this.bind();
-    this.centerOn(470, 2330, true);
+    this.centerOn(HOME.x, HOME.y, true);
     const isMobile = matchMedia('(pointer: coarse)').matches;
     this.cam.zoom = isMobile ? 0.7 : 0.9;
     this.hint = isMobile ? 'Касание — выбор • Касание земли — приказ • Потяните — рамка выбора' : 'ЛКМ-рамка — выделение • ПКМ — приказ • WASD камера • 1-8 тренировка';
@@ -303,7 +313,7 @@ export class Game {
     return u;
   }
 
-  addBld(key: BuildingKey, owner: 'player' | 'enemy', x: number, y: number, done = 1): Bld {
+  addBld(key: BuildingKey, owner: 'player' | 'enemy' | 'neutral', x: number, y: number, done = 1): Bld {
     const d = BUILDING_DEFS[key];
     const b: Bld = {
       id: this.nextId++, key, owner, x, y, size: d.size, hp: d.hp * done, maxHp: d.hp,
@@ -328,34 +338,14 @@ export class Game {
       default: return 'rgba(0,0,0,0)';
     }
   }
+  // ── БЕСКОНЕЧНЫЙ МИР: стартовые базы игрока/соперника, остальное — ленивые чанки ──
   genWorld() {
-    const P = { x: 470, y: 2330 }, E = { x: 3140, y: 560 };
-    // террейн: безопасные зоны вокруг баз (суша, без рек/холмов)
-    this.terrain.addSafe(P.x, P.y, 340);
-    this.terrain.addSafe(E.x, E.y, 340);
-    const land = (x: number, y: number) => this.terrain.isLand(x, y);
-    // случайная точка на суше вне радиуса баз
-    const randLand = (baseAvoid = true): [number, number] => {
-      for (let t = 0; t < 60; t++) {
-        const x = rand(220, WORLD.w - 220), y = rand(220, WORLD.h - 220);
-        if (baseAvoid && (dist2(x, y, P.x, P.y) < 420 * 420 || dist2(x, y, E.x, E.y) < 420 * 420)) continue;
-        if (land(x, y)) return [x, y];
-      }
-      return [rand(220, WORLD.w - 220), rand(220, WORLD.h - 220)];
-    };
-    // decor — только на суше
-    const decorCols: Record<string, string[]> = {
-      green: ['#5da24a', '#6fae55', '#87b96a', '#d9c26a', '#c9b458'],
-      autumn: ['#c87a2e', '#d9a13b', '#a85b24', '#b06b2a', '#d9c26a'],
-      winter: ['#cfd8e3', '#b9c4d2', '#e2e8f0', '#9fb2c6', '#dce5ef'],
-      desert: ['#d9b868', '#c9a555', '#e3c87a', '#b8934a', '#d9c26a'],
-    };
-    for (let i = 0; i < 760; i++) {
-      const [x, y] = randLand(false);
-      const cols = decorCols[this.settings.biome] || decorCols.green;
-      this.decor.push({ x, y, k: (Math.random() * 3) | 0, s: rand(2, 5), c: cols[(Math.random() * cols.length) | 0] });
-    }
-    // лес у базы (дуга) — гарантированно рядом со стартом
+    const P = HOME, E = RIVAL;
+    // террейн: безопасные зоны вокруг баз (суша, без гор/воды)
+    this.terrain.addSafe(P.x, P.y, 360);
+    this.terrain.addSafe(E.x, E.y, 360);
+
+    // стартовые ресурсы у игрока (дуга леса + золото/ягоды)
     const arc = (cx: number, cy: number, n: number, r0: number, a0: number) => {
       for (let i = 0; i < n; i++) {
         const a = a0 + (i / n) * Math.PI * 1.2 + rand(-0.15, 0.15);
@@ -363,36 +353,9 @@ export class Game {
         this.addNode('wood', cx + Math.cos(a) * r, cy + Math.sin(a) * r, 220);
       }
     };
-    arc(P.x, P.y, 9, 210, -0.4); arc(E.x, E.y, 9, 210, Math.PI - 0.4);
+    arc(P.x, P.y, 9, 210, -0.4);
     this.addNode('food', P.x + 120, P.y - 150, 700); this.addNode('food', P.x - 170, P.y + 60, 700);
     this.addNode('gold', P.x + 190, P.y + 130, 900); this.addNode('gold', P.x - 90, P.y - 230, 700);
-    this.addNode('food', E.x - 120, E.y + 150, 700); this.addNode('food', E.x + 170, E.y - 60, 700);
-    this.addNode('gold', E.x - 190, E.y - 130, 900); this.addNode('gold', E.x + 90, E.y + 230, 700);
-    // леса: гуще на серединной полосе между базами + случайные рощи по всей карте
-    const M = { x: (P.x + E.x) / 2, y: (P.y + E.y) / 2 };
-    for (let i = 0; i < 14; i++) {
-      const t = rand(-0.7, 1.7);
-      const fx = P.x + (E.x - P.x) * t + rand(-260, 260);
-      const fy = P.y + (E.y - P.y) * t + rand(-260, 260);
-      if (!land(fx, fy)) continue;
-      const n = 8 + ((Math.random() * 7) | 0);
-      for (let k = 0; k < n; k++) this.addNode('wood', fx + rand(-140, 140), fy + rand(-120, 120), 200);
-    }
-    for (let i = 0; i < 22; i++) {
-      const [fx, fy] = randLand();
-      const n = 7 + ((Math.random() * 7) | 0);
-      for (let k = 0; k < n; k++) {
-        const tx = fx + rand(-150, 150), ty = fy + rand(-130, 130);
-        if (land(tx, ty)) this.addNode('wood', tx, ty, 200);
-      }
-    }
-    // золото/ягоды: вокруг центрального «золотого спора» и в случайных точках суши
-    this.addNode('gold', M.x + 50, M.y + 40, 1500); this.addNode('gold', M.x + 100, M.y + 80, 1200);
-    for (let i = 0; i < 16; i++) {
-      const [sx, sy] = randLand();
-      if (Math.random() < 0.8) this.addNode('gold', sx + rand(-50, 50), sy + rand(-50, 50), 850);
-      if (Math.random() < 0.75) this.addNode('food', sx + rand(-110, 110), sy + rand(-90, 90), 550);
-    }
     // TCs
     this.addBld('towncenter', 'player', P.x, P.y, 1);
     this.addBld('towncenter', 'enemy', E.x, E.y, 1);
@@ -412,7 +375,9 @@ export class Game {
     const s2 = this.addUnit('swordsman', 'player', P.x + 160, P.y + 20);
     this.addUnit('archer', 'player', P.x + 110, P.y + 60);
     this.selected.add(s1.id); this.selected.add(s2.id);
-    // enemy villagers
+    // соперник: крестьяне и пара воинов у его ГЦ
+    arc(E.x, E.y, 7, 200, Math.PI - 0.4);
+    this.addNode('food', E.x - 120, E.y + 150, 700); this.addNode('gold', E.x - 190, E.y - 130, 900);
     for (let i = 0; i < 5; i++) {
       const u = this.addUnit('villager', 'enemy', E.x + rand(-70, 70), E.y + rand(-70, 70));
       const ns = this.nodes.filter(n => dist2(n.x, n.y, E.x, E.y) < 340 * 340);
@@ -420,34 +385,128 @@ export class Game {
     }
     this.addUnit('swordsman', 'enemy', E.x - 120, E.y + 40);
     this.addUnit('swordsman', 'enemy', E.x - 150, E.y - 20);
-    // ── дикие животные: случайно разбросаны по всей карте ──
-    const spawnPack = (kind: UnitKey, packs: number, size: [number, number]) => {
-      for (let p = 0; p < packs; p++) {
-        const [hx, hy] = randLand();
-        const n = size[0] + ((Math.random() * (size[1] - size[0] + 1)) | 0);
-        for (let i = 0; i < n; i++) {
-          const a = this.addUnit(kind, 'neutral', hx + rand(-55, 55), hy + rand(-50, 50));
-          a.wx = hx; a.wy = hy;
-        }
+    // пред-генерим чанки вокруг стартов и на линии к сопернику — мир сразу живой
+    this.ensureChunks(P.x, P.y, 2);
+    this.ensureChunks(E.x, E.y, 1);
+  }
+
+  // ── чанковая генерация контента ──
+  private chunkKey(cx: number, cz: number) { return cx + ',' + cz; }
+  // гарантировать, что все чанки в радиусе R (в чанках) от точки загенерены
+  ensureChunks(wx: number, wy: number, R: number) {
+    const C = Game.CHUNK;
+    const ccx = Math.floor(wx / C), ccz = Math.floor(wy / C);
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      if (dx * dx + dz * dz > R * R + 1) continue;
+      const cx = ccx + dx, cz = ccz + dz;
+      const key = this.chunkKey(cx, cz);
+      if (this.chunksGen.has(key)) continue;
+      this.chunksGen.add(key);
+      this.genChunk(cx, cz);
+    }
+  }
+  // найти в чанке точку нужного биома; null — не нашли
+  private chunkPoint(cx: number, cz: number, rng: () => number, want: (x: number, y: number) => boolean): [number, number] | null {
+    const C = Game.CHUNK;
+    for (let t = 0; t < 24; t++) {
+      const x = cx * C + rng() * C, y = cz * C + rng() * C;
+      if (want(x, y)) return [x, y];
+    }
+    return null;
+  }
+  genChunk(cx: number, cz: number) {
+    const C = Game.CHUNK;
+    const rng = this.terrain.chunkRand(cx, cz);
+    const ox = cx * C, oz = cz * C;
+    const distHome = Math.min(
+      Math.hypot(ox + C / 2 - HOME.x, oz + C / 2 - HOME.y),
+      Math.hypot(ox + C / 2 - RIVAL.x, oz + C / 2 - RIVAL.y)
+    );
+    // рядом со стартовыми базами чанк «зарезервирован» — контент там уже стоит вручную
+    if (distHome < C * 0.9) return;
+    const land = (x: number, y: number) => this.terrain.isLand(x, y);
+    const buildable = (x: number, y: number) => this.terrain.isBuildable(x, y);
+    const biomeAt = (x: number, y: number) => this.terrain.classAt(x, y);
+
+    // деревья: лесные биомы — густо, прочая суша — редкие рощицы
+    const treeClusters = 3 + ((rng() * 4) | 0);
+    for (let i = 0; i < treeClusters; i++) {
+      const p = this.chunkPoint(cx, cz, rng, (x, y) => {
+        const b = biomeAt(x, y);
+        return b === 'forest' ? true : (b === 'grass' && rng() < 0.3);
+      });
+      if (!p) continue;
+      const dense = biomeAt(p[0], p[1]) === 'forest';
+      const n = dense ? 7 + ((rng() * 6) | 0) : 2 + ((rng() * 3) | 0);
+      for (let k = 0; k < n; k++) {
+        const tx = p[0] + (rng() - 0.5) * 220, ty = p[1] + (rng() - 0.5) * 200;
+        if (land(tx, ty)) this.addNode('wood', tx, ty, 200);
+      }
+    }
+    // золото: в горах/предгорьях — жилы, иногда на равнине
+    const goldN = 1 + ((rng() * 2) | 0);
+    for (let i = 0; i < goldN; i++) {
+      const p = this.chunkPoint(cx, cz, rng, (x, y) => {
+        const b = biomeAt(x, y);
+        return b === 'hill' || b === 'mountain' || (b === 'desert' && rng() < 0.5) || (land(x, y) && rng() < 0.25);
+      });
+      if (p) this.addNode('gold', p[0] + (rng() - 0.5) * 60, p[1] + (rng() - 0.5) * 60, 800 + ((rng() * 400) | 0));
+    }
+    // ягоды/еда: поля и трава
+    if (rng() < 0.7) {
+      const p = this.chunkPoint(cx, cz, rng, (x, y) => { const b = biomeAt(x, y); return b === 'field' || b === 'grass' || b === 'forest'; });
+      if (p) this.addNode('food', p[0] + (rng() - 0.5) * 80, p[1] + (rng() - 0.5) * 80, 550);
+    }
+    // дикие животные: стаи на суше
+    const spawnPack = (kind: UnitKey, prob: number, size: [number, number]) => {
+      if (rng() > prob) return;
+      const p = this.chunkPoint(cx, cz, rng, land);
+      if (!p) return;
+      const n = size[0] + ((rng() * (size[1] - size[0] + 1)) | 0);
+      for (let i = 0; i < n; i++) {
+        const a = this.addUnit(kind, 'neutral', p[0] + (rng() - 0.5) * 110, p[1] + (rng() - 0.5) * 100);
+        a.wx = p[0]; a.wy = p[1];
       }
     };
-    spawnPack('wolf', 12, [2, 3]);   // волчьи стаи
-    spawnPack('sheep', 8, [3, 5]);   // отары овец
-    spawnPack('cow', 6, [2, 3]);     // коровы
-    spawnPack('deer', 8, [3, 4]);    // олени
-    // вражеские лагеря в центре карты — зачисти ради награды
-    for (let i = 0; i < 3; i++) {
-      const [cx, cy] = i === 0 ? [M.x, M.y] : randLand();
-      this.addBld('tower', 'enemy', cx, cy, 1);
-      for (let k = 0; k < 2; k++) { const g = this.addUnit('swordsman', 'enemy', cx + rand(-40, 40), cy + rand(-40, 40)); g.state = 'idle'; }
-      this.addNode('gold', cx + 60, cy - 50, 700);
-      this.relics.push({ id: this.nextId++, x: cx - 70, y: cy + 40, taken: false, phase: rand(0, 6) });
+    spawnPack('wolf', 0.28, [2, 3]);
+    spawnPack('deer', 0.34, [3, 4]);
+    spawnPack('sheep', 0.26, [3, 5]);
+    spawnPack('cow', 0.18, [2, 3]);
+
+    // декор (кустики/цветы) на суше
+    const cols = ['#5da24a', '#6fae55', '#87b96a', '#d9c26a', '#c9b458'];
+    for (let i = 0; i < 26; i++) {
+      const x = ox + rng() * C, y = oz + rng() * C;
+      if (!land(x, y)) continue;
+      this.decor.push({ x, y, k: (rng() * 3) | 0, s: 2 + rng() * 3, c: cols[(rng() * cols.length) | 0] });
     }
-    // ещё реликвии в разброс по карте
-    for (let i = 0; i < 4; i++) {
-      const [rx, ry] = randLand();
-      this.relics.push({ id: this.nextId++, x: rx, y: ry, taken: false, phase: rand(0, 6) });
+
+    // нейтральное племя: лагерь достаточно далеко от стартов, на ровной суше
+    if (distHome > C * 3.2 && rng() < 0.10) {
+      const cp = this.chunkPoint(cx, cz, rng, (x, y) => buildable(x, y)
+        && dist2(x, y, HOME.x, HOME.y) > (C * 3) ** 2 && dist2(x, y, RIVAL.x, RIVAL.y) > (C * 3) ** 2);
+      if (cp) this.spawnTribeCamp(cp[0], cp[1], rng);
     }
+    // редкая реликвия
+    if (rng() < 0.06) {
+      const p = this.chunkPoint(cx, cz, rng, land);
+      if (p) this.relics.push({ id: this.nextId++, x: p[0], y: p[1], taken: false, phase: rng() * 6 });
+    }
+  }
+  // лагерь нейтрального племени: башня-деревня + воины (пассивны, пока не тронут)
+  spawnTribeCamp(x: number, y: number, rng: () => number) {
+    const hut = this.addBld('tower', 'neutral', x, y, 1);
+    hut.tribe = true;
+    const guards = 2 + ((rng() * 3) | 0);
+    const kinds: UnitKey[] = ['spearman', 'swordsman', 'archer'];
+    for (let i = 0; i < guards; i++) {
+      const k = kinds[(rng() * kinds.length) | 0];
+      const g = this.addUnit(k, 'neutral', x + (rng() - 0.5) * 90, y + (rng() - 0.5) * 90);
+      g.tribe = true; g.aggro = false; g.state = 'idle';
+      g.homeX = x; g.homeY = y; g.wx = x; g.wy = y;
+    }
+    // клад золота у лагеря
+    this.addNode('gold', x + 60, y - 50, 700);
   }
 
   relicsHeld = 0; // реликвий собрано игроком (пассивное золото)
@@ -496,7 +555,7 @@ export class Game {
     else if (k === 't') this.ageUp();
     else if (k === 'g') { if (this.selUnits().length) { this.attackArmed = !this.attackArmed; this.rallyArmed = false; this.patrolArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === 'y') { if (this.selUnits().some(u => u.key !== 'villager')) { this.patrolArmed = !this.patrolArmed; this.attackArmed = false; this.sound.select(); this.pushHud(); } }
-    else if (k === 'h') this.centerOn(470, 2330);
+    else if (k === 'h') this.centerOn(HOME.x, HOME.y);
     else if (k === '.' || k === 'ю') this.jumpToIdleVillager();
     else if (k === 'm') this.toggleMute();
     else if (k === '+' || k === '=') this.zoomBy(0.15);
@@ -768,9 +827,11 @@ export class Game {
 
   minimapJump(px: number, py: number) {
     const { x, y, w, h } = this.minimap;
-    const fx = (px - x) / w, fy = (py - y) / h;
-    this.cam.x = clamp(fx * WORLD.w, 0, WORLD.w);
-    this.cam.y = clamp(fy * WORLD.h, 0, WORLD.h);
+    // региональная миникарта: центр = камера, смещение по доле карты
+    const fx = (px - x) / w - 0.5, fy = (py - y) / h - 0.5;
+    const RANGE = 4200;
+    this.cam.x = this.cam.x + fx * RANGE * 2;
+    this.cam.y = this.cam.y + fy * RANGE * 2;
     this.clampCam();
   }
 
@@ -1026,8 +1087,8 @@ export class Game {
   // ---------- economy / production ----------
   afford(c: { wood: number; food: number; gold: number }) { return this.res.wood >= c.wood && this.res.food >= c.food && this.res.gold >= c.gold; }
   pay(c: { wood: number; food: number; gold: number }) { this.res.wood -= c.wood; this.res.food -= c.food; this.res.gold -= c.gold; }
-  popUsed(owner: 'player' | 'enemy') { let s = 0; for (const u of this.units) if (u.owner === owner) s += UNIT_DEFS[u.key].pop; return s; }
-  popCap(owner: 'player' | 'enemy') {
+  popUsed(owner: 'player' | 'enemy' | 'neutral') { let s = 0; for (const u of this.units) if (u.owner === owner) s += UNIT_DEFS[u.key].pop; return s; }
+  popCap(owner: 'player' | 'enemy' | 'neutral') {
     let c = 10;
     for (const b of this.blds) if (b.owner === owner && b.key === 'house' && b.done >= 1) c += 8;
     return Math.min(60, c);
@@ -1498,7 +1559,7 @@ export class Game {
       3: 'Имперская мощь! Открыто Чудо света ⭐ — постройте его для победы',
     };
     this.pushBanner(`${next.icon} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
-    this.burst(470, 2330, 40, ['#f6d47c', '#fff'], 160);
+    this.burst(HOME.x, HOME.y, 40, ['#f6d47c', '#fff'], 160);
     this.checkQuests();
     this.pushHud();
   }
@@ -1670,6 +1731,12 @@ export class Game {
     this.updateBuildings(dt);
     this.updateFog(dt);
     this.updateProjs(dt);
+    // бесконечный мир: догенерировать чанки вокруг камеры при разведке
+    this.chunkT -= dt;
+    if (this.chunkT <= 0) {
+      this.chunkT = 0.4;
+      this.ensureChunks(this.cam.x, this.cam.y, 2);
+    }
     // статистика матча
     const pop = this.popUsed('player');
     const army = this.units.filter(u => u.owner === 'player' && u.key !== 'villager').length;
@@ -1791,7 +1858,9 @@ export class Game {
       const stateMoving = u.state === 'move' || u.state === 'attackmove' || u.state === 'gather' || u.state === 'return' || u.state === 'build';
       u.cd -= dt; u.atkAnim = Math.max(0, u.atkAnim - dt * 4); u.flash = 0;
       u.retarget -= dt;
-      if (u.owner === 'neutral') {
+      // воины нейтрального племени дерутся как солдаты (пассивны до провокации);
+      // волки охотятся, скот пасётся — это отдельная звериная логика
+      if (u.owner === 'neutral' && !u.tribe) {
         const w0 = u.x, z0 = u.y;
         if (u.key === 'wolf') this.updateWolf(u, dt); else this.updateAnimal(u, dt);
         const moved = Math.hypot(u.x - w0, u.y - z0) > 1.5;
@@ -1810,7 +1879,8 @@ export class Game {
         u.anim += dt * (moved ? 12 : 2);
         continue;
       }
-      if (u.key === 'villager') this.updateVillager(u, dt);
+      if (u.owner === 'neutral' && u.tribe) this.updateSoldier(u, dt);
+      else if (u.key === 'villager') this.updateVillager(u, dt);
       else this.updateSoldier(u, dt);
       // building collision push (стены блокируют; ворота пропускают своих)
       for (const b of this.blds) {
@@ -1990,12 +2060,42 @@ export class Game {
     return this.atWar;
   }
 
+  // разозлено ли племя в точке (есть ли рядом агр-воин племени)
+  tribeAggro(x: number, y: number): boolean {
+    for (const e of this.units) {
+      if (!e.tribe || !e.aggro) continue;
+      if (dist2(e.x, e.y, x, y) < 320 * 320) return true;
+    }
+    return false;
+  }
+  // атаковали воина/постройку нейтрального племени → всё племя рядом мстит
+  provokeTribe(x: number, y: number, by: Unit) {
+    let any = false;
+    for (const e of this.units) {
+      if (!e.tribe) continue;
+      if (dist2(e.x, e.y, x, y) < 360 * 360) { e.aggro = true; any = true; }
+    }
+    for (const b of this.blds) {
+      if (b.tribe && dist2(b.x, b.y, x, y) < 360 * 360) any = true;
+    }
+    if (any) {
+      // ближайшие воины племени идут на обидчика
+      for (const e of this.units) {
+        if (e.tribe && e.aggro && dist2(e.x, e.y, by.x, by.y) < 560 * 560) {
+          e.state = 'attackmove'; e.targetU = by.id; e.tx = by.x; e.ty = by.y;
+        }
+      }
+    }
+  }
+
   acquireEnemy(u: Unit, radius: number): { tu: number; tb: number } {
     let bu = -1, bb = -1; let bd = radius * radius;
     for (const e of this.units) {
       if (!this.hostile(u.owner, e.owner)) continue;
+      // нетронутое нейтральное племя (воины/башни) пассивно: авто-боем не трогаем
+      if (e.tribe && !e.aggro) continue;
       // пассивный скот не цель авто-боя (бить можно только явным приказом)
-      if (e.owner === 'neutral' && e.key !== 'wolf' && u.state !== 'attackmove') continue;
+      if (e.owner === 'neutral' && e.key !== 'wolf' && !e.tribe && u.state !== 'attackmove') continue;
       if (u.owner === 'player' && e.owner === 'neutral' && e.key === 'wolf' && u.state !== 'attackmove') {
         // villagers don't auto-aggro wolves; military does
         if (u.key === 'villager') continue;
@@ -2007,6 +2107,8 @@ export class Game {
     let bbd = radius * radius;
     for (const b of this.blds) {
       if (!this.hostile(u.owner, b.owner) || b.done < 0.5) continue;
+      // нетронутое нейтральное племя авто-боем не атакуем
+      if (b.tribe && !this.tribeAggro(b.x, b.y)) continue;
       if (u.owner === 'player' && u.key === 'villager') continue;
       let d = dist2(u.x, u.y, b.x, b.y) - b.size * b.size * 0.25;
       if (b.key === 'wonder') d *= 0.15;   // Чудо — приоритетная цель для атаки
@@ -2078,6 +2180,15 @@ export class Game {
       }
       return;
     }
+    // воин нейтрального племени без цели: стережёт лагерь (возвращается к точке спавна)
+    if (u.owner === 'neutral' && u.tribe && !u.targetU && u.targetB < 0) {
+      if (dist2(u.x, u.y, u.homeX, u.homeY) > 120 * 120) {
+        u.state = 'move'; u.tx = u.homeX; u.ty = u.homeY;
+        this.moveToward(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
+        return;
+      }
+      u.state = 'idle';
+    }
     if (u.state === 'attackmove' || u.state === 'move') {
       // стойка «держать позицию»: не уходить от точки старта за поводок
       if (u.stance === 'stand' && u.state === 'attackmove' && (u.key !== 'catapult')) {
@@ -2087,10 +2198,17 @@ export class Game {
         }
       }
       if (this.moveToward(u, u.tx, u.ty, dt)) {
-        // вернулись домой из погони (stand) — встаём
-        u.state = 'idle';
-        const f = this.acquireEnemy(u, isCata ? 300 : 200);
-        if (f.tu >= 0 && u.stance !== 'stand') { u.targetU = f.tu; u.state = 'attackmove'; }
+        // разозлённый воин племени, догнавший точку, продолжает искать обидчика у лагеря
+        if (u.tribe && u.aggro) {
+          const f = this.acquireEnemy(u, 240);
+          if (f.tu >= 0) { u.targetU = f.tu; u.state = 'attackmove'; return; }
+          u.state = 'idle';
+        } else {
+          // вернулись домой из погони (stand) — встаём
+          u.state = 'idle';
+          const f = this.acquireEnemy(u, isCata ? 300 : 200);
+          if (f.tu >= 0 && u.stance !== 'stand') { u.targetU = f.tu; u.state = 'attackmove'; }
+        }
       }
       return;
     }
@@ -2246,6 +2364,8 @@ export class Game {
 
   damageUnit(t: Unit, dmg: number, from?: Unit) {
     if (t.hp <= 0) return;
+    // удар по воину нейтрального племени — всё племя рядом мстит
+    if (t.tribe && from) this.provokeTribe(t.x, t.y, from);
     t.hp -= dmg;
     this.sound.hit();
     this.spark(t.x, t.y - 12, t.owner === 'player' ? '#93c5fd' : '#fca5a5');
@@ -2264,6 +2384,11 @@ export class Game {
   damageBld(b: Bld, dmg: number, byOwner: 'player' | 'enemy' | 'neutral') {
     if (b.hp <= 0) return;
     if (b.done < 1) dmg *= 1.6;
+    // атака по постройке нейтрального племени тоже разозляет племя
+    if (b.tribe) {
+      const attacker = this.units.find(u => u.owner === byOwner && u.key !== 'villager') || this.units.find(u => u.owner === byOwner);
+      if (attacker) this.provokeTribe(b.x, b.y, attacker);
+    }
     b.hp -= dmg; b.flash = 1;
     if (b.owner === 'player') { this.dmgFlash = Math.min(0.6, this.dmgFlash + 0.09); this.trauma = Math.min(1, this.trauma + 0.06); }
     if (b.hp <= 30 && Math.random() < 0.3) this.burst(b.x + rand(-20, 20), b.y - 20, 2, ['#78716c', '#44403c'], 40, 0.8);
@@ -2461,7 +2586,9 @@ export class Game {
           let best: Unit | null = null; let bd = tRange * tRange;
           for (const e of this.units) {
             if (e.owner === b.owner || e.hp <= 0 || !this.hostile(b.owner, e.owner)) continue;
-            if (e.owner === 'neutral' && e.key !== 'wolf') continue; // башни не стреляют по скоту
+            if (e.owner === 'neutral' && e.key !== 'wolf' && !(e.tribe && e.aggro)) continue; // скот не трогаем
+            // башня нейтрального племени молчит, пока племя не разозлено атакой
+            if (b.owner === 'neutral' && !this.tribeAggro(b.x, b.y)) continue;
             const d = dist2(b.x, b.y - 20, e.x, e.y);
             if (d < bd) { bd = d; best = e; }
           }
@@ -2689,12 +2816,12 @@ export class Game {
     const comp = this.waveComp();
     const etc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
     const ptc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
-    const sx = etc ? etc.x - 120 : WORLD.w - 300, sy = etc ? etc.y + 60 : 400;
+    const sx = etc ? etc.x - 120 : RIVAL.x - 300, sy = etc ? etc.y + 60 : RIVAL.y;
     for (const k of comp) {
       if (this.popUsed('enemy') >= this.popCap('enemy')) break;
       const u = this.addUnit(k, 'enemy', sx + rand(-60, 60), sy + rand(-50, 50));
       u.state = 'attackmove';
-      u.tx = (ptc ? ptc.x : 380) + rand(-80, 80); u.ty = (ptc ? ptc.y : 1620) + rand(-80, 80);
+      u.tx = (ptc ? ptc.x : HOME.x) + rand(-80, 80); u.ty = (ptc ? ptc.y : HOME.y) + rand(-80, 80);
     }
     this.sound.horn();
     const boss = this.wave % 6 === 0 && this.wave >= 6 ? ' 💥 Идут ОСАДНЫЕ ОРУДИЯ!' : '';
@@ -2923,20 +3050,29 @@ export class Game {
     const cx1 = Math.ceil((this.cam.x + margin) / S) * S;
     const cy0 = Math.floor((this.cam.y - margin) / S) * S;
     const cy1 = Math.ceil((this.cam.y + margin) / S) * S;
-    const PX = 470, PY = 2330, EX = 3140, EY = 560;
     for (let wy = cy0; wy <= cy1; wy += S) {
       for (let wx = cx0; wx <= cx1; wx += S) {
-        if (wx < -S || wx > WORLD.w + S || wy < -S || wy > WORLD.h + S) continue;
         const [ix, iy] = toIso(wx, wy);
         const cx = wx + S / 2, cy = wy + S / 2; // центр клетки для террейна
-        const hash = ((wx * 73 + wy * 137) & 0xFFFF);
-        const isBase = (Math.abs(cx - PX) < 190 && Math.abs(cy - PY) < 190) || (Math.abs(cx - EX) < 190 && Math.abs(cy - EY) < 190);
-        const tc = this.terrain.classAt(cx, cy);
+        const hash = ((wx * 73 - wy * 137) & 0xFFFF) ^ ((wx + wy) & 0xFFFF);
+        const hv = hash & 0xFFFF;
+        const isBase = (Math.abs(cx - HOME.x) < 190 && Math.abs(cy - HOME.y) < 190)
+          || (Math.abs(cx - RIVAL.x) < 190 && Math.abs(cy - RIVAL.y) < 190);
         let tile;
         if (isBase) tile = dirtTile;
-        else if (tc === 'water') tile = getWaterTile(hash);
-        else if (tc === 'hill') tile = getHillTile(hash);
-        else tile = hash % 5 === 0 ? dkGrass : grassTile;
+        else {
+          switch (this.terrain.classAt(cx, cy)) {
+            case 'deep': tile = getDeepWaterTile(hv); break;
+            case 'water': tile = getWaterTile(hv); break;
+            case 'sand': tile = getSandTile(hv); break;
+            case 'desert': tile = getDesertTile(hv); break;
+            case 'field': tile = getFieldTile(hv); break;
+            case 'forest': tile = hv % 2 ? getForestFloorTile(hv) : dkGrass; break;
+            case 'mountain': tile = getMountainTile(hv); break;
+            case 'hill': tile = getHillTile(hv); break;
+            default: tile = hv % 5 === 0 ? dkGrass : grassTile;
+          }
+        }
         ctx.drawImage(tile, ix - 33, iy - 17);
       }
     }
@@ -3560,48 +3696,69 @@ export class Game {
     ctx.strokeStyle = 'rgba(212,175,55,0.5)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.roundRect(x - 5, y - 5, W + 10, H + 10, 10); ctx.stroke();
     ctx.beginPath(); ctx.rect(x, y, W, H); ctx.clip();
+    // региональная миникарта: показывает область RANGE вокруг камеры (мир бесконечный)
+    const RANGE = 4200; // world-единиц от центра камеры до края миникарты
+    const sx = W / (RANGE * 2), sy = H / (RANGE * 2);
+    const toMap = (wx: number, wy: number): [number, number] =>
+      [x + (wx - this.cam.x) * sx + W / 2, y + (wy - this.cam.y) * sy + H / 2];
+    // фон — трава
     ctx.fillStyle = '#33582b'; ctx.fillRect(x, y, W, H);
-    const sx = W / WORLD.w, sy = H / WORLD.h;
-    // рельеф: вода (реки/озёра) и холмы — по сетке террейна
-    const cell = 90;
-    for (let wy = 0; wy < WORLD.h; wy += cell) {
-      for (let wx = 0; wx < WORLD.w; wx += cell) {
-        const tc = this.terrain.classAt(wx + cell / 2, wy + cell / 2);
-        if (tc === 'grass') continue;
-        ctx.fillStyle = tc === 'water' ? '#3b82f6' : '#8a8266';
-        ctx.fillRect(x + wx * sx - 0.5, y + wy * sy - 0.5, Math.max(2, cell * sx) + 1, Math.max(2, cell * sy) + 1);
+    // рельеф сэмплируем по сетке в видимой области
+    const gstep = 150;
+    for (let wy = this.cam.y - RANGE; wy <= this.cam.y + RANGE; wy += gstep) {
+      for (let wx = this.cam.x - RANGE; wx <= this.cam.x + RANGE; wx += gstep) {
+        const tc = this.terrain.classAt(wx, wy);
+        let col: string | null = null;
+        if (tc === 'water' || tc === 'deep') col = tc === 'deep' ? '#1d4e89' : '#3b82f6';
+        else if (tc === 'sand') col = '#d8c489';
+        else if (tc === 'desert') col = '#c9a456';
+        else if (tc === 'field') col = '#9aa548';
+        else if (tc === 'forest') col = '#2c5a26';
+        else if (tc === 'mountain') col = '#8a8a92';
+        else if (tc === 'hill') col = '#7c7a5c';
+        if (!col) continue;
+        ctx.fillStyle = col;
+        const [mx, my] = toMap(wx, wy);
+        const cw = Math.max(2, gstep * sx) + 1, ch = Math.max(2, gstep * sy) + 1;
+        ctx.fillRect(mx - cw / 2, my - ch / 2, cw, ch);
       }
     }
-    // nodes
+    // объекты — только в диапазоне
+    const inRange = (wx: number, wy: number) => Math.abs(wx - this.cam.x) < RANGE && Math.abs(wy - this.cam.y) < RANGE;
     for (const n of this.nodes) {
-      if (n.amount <= 0) continue;
+      if (n.amount <= 0 || !inRange(n.x, n.y)) continue;
       ctx.fillStyle = n.kind === 'wood' ? '#22c55e' : n.kind === 'gold' ? '#facc15' : '#fb7185';
-      ctx.fillRect(x + n.x * sx - 1.5, y + n.y * sy - 1.5, 3, 3);
+      const [mx, my] = toMap(n.x, n.y);
+      ctx.fillRect(mx - 1.5, my - 1.5, 3, 3);
     }
-    // relics
     for (const r of this.relics) {
-      if (r.taken) continue;
+      if (r.taken || !inRange(r.x, r.y)) continue;
+      const [mx, my] = toMap(r.x, r.y);
       ctx.fillStyle = '#fde047';
-      ctx.fillRect(x + r.x * sx - 2, y + r.y * sy - 2, 4, 4);
+      ctx.fillRect(mx - 2, my - 2, 4, 4);
     }
-    // buildings (враги — только в текущей видимости при тумане)
     for (const b of this.blds) {
       if (b.owner !== 'player' && !this.canSeeEnemy(b.x, b.y)) continue;
-      ctx.fillStyle = b.owner === 'player' ? '#60a5fa' : '#f87171';
+      if (!inRange(b.x, b.y)) continue;
+      ctx.fillStyle = b.owner === 'player' ? '#60a5fa' : b.tribe ? '#e0b050' : '#f87171';
       const s = b.key === 'towncenter' ? 6 : 4;
-      ctx.fillRect(x + b.x * sx - s / 2, y + b.y * sy - s / 2, s, s);
+      const [mx, my] = toMap(b.x, b.y);
+      ctx.fillRect(mx - s / 2, my - s / 2, s, s);
     }
-    // units
     for (const u of this.units) {
-      if (u.owner === 'player') { ctx.fillStyle = '#dbeafe'; ctx.fillRect(x + u.x * sx - 1, y + u.y * sy - 1, 2, 2); }
-      else { if (!this.canSeeEnemy(u.x, u.y)) continue; ctx.fillStyle = u.owner === 'neutral' ? '#eab308' : '#fecaca'; ctx.fillRect(x + u.x * sx - 1, y + u.y * sy - 1, 2, 2); }
+      if (!inRange(u.x, u.y)) continue;
+      const [mx, my] = toMap(u.x, u.y);
+      if (u.owner === 'player') { ctx.fillStyle = '#dbeafe'; ctx.fillRect(mx - 1, my - 1, 2, 2); }
+      else {
+        if (!this.canSeeEnemy(u.x, u.y)) continue;
+        ctx.fillStyle = u.tribe ? '#e0b050' : u.owner === 'neutral' ? '#eab308' : '#fecaca';
+        ctx.fillRect(mx - 1, my - 1, 2, 2);
+      }
     }
-    // viewport
-    const vx0 = (this.cam.x - this.vw / 2 / this.cam.zoom) * sx + x;
-    const vy0 = (this.cam.y - this.vh / 2 / this.cam.zoom) * sy + y;
+    // рамка вьюпорта — центр миникарты
     const vw = (this.vw / this.cam.zoom) * sx, vh = (this.vh / this.cam.zoom) * sy;
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2;
-    ctx.strokeRect(vx0, vy0, vw, vh);
+    ctx.strokeRect(x + W / 2 - vw / 2, y + H / 2 - vh / 2, vw, vh);
     ctx.restore();
     ctx.fillStyle = 'rgba(253,230,138,0.85)'; ctx.font = '700 9px Inter';
     ctx.textAlign = 'left'; ctx.fillText('КАРТА — нажмите, чтобы прыгнуть', x - 2, y - 8);
