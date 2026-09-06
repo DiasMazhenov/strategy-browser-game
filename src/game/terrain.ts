@@ -112,6 +112,26 @@ export class Terrain {
     return this.rawClass(wx, wz);
   }
 
+  // кэш ступеней высоты (мир бесконечный — детерминированно, периодически чистим)
+  private hCache = new Map<string, number>();
+  /**
+   * Высота рельефа в СТУПЕНЯХ (лесенка): 0 — равнина/вода/базы, выше — холмы и горы.
+   * Чисто визуальный слой: мир/движение остаются плоскими, плитки лишь поднимаются по вертикали.
+   */
+  heightAt(wx: number, wz: number): number {
+    const key = wx + ',' + wz;
+    const cached = this.hCache.get(key);
+    if (cached !== undefined) return cached;
+    let h = 0;
+    if (!this.inSafe(wx, wz)) {
+      const e = this.elev(wx, wz);
+      if (e >= 0.57) h = Math.max(0, Math.min(5, Math.round((e - 0.57) * 15)));
+    }
+    if (this.hCache.size > 60000) this.hCache.clear();
+    this.hCache.set(key, h);
+    return h;
+  }
+
   /** можно ли ставить контент/ходить (горы и вода — нет для спавна ресурсов/животных) */
   isLand(wx: number, wz: number): boolean {
     if (this.inSafe(wx, wz)) return true;

@@ -219,6 +219,8 @@ export interface HudSnapshot {
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => v < a ? a : v > b ? b : v;
 const dist2 = (ax: number, ay: number, bx: number, by: number) => { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
+// высота одной ступени рельефа в экранных iso-px (плитки поднимаются лесенкой)
+const RELIEF_STEP = 10;
 
 export class Game {
   canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
@@ -3045,6 +3047,11 @@ export class Game {
 
   // ---------- render ----------
   /** Convert world→iso then to screen-relative for visibility check */
+  // вертикальный подъём объекта на рельефе (iso-px): плитка в этой точке поднята на ступень×шаг
+  terrainUp(wx: number, wy: number): number {
+    const gx = Math.round(wx / TILE_STEP) * TILE_STEP, gy = Math.round(wy / TILE_STEP) * TILE_STEP;
+    return this.terrain.heightAt(gx, gy) * RELIEF_STEP;
+  }
   wToScreen(wx: number, wy: number): [number, number] {
     const [ix, iy] = toIso(wx, wy);
     return [ix - this.camIsoX(), iy - this.camIsoY()];
@@ -3086,6 +3093,46 @@ export class Game {
     const cx1 = Math.ceil((this.cam.x + margin) / S) * S;
     const cy0 = Math.floor((this.cam.y - margin) / S) * S;
     const cy1 = Math.ceil((this.cam.y + margin) / S) * S;
+    // палитра вертикальных граней-ступеней по биому (тёмный бок / светлее бок / тёмная кромка)
+    const cliffColors = (cls: string): [string, string, string] => {
+      switch (cls) {
+        case 'mountain': return ['#6e6e78', '#5c5c66', '#3f3f47'];
+        case 'hill': return ['#7d7050', '#6a5f44', '#4c4430'];
+        case 'desert': return ['#a8843f', '#907036', '#6b5226'];
+        case 'sand': return ['#b39c5f', '#9c8850', '#736238'];
+        case 'forest': return ['#33532a', '#2b4624', '#1d3018'];
+        case 'field': return ['#6f7a36', '#5f692e', '#444c22'];
+        case 'water': case 'deep': return ['#2f6fa8', '#285d8e', '#1b4166'];
+        default: return ['#4c7a33', '#40692b', '#2c4a1e']; // grass
+      }
+    };
+    // рисует две вертикальные грани (к камере), если плитка выше соседей спереди.
+    // углы поднятого ромба: R(ix+32,iy-up), L(ix-32,iy-up), B(ix,iy+16-up) — передний угол.
+    // rDrop/lDrop — вертикальный перепад до соседних плиток спереди (x+S и y+S).
+    const drawCliff = (ix: number, iy: number, up: number, cls: string, rDrop: number, lDrop: number) => {
+      if (up <= 0) return;
+      const [cL, cR, cB] = cliffColors(cls);
+      const R = [ix + 32, iy - up], L = [ix - 32, iy - up], B = [ix, iy + 16 - up];
+      const face = (p1: number[], p2: number[], drop: number, fill: string) => {
+        if (drop <= 0) return;
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
+        ctx.lineTo(p2[0], p2[1] + drop); ctx.lineTo(p1[0], p1[1] + drop);
+        ctx.closePath(); ctx.fill();
+        // слойки-пласты
+        ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;
+        for (let k = 3; k < drop; k += 4) {
+          ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + k); ctx.lineTo(p2[0], p2[1] + k); ctx.stroke();
+        }
+        // тёмная подошва
+        ctx.strokeStyle = cB; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + drop); ctx.lineTo(p2[0], p2[1] + drop); ctx.stroke();
+      };
+      face(R, B, rDrop, cR);   // правая грань (ребро R→B)
+      face(L, B, lDrop, cL);   // левая грань (ребро L→B)
+    };
+
     for (let wy = cy0; wy <= cy1; wy += S) {
       for (let wx = cx0; wx <= cx1; wx += S) {
         const [ix, iy] = toIso(wx, wy);
@@ -3095,9 +3142,10 @@ export class Game {
         const isBase = (Math.abs(cx - HOME.x) < 190 && Math.abs(cy - HOME.y) < 190)
           || (Math.abs(cx - RIVAL.x) < 190 && Math.abs(cy - RIVAL.y) < 190);
         let tile;
+        let cls: string = isBase ? 'dirt' : this.terrain.classAt(wx, wy);
         if (isBase) tile = dirtTile;
         else {
-          switch (this.terrain.classAt(cx, cy)) {
+          switch (cls) {
             case 'deep': tile = getDeepWaterTile(hv); break;
             case 'water': tile = getWaterTile(hv); break;
             case 'sand': tile = getSandTile(hv); break;
@@ -3106,10 +3154,16 @@ export class Game {
             case 'forest': tile = hv % 2 ? getForestFloorTile(hv) : dkGrass; break;
             case 'mountain': tile = getMountainTile(hv); break;
             case 'hill': tile = getHillTile(hv); break;
-            default: tile = hv % 5 === 0 ? dkGrass : grassTile;
+            default: cls = 'grass'; tile = hv % 5 === 0 ? dkGrass : grassTile;
           }
         }
-        ctx.drawImage(tile, ix - 33, iy - 17);
+        const up = this.terrain.heightAt(wx, wy) * RELIEF_STEP;
+        // перепад до соседей спереди (x+S — за правым ребром, y+S — за левым)
+        const rDrop = up - this.terrain.heightAt(wx + S, wy) * RELIEF_STEP;
+        const lDrop = up - this.terrain.heightAt(wx, wy + S) * RELIEF_STEP;
+        // сначала верхняя площадка, затем грани к соседям спереди (рисуются поверх более дальних плиток)
+        ctx.drawImage(tile, ix - 33, iy - 17 - up);
+        drawCliff(ix, iy, up, cls, rDrop, lDrop);
       }
     }
     // тинт биома поверх земли
@@ -3122,7 +3176,8 @@ export class Game {
     // ── decor (tiny grass tufts, flowers) ──
     for (const d of this.decor) {
       if (!this.inView(d.x, d.y, 30)) continue;
-      const [dx, dy] = toIso(d.x, d.y);
+      const [dx, dy0] = toIso(d.x, d.y);
+      const dy = dy0 - this.terrainUp(d.x, d.y);
       ctx.fillStyle = d.c; ctx.globalAlpha = 0.6;
       if (d.k === 0) { ctx.fillRect(dx, dy - d.s, 2, d.s + 2); }
       else { ctx.beginPath(); ctx.arc(dx, dy - 1, d.s * 0.6, 0, 7); ctx.fill(); }
@@ -3138,13 +3193,15 @@ export class Game {
       if (n.amount <= 0) continue;
       if (!this.inView(n.x, n.y, 80)) continue;
       const [ix, iy] = toIso(n.x, n.y);
-      drawList.push({ iy, draw: () => this.drawNodeIso(n, ix, iy) });
+      const ey = iy - this.terrainUp(n.x, n.y);
+      drawList.push({ iy: ey, draw: () => this.drawNodeIso(n, ix, ey) });
     }
     // relics
     for (const r of this.relics) {
       if (r.taken || !this.inView(r.x, r.y, 60)) continue;
       const [ix, iy] = toIso(r.x, r.y);
-      drawList.push({ iy, draw: () => this.drawRelicIso(r, ix, iy) });
+      const ey = iy - this.terrainUp(r.x, r.y);
+      drawList.push({ iy: ey, draw: () => this.drawRelicIso(r, ix, ey) });
     }
     // corpses
     for (const c of this.corpses) {
@@ -3187,7 +3244,8 @@ export class Game {
       // враги/нейтральные видны только в текущей видимости (туман войны)
       if (u.owner !== 'player' && !this.canSeeEnemy(u.x, u.y)) continue;
       const [ix, iy] = toIso(u.x, u.y);
-      drawList.push({ iy, draw: () => this.drawUnitIso(u, ix, iy) });
+      const ey = iy - this.terrainUp(u.x, u.y);
+      drawList.push({ iy: ey, draw: () => this.drawUnitIso(u, ix, ey) });
     }
 
     // sort by iso Y (depth sort)
