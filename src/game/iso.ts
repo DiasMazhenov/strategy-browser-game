@@ -261,45 +261,35 @@ export function getForestFloorTile(variant: number): HTMLCanvasElement {
 }
 
 // Горы: скалистые пики со снежной шапкой и тенью обрыва
+// Горная ПЛОЩАДКА (плоская вершина террасы): без пика на каждой плитке.
+// Редкие крупные вершины рисуются отдельно (engine.drawPeak) на локальных максимумах.
 export function getMountainTile(variant: number): HTMLCanvasElement {
   return getCachedTile('mount' + (variant % 3), TW, TH, (g) => {
-    // тень-обрыв у нижней кромки
+    // каменистый ромб
     diamondPath(g, TCX, TCY);
-    g.fillStyle = '#4a4640';
+    g.fillStyle = variant % 3 === 0 ? '#6b6a72' : '#62606a';
     g.fill();
-    // скальный массив — пик треугольником по центру ромба
-    g.fillStyle = variant % 3 === 0 ? '#6f6a62' : '#66615a';
+    // осветлённая верхняя кромка (дальний гребень террасы)
+    g.strokeStyle = 'rgba(200,200,210,0.5)';
+    g.lineWidth = 1.5;
     g.beginPath();
-    g.moveTo(TCX - 20, TCY + 10);
-    g.lineTo(TCX - 6, TCY - 12);
-    g.lineTo(TCX + 2, TCY - 16);
-    g.lineTo(TCX + 18, TCY + 10);
-    g.closePath();
-    g.fill();
-    // второй пик
-    g.fillStyle = '#7b756c';
+    g.moveTo(TCX - TILE_W / 2 + 3, TCY + 1);
+    g.lineTo(TCX, TCY - TILE_H / 2 + 2);
+    g.lineTo(TCX + TILE_W / 2 - 3, TCY + 1);
+    g.stroke();
+    // каменная крошка / трещины (вариативно)
+    for (let i = 0; i < 7; i++) {
+      const px = TCX + ((i * 17 + variant * 7) % 44) - 22;
+      const py = TCY + ((i * 13 + variant * 5) % 18) - 9;
+      g.fillStyle = i % 2 === 0 ? '#7d7b85' : '#54525b';
+      g.fillRect(px, py, 2, 2);
+    }
+    // тень-обрыв у нижней (передней) кромки
+    g.fillStyle = 'rgba(28,27,32,0.4)';
     g.beginPath();
-    g.moveTo(TCX - 2, TCY + 10);
-    g.lineTo(TCX + 12, TCY - 8);
-    g.lineTo(TCX + 24, TCY + 10);
-    g.closePath();
-    g.fill();
-    // снежные шапки
-    g.fillStyle = '#eef2f5';
-    g.beginPath();
-    g.moveTo(TCX - 8, TCY - 8);
-    g.lineTo(TCX - 6, TCY - 12);
-    g.lineTo(TCX + 2, TCY - 16);
-    g.lineTo(TCX + 5, TCY - 9);
-    g.lineTo(TCX - 1, TCY - 11);
-    g.closePath();
-    g.fill();
-    // тень на склоне
-    g.fillStyle = 'rgba(30,28,25,0.35)';
-    g.beginPath();
-    g.moveTo(TCX + 2, TCY - 16);
-    g.lineTo(TCX + 18, TCY + 10);
-    g.lineTo(TCX + 4, TCY + 10);
+    g.moveTo(TCX - TILE_W / 2 + 6, TCY - 1);
+    g.lineTo(TCX + TILE_W / 2 - 6, TCY - 1);
+    g.lineTo(TCX, TCY + TILE_H / 2 - 1);
     g.closePath();
     g.fill();
   });

@@ -112,24 +112,62 @@ export class Terrain {
     return this.rawClass(wx, wz);
   }
 
-  // кэш ступеней высоты (мир бесконечный — детерминированно, периодически чистим)
-  private hCache = new Map<string, number>();
   /**
-   * Высота рельефа в СТУПЕНЯХ (лесенка): 0 — равнина/вода/базы, выше — холмы и горы.
-   * Чисто визуальный слой: мир/движение остаются плоскими, плитки лишь поднимаются по вертикали.
+   * СЫРАЯ высота рельефа в СТУПЕНЯХ (0..5) от гладкого крупномасштабного шума —
+   * БЕЗ лимита склонов. Вода/берег/базы = 0 (плоский уровень). Высота чисто
+   * визуальная: мир/движение плоские, плитки лишь поднимаются лесенкой.
+   * Финальная выровненная высота (перепад соседей ≤ 1) строится в reliefGrid().
    */
-  heightAt(wx: number, wz: number): number {
-    const key = wx + ',' + wz;
-    const cached = this.hCache.get(key);
-    if (cached !== undefined) return cached;
-    let h = 0;
-    if (!this.inSafe(wx, wz)) {
-      const e = this.elev(wx, wz);
-      if (e >= 0.57) h = Math.max(0, Math.min(5, Math.round((e - 0.57) * 15)));
+  private rawRelief(wx: number, wz: number): number {
+    if (this.inSafe(wx, wz)) return 0;
+    const c = this.rawClass(wx, wz);
+    if (c === 'water' || c === 'deep' || c === 'sand') return 0; // вода и берег — плоские
+    // гладкий рельеф: только 3 низкочастотные октавы на крупной ячейке 900 (без дёрганья)
+    const rv = fbm(wx, wz, this.seed, 900, 3);
+    let L = (rv - 0.46) / 0.34;
+    L = L < 0 ? 0 : L > 1 ? 1 : L;
+    return Math.round(L * 5);
+  }
+
+  /**
+   * Построить сетку ступеней высоты для прямоугольника видимых клеток.
+   * Два прохода (сверху-слева и снизу-справа) делают высоту = min(сырая, расстояние
+   * до любой низины/воды) ⇒ соседние плитки отличаются максимум на 1 ступень —
+   * подъём идёт ПЛАВНОЙ лесенкой, без резких обрывов. Возвращает функцию (wx,wy)→ступень.
+   */
+  reliefGrid(wx0: number, wz0: number, wx1: number, wz1: number, S = 32): (x: number, y: number) => number {
+    const gx0 = Math.floor(wx0 / S), gx1 = Math.ceil(wx1 / S);
+    const gz0 = Math.floor(wz0 / S), gz1 = Math.ceil(wz1 / S);
+    const gw = gx1 - gx0 + 1, gh = gz1 - gz0 + 1;
+    const raw = new Int16Array(gw * gh);
+    for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
+      raw[r * gw + c] = this.rawRelief((gx0 + c) * S, (gz0 + r) * S);
     }
-    if (this.hCache.size > 60000) this.hCache.clear();
-    this.hCache.set(key, h);
-    return h;
+    const BIG = 99;
+    const dist = new Int16Array(gw * gh).fill(BIG);
+    // проход 1: слева-сверху
+    for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
+      const i = r * gw + c;
+      if (raw[i] === 0) { dist[i] = 0; continue; }
+      let v = dist[i];
+      if (c > 0) v = Math.min(v, dist[i - 1] + 1);
+      if (r > 0) v = Math.min(v, dist[i - gw] + 1);
+      dist[i] = v;
+    }
+    // проход 2: справа-снизу
+    for (let r = gh - 1; r >= 0; r--) for (let c = gw - 1; c >= 0; c--) {
+      const i = r * gw + c;
+      if (raw[i] === 0) { dist[i] = 0; continue; }
+      let v = dist[i];
+      if (c < gw - 1) v = Math.min(v, dist[i + 1] + 1);
+      if (r < gh - 1) v = Math.min(v, dist[i + gw] + 1);
+      dist[i] = v;
+    }
+    return (x: number, y: number) => {
+      const c = Math.round(x / S) - gx0, r = Math.round(y / S) - gz0;
+      if (c < 0 || c >= gw || r < 0 || r >= gh) return 0;
+      return Math.max(0, Math.min(raw[r * gw + c], dist[r * gw + c]));
+    };
   }
 
   /** можно ли ставить контент/ходить (горы и вода — нет для спавна ресурсов/животных) */

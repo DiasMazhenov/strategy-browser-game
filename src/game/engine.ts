@@ -3047,11 +3047,6 @@ export class Game {
 
   // ---------- render ----------
   /** Convert world→iso then to screen-relative for visibility check */
-  // вертикальный подъём объекта на рельефе (iso-px): плитка в этой точке поднята на ступень×шаг
-  terrainUp(wx: number, wy: number): number {
-    const gx = Math.round(wx / TILE_STEP) * TILE_STEP, gy = Math.round(wy / TILE_STEP) * TILE_STEP;
-    return this.terrain.heightAt(gx, gy) * RELIEF_STEP;
-  }
   wToScreen(wx: number, wy: number): [number, number] {
     const [ix, iy] = toIso(wx, wy);
     return [ix - this.camIsoX(), iy - this.camIsoY()];
@@ -3093,6 +3088,9 @@ export class Game {
     const cx1 = Math.ceil((this.cam.x + margin) / S) * S;
     const cy0 = Math.floor((this.cam.y - margin) / S) * S;
     const cy1 = Math.ceil((this.cam.y + margin) / S) * S;
+    // сетка ступеней высоты на видимую область (перепад соседей ≤ 1 — плавная лесенка; вода плоская)
+    const hAt = this.terrain.reliefGrid(cx0 - S, cy0 - S, cx1 + S, cy1 + S, S);
+    const upAt = (wx: number, wy: number) => hAt(Math.round(wx / S) * S, Math.round(wy / S) * S) * RELIEF_STEP;
     // палитра вертикальных граней-ступеней по биому (тёмный бок / светлее бок / тёмная кромка)
     const cliffColors = (cls: string): [string, string, string] => {
       switch (cls) {
@@ -3152,15 +3150,15 @@ export class Game {
             case 'desert': tile = getDesertTile(hv); break;
             case 'field': tile = getFieldTile(hv); break;
             case 'forest': tile = hv % 2 ? getForestFloorTile(hv) : dkGrass; break;
-            case 'mountain': tile = getMountainTile(hv); break;
+            case 'mountain': tile = getMountainTile(hv); break; // каменистая площадка (без пика)
             case 'hill': tile = getHillTile(hv); break;
             default: cls = 'grass'; tile = hv % 5 === 0 ? dkGrass : grassTile;
           }
         }
-        const up = this.terrain.heightAt(wx, wy) * RELIEF_STEP;
+        const up = upAt(wx, wy);
         // перепад до соседей спереди (x+S — за правым ребром, y+S — за левым)
-        const rDrop = up - this.terrain.heightAt(wx + S, wy) * RELIEF_STEP;
-        const lDrop = up - this.terrain.heightAt(wx, wy + S) * RELIEF_STEP;
+        const rDrop = up - upAt(wx + S, wy);
+        const lDrop = up - upAt(wx, wy + S);
         // сначала верхняя площадка, затем грани к соседям спереди (рисуются поверх более дальних плиток)
         ctx.drawImage(tile, ix - 33, iy - 17 - up);
         drawCliff(ix, iy, up, cls, rDrop, lDrop);
@@ -3177,7 +3175,7 @@ export class Game {
     for (const d of this.decor) {
       if (!this.inView(d.x, d.y, 30)) continue;
       const [dx, dy0] = toIso(d.x, d.y);
-      const dy = dy0 - this.terrainUp(d.x, d.y);
+      const dy = dy0 - upAt(d.x, d.y);
       ctx.fillStyle = d.c; ctx.globalAlpha = 0.6;
       if (d.k === 0) { ctx.fillRect(dx, dy - d.s, 2, d.s + 2); }
       else { ctx.beginPath(); ctx.arc(dx, dy - 1, d.s * 0.6, 0, 7); ctx.fill(); }
@@ -3188,19 +3186,40 @@ export class Game {
     type Drawable = { iy: number; draw: () => void };
     const drawList: Drawable[] = [];
 
+    // ── редкие ГОРНЫЕ ВЕРШИНЫ (не на каждой плитке): только локальные максимумы,
+    //    прорежены детерминированно — получается хребет, а не частокол пиков ──
+    for (let wy = cy0; wy <= cy1; wy += S) {
+      for (let wx = cx0; wx <= cx1; wx += S) {
+        const lvl = hAt(wx, wy);
+        if (lvl < 4) continue;                       // только высокий горный пояс
+        const cls = this.terrain.classAt(wx + S / 2, wy + S / 2);
+        if (cls !== 'mountain') continue;
+        // локальный максимум: не ниже соседей
+        if (lvl < hAt(wx + S, wy) || lvl < hAt(wx - S, wy) || lvl < hAt(wx, wy + S) || lvl < hAt(wx, wy - S)) continue;
+        // прореживание ~1/3 площадок (детерминированно по координатам)
+        const ph = ((wx * 73856093) ^ (wy * 19349663)) & 0xff;
+        if (ph < 150) continue;
+        const [ix, iy0] = toIso(wx, wy);
+        const baseUp = upAt(wx, wy);
+        const iy = iy0 - baseUp;
+        const peakH = 30 + (ph % 14);                 // высота пика в px
+        drawList.push({ iy: iy0, draw: () => this.drawPeak(ix, iy, peakH) });
+      }
+    }
+
     // nodes
     for (const n of this.nodes) {
       if (n.amount <= 0) continue;
       if (!this.inView(n.x, n.y, 80)) continue;
       const [ix, iy] = toIso(n.x, n.y);
-      const ey = iy - this.terrainUp(n.x, n.y);
+      const ey = iy - upAt(n.x, n.y);
       drawList.push({ iy: ey, draw: () => this.drawNodeIso(n, ix, ey) });
     }
     // relics
     for (const r of this.relics) {
       if (r.taken || !this.inView(r.x, r.y, 60)) continue;
       const [ix, iy] = toIso(r.x, r.y);
-      const ey = iy - this.terrainUp(r.x, r.y);
+      const ey = iy - upAt(r.x, r.y);
       drawList.push({ iy: ey, draw: () => this.drawRelicIso(r, ix, ey) });
     }
     // corpses
@@ -3244,7 +3263,7 @@ export class Game {
       // враги/нейтральные видны только в текущей видимости (туман войны)
       if (u.owner !== 'player' && !this.canSeeEnemy(u.x, u.y)) continue;
       const [ix, iy] = toIso(u.x, u.y);
-      const ey = iy - this.terrainUp(u.x, u.y);
+      const ey = iy - upAt(u.x, u.y);
       drawList.push({ iy: ey, draw: () => this.drawUnitIso(u, ix, ey) });
     }
 
@@ -3399,6 +3418,50 @@ export class Game {
       ctx.fillStyle = n.kind === 'wood' ? '#65a30d' : n.kind === 'gold' ? '#facc15' : '#fb7185';
       ctx.fillRect(ix - 15, iy + 11, 30 * s, 3);
     }
+  }
+
+  // Крупная редкая горная вершина: изо-пирамида со снежной шапкой (без повтора на каждой плитке).
+  // (ix,iy) — центр поднятой плитки (опора пика); пик уходит вверх на peakH.
+  drawPeak(ix: number, iy: number, peakH: number) {
+    const { ctx } = this;
+    const bx = 27, by = 15;            // полу-размеры ромба-основания
+    const ax = ix, ay = iy - peakH;    // вершина
+    // тень под пиком (на площадке)
+    ctx.fillStyle = 'rgba(8,12,10,0.30)';
+    ctx.beginPath();
+    ctx.moveTo(ix, iy + by - 1); ctx.lineTo(ix + bx - 2, iy); ctx.lineTo(ix, iy - by + 2); ctx.lineTo(ix - bx + 2, iy);
+    ctx.closePath(); ctx.fill();
+    // передняя ЛЕВАЯ грань (темнее): apex → левый угол → передний угол
+    ctx.fillStyle = '#56555e';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay); ctx.lineTo(ix - bx, iy); ctx.lineTo(ix, iy + by); ctx.closePath(); ctx.fill();
+    // передняя ПРАВАЯ грань (светлее): apex → правый угол → передний угол
+    ctx.fillStyle = '#6c6a74';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay); ctx.lineTo(ix + bx, iy); ctx.lineTo(ix, iy + by); ctx.closePath(); ctx.fill();
+    // скальные рёбра (лёгкая штриховка на правой грани)
+    ctx.strokeStyle = 'rgba(30,30,36,0.25)'; ctx.lineWidth = 1;
+    for (let k = 1; k <= 3; k++) {
+      const t = k / 4;
+      ctx.beginPath();
+      ctx.moveTo(ax + (ix + bx - ax) * t * 0.7, ay + (iy - ay) * t * 0.7);
+      ctx.lineTo(ax + (ix - ax) * t * 0.7 + (ix + bx - ix) * 0.0, ay + (iy + by - ay) * t * 0.7);
+      ctx.stroke();
+    }
+    // снежная шапка у вершины
+    const cap = peakH * 0.32;
+    ctx.fillStyle = '#eef2f5';
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - bx * 0.34, ay + cap);
+    ctx.lineTo(ax + bx * 0.30, ay + cap * 0.9);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#c9d2dc'; // тень на снегу (правая сторона)
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + bx * 0.30, ay + cap * 0.9);
+    ctx.lineTo(ax + bx * 0.10, ay + cap * 0.55);
+    ctx.closePath(); ctx.fill();
   }
 
   drawRelicIso(r: Relic, ix: number, iy: number) {
