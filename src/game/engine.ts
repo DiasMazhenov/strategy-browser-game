@@ -465,12 +465,12 @@ export class Game {
   // равномерная раскладка лагерей племён по сетке (узлы гексагональной решётки,
   // чтобы расстояния были максимально равными), каждый узел джиттерится детерм.
   private planTribeCamps() {
-    const STEP = 1500;          // расстояние между соседними лагерями
+    const STEP = 8000;          // расстояние между соседними лагерями (карта огромная — баз немного, но равноудалены)
     // аксиальная сетка узлов (как гексы) поверх мира — равные расстояния по 6 осям
     const rowH = STEP * Math.sqrt(3) / 2; // вертикальный шаг рядов
     let placed = 0;
-    for (let row = -12; row <= 12; row++) {
-      for (let col = -12; col <= 12; col++) {
+    for (let row = -4; row <= 4; row++) {
+      for (let col = -4; col <= 4; col++) {
         // базовый центр узла в мире (центр мира — середина WORLD)
         let bx = WORLD.w / 2 + col * STEP * 1.5;
         let by = WORLD.h / 2 + row * rowH + (col % 2 ? rowH / 2 : 0);
@@ -1973,14 +1973,33 @@ export class Game {
     }
   }
 
+  // Далёкие нейтральные племена/звери «спят»: вне зоны камеры и боя их O(n²) логика
+  // (поиск врагов, сепарация, стрельба башен) не выполняется — иначе на огромной карте
+  // с множеством лагерей FPS падает. Просыпаются, когда рядом камера ИЛИ свои/вражеские
+  // юниты/здания (бой на их территории идёт как обычно).
+  private activeZone(wx: number, wy: number, rad = 2200): boolean {
+    const rc = rad * 1.7;
+    const ddx = this.cam.x - wx, ddy = this.cam.y - wy;
+    if (ddx * ddx + ddy * ddy < rc * rc) return true; // рядом с камерой
+    const r2 = rad * rad;
+    for (const u of this.units) { if (u.owner === 'neutral') continue; const dx = u.x - wx, dy = u.y - wy; if (dx * dx + dy * dy < r2) return true; }
+    for (const b of this.blds) { if (b.owner === 'neutral') continue; const dx = b.x - wx, dy = b.y - wy; if (dx * dx + dy * dy < r2) return true; }
+    return false;
+  }
+
   updateUnits(dt: number) {
     const us = this.units;
+    // кто из юнитов «бодрствует» в этом кадре (нейтралы далеко — спят)
+    const wake = new Array<boolean>(us.length);
+    for (let i = 0; i < us.length; i++) wake[i] = us[i].owner !== 'neutral' || this.activeZone(us[i].x, us[i].y);
     // separation (cheap grid-less, n small)
     for (let i = 0; i < us.length; i++) {
       const a = us[i];
       for (let j = i + 1; j < us.length; j++) {
+        if (!wake[i] && !wake[j]) continue; // спящие друг на друга не давят
         const b = us[j];
         const dx = b.x - a.x, dy = b.y - a.y;
+        if (dx > 26 || dx < -26 || dy > 26 || dy < -26) continue; // грубый отсев по осям
         const d2 = dx * dx + dy * dy;
         if (d2 < 26 * 26 && d2 > 0.01) {
           const d = Math.sqrt(d2), push = (26 - d) * 0.5;
@@ -1993,6 +2012,8 @@ export class Game {
     for (let i = us.length - 1; i >= 0; i--) {
       const u = us[i];
       if (u.hidden) continue; // в гарнизоне
+      // спящий нейтрал далеко — пропускаем его апдейт и коллизии целиком
+      if (!wake[i]) { (u as Unit & { walk?: boolean }).walk = false; continue; }
       // цель-реликвия: подобрать при подходе
       if (u.relicTarget != null && u.owner === 'player') {
         const r = this.relics.find(x => x.id === u.relicTarget);
@@ -2888,7 +2909,9 @@ export class Game {
       }
       // defense
       const atk = BUILDING_DEFS[b.key].attack;
-      if (atk) {
+      // далёкие нейтральные башни племён спят — не сканируют цели (огромная карта, много лагерей)
+      const dormantBld = b.owner === 'neutral' && !this.activeZone(b.x, b.y, atk ? atk.range + 1800 : 2200);
+      if (atk && !dormantBld) {
         b.cd -= dt;
         const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1);
         if (b.cd <= 0) {
@@ -4225,6 +4248,9 @@ export class Game {
   // кэш фона мини-карты (террейн статичен — перерисовываем редко/при ресайзе)
   minimapBg: HTMLCanvasElement | null = null;
   minimapBgW = 0; minimapBgH = 0;
+  // кэш слоя тумана мини-карты (обновляем редко, НЕ каждый кадр)
+  minimapFog: HTMLCanvasElement | null = null;
+  minimapFogW = 0; minimapFogH = 0; minimapFogT = 0;
   drawMinimap(ctx: CanvasRenderingContext2D) {
     // МИРОВАЯ мини-карта: показывает ВЕСЬ мир (0..WORLD), а не регион вокруг камеры.
     // Кликабельная (minimapJump переводит долю → мировую координату), с рамкой обзора.
@@ -4236,17 +4262,17 @@ export class Game {
     const sx = W / WORLD.w, sy = H / WORLD.h;
     const toMap = (wx: number, wy: number): [number, number] => [x + wx * sx, y + wy * sy];
 
-    // ── фон террейна: рисуем в оффскрин раз и переиспользуем (дешево каждый кадр) ──
+    // ── фон террейна: оффскрин в ПОЛОВИННОМ разрешении (террейн статичен) ──
     if (!this.minimapBg || this.minimapBgW !== Math.round(W) || this.minimapBgH !== Math.round(H)) {
+      const scale = 0.5;
+      const bw = Math.max(2, Math.round(W * scale)), bh = Math.max(2, Math.round(H * scale));
       const bg = document.createElement('canvas');
-      bg.width = Math.max(2, Math.round(W)); bg.height = Math.max(2, Math.round(H));
+      bg.width = bw; bg.height = bh;
       const c = bg.getContext('2d')!;
-      c.fillStyle = '#2f5226'; c.fillRect(0, 0, bg.width, bg.height);
-      // сэмпл террейна пиксель-в-пиксель по размеру карты (террейн статичен)
-      const pw = Math.ceil(bg.width), ph = Math.ceil(bg.height);
-      for (let py = 0; py < ph; py++) {
-        for (let px = 0; px < pw; px++) {
-          const wx = (px / pw) * WORLD.w, wy = (py / ph) * WORLD.h;
+      c.fillStyle = '#2f5226'; c.fillRect(0, 0, bw, bh);
+      for (let py = 0; py < bh; py++) {
+        for (let px = 0; px < bw; px++) {
+          const wx = (px / bw) * WORLD.w, wy = (py / bh) * WORLD.h;
           const tc = this.terrain.classAt(wx, wy);
           let col: string | null = null;
           if (tc === 'water' || tc === 'deep') col = tc === 'deep' ? '#1d4e89' : '#2f6fb0';
@@ -4258,10 +4284,32 @@ export class Game {
           else if (tc === 'hill') col = '#7c7a5c';
           if (!col) continue;
           c.fillStyle = col;
-          c.fillRect(px, py, 1.4, 1.4);
+          c.fillRect(px, py, 1.6, 1.6);
         }
       }
       this.minimapBg = bg; this.minimapBgW = Math.round(W); this.minimapBgH = Math.round(H);
+      this.minimapFog = null; // сбросить кэш тумана под новый размер
+    }
+
+    // ── слой тумана: перерисовываем в оффскрин раз в ~0.5с (не каждый кадр!) ──
+    this.minimapFogT -= 1; // считаем кадры; обновляем ~раз в 30 кадров
+    if (!this.minimapFog || this.minimapFogW !== Math.round(W) || this.minimapFogH !== Math.round(H) || this.minimapFogT <= 0) {
+      this.minimapFogT = 30;
+      const fc = document.createElement('canvas');
+      fc.width = Math.max(2, Math.round(W)); fc.height = Math.max(2, Math.round(H));
+      const fctx = fc.getContext('2d')!;
+      if (this.settings.fogOfWar) {
+        fctx.fillStyle = 'rgba(5,9,7,0.80)';
+        const step = this.fogCell;
+        const cw = Math.max(2, step * sx) + 1, ch = Math.max(2, step * sy) + 1;
+        for (let gy = 0; gy < this.fogGH; gy++) {
+          for (let gx = 0; gx < this.fogGW; gx++) {
+            if (this.fogExpl[gy * this.fogGW + gx]) continue;
+            fctx.fillRect(gx * step * sx, gy * step * sy, cw, ch);
+          }
+        }
+      }
+      this.minimapFog = fc; this.minimapFogW = Math.round(W); this.minimapFogH = Math.round(H);
     }
 
     ctx.save();
@@ -4272,21 +4320,8 @@ export class Game {
     ctx.beginPath(); ctx.roundRect(x - 5, y - 5, W + 10, H + 10, 10); ctx.stroke();
     ctx.save();
     ctx.beginPath(); ctx.rect(x, y, W, H); ctx.clip();
-    if (this.minimapBg) ctx.drawImage(this.minimapBg, x, y, W, H);
-
-    // туман войны: неисследованное — затемняем (по сетке fogCell)
-    if (this.settings.fogOfWar) {
-      ctx.fillStyle = 'rgba(5,9,7,0.78)';
-      const step = this.fogCell;
-      for (let gy = 0; gy < this.fogGH; gy++) {
-        for (let gx = 0; gx < this.fogGW; gx++) {
-          if (this.fogExpl[gy * this.fogGW + gx]) continue;
-          const wx = gx * step, wy = gy * step;
-          const [mx, my] = toMap(wx, wy);
-          ctx.fillRect(mx, my, Math.max(2, step * sx) + 1, Math.max(2, step * sy) + 1);
-        }
-      }
-    }
+    if (this.minimapBg) { ctx.imageSmoothingEnabled = true; ctx.drawImage(this.minimapBg, x, y, W, H); }
+    if (this.minimapFog) ctx.drawImage(this.minimapFog, x, y, W, H);
 
     // ресурсы (мелкие точки) — только в исследованной области
     for (const n of this.nodes) {
