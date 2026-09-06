@@ -320,7 +320,21 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
     "baseW": 205,
     "w": 205,
     "h": 112
-  }
+  },
+  // ── казахская раса (игрок): кочевые батыры — меховые тымак, ламеллярная бронь с орнаментом ──
+  "kz_villager":    { "ax": 29.2, "ay": 150, "baseW": 52,  "w": 52,  "h": 150 },
+  "kz_swordsman":   { "ax": 44.7, "ay": 150, "baseW": 90,  "w": 90,  "h": 150 },
+  "kz_archer":      { "ax": 38.6, "ay": 150, "baseW": 93,  "w": 93,  "h": 150 },
+  "kz_spearman":    { "ax": 42.5, "ay": 150, "baseW": 82,  "w": 82,  "h": 150 },
+  "kz_knight":      { "ax": 48,   "ay": 128, "baseW": 115, "w": 115, "h": 128 },
+  "kz_cavalry":     { "ax": 101,  "ay": 150, "baseW": 202, "w": 202, "h": 150 },
+  "kz_catapult":    { "ax": 67.5, "ay": 81,  "baseW": 135, "w": 135, "h": 81 },
+  "kz_monk":        { "ax": 44.9, "ay": 150, "baseW": 80,  "w": 80,  "h": 150 },
+  // направленные кадры мечника/крестьянина (f=перёд, b=спина) — симметричные, якорь по центру
+  "kz_swordsman_f": { "ax": 66.5, "ay": 150, "baseW": 133, "w": 133, "h": 150 },
+  "kz_swordsman_b": { "ax": 67,   "ay": 150, "baseW": 134, "w": 134, "h": 150 },
+  "kz_villager_f":  { "ax": 38.5, "ay": 150, "baseW": 77,  "w": 77,  "h": 150 },
+  "kz_villager_b":  { "ax": 45,   "ay": 150, "baseW": 90,  "w": 90,  "h": 150 }
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {

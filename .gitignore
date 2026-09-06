@@ -11,3 +11,6 @@ tile-test.png
 # одноразовые скретч-скрипты (рабочая версия обработчика спрайтов — scripts/process-art.cjs)
 scripts/proc.cjs
 scripts/tile-test.cjs
+# исходники AI-спрайтов казахской расы (тяжёлые PNG на magenta-фоне; готовые кадры — в kz/*.png)
+src/assets/sprites/units/kz/raw/
+refs/

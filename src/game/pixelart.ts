@@ -102,6 +102,19 @@ import uCow from '../assets/sprites/units/cow.png';
 import uCowW from '../assets/sprites/units/cow_w.png';
 import uDeer from '../assets/sprites/units/deer.png';
 import uDeerW from '../assets/sprites/units/deer_w.png';
+// ── казахская раса (игрок): кочевые батыры — отдельный набор спрайтов (старые остаются врагам/нейтралам) ──
+import kzVillager from '../assets/sprites/units/kz/kz_villager.png';
+import kzSwordsman from '../assets/sprites/units/kz/kz_swordsman.png';
+import kzArcher from '../assets/sprites/units/kz/kz_archer.png';
+import kzSpearman from '../assets/sprites/units/kz/kz_spearman.png';
+import kzKnight from '../assets/sprites/units/kz/kz_knight.png';
+import kzCavalry from '../assets/sprites/units/kz/kz_cavalry.png';
+import kzCatapult from '../assets/sprites/units/kz/kz_catapult.png';
+import kzMonk from '../assets/sprites/units/kz/kz_monk.png';
+import kzSwordsmanF from '../assets/sprites/units/kz/kz_swordsman_f.png';
+import kzSwordsmanB from '../assets/sprites/units/kz/kz_swordsman_b.png';
+import kzVillagerF from '../assets/sprites/units/kz/kz_villager_f.png';
+import kzVillagerB from '../assets/sprites/units/kz/kz_villager_b.png';
 
 const mk = (src: string): HTMLImageElement => { const im = new Image(); im.src = src; return im; };
 // кадр покоя/атаки
@@ -122,6 +135,20 @@ const UNIT_WALK_B: Partial<Record<UnitKey, HTMLImageElement>> = {
   sheep: mk(uSheepW), cow: mk(uCowW), deer: mk(uDeerW),
 };
 const ready = (im?: HTMLImageElement) => !!im && im.complete && im.naturalWidth > 0;
+
+// ── казахская раса (игрок): базовые боковые кадры и направленные «перёд/спина» ──
+const KZ_BASE: Partial<Record<UnitKey, HTMLImageElement>> = {
+  villager: mk(kzVillager), swordsman: mk(kzSwordsman), archer: mk(kzArcher), spearman: mk(kzSpearman),
+  knight: mk(kzKnight), cavalry: mk(kzCavalry), catapult: mk(kzCatapult), monk: mk(kzMonk),
+};
+const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
+  swordsman: [[mk(kzSwordsmanF), 'kz_swordsman_f'], [mk(kzSwordsmanF), 'kz_swordsman_f']],
+  villager: [[mk(kzVillagerF), 'kz_villager_f'], [mk(kzVillagerF), 'kz_villager_f']],
+};
+const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
+  swordsman: [[mk(kzSwordsmanB), 'kz_swordsman_b'], [mk(kzSwordsmanB), 'kz_swordsman_b']],
+  villager: [[mk(kzVillagerB), 'kz_villager_b'], [mk(kzVillagerB), 'kz_villager_b']],
+};
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
 const WALK_ANCHOR_A: Partial<Record<UnitKey, string>> = {
@@ -221,8 +248,12 @@ const WF_WALK_BACK: [HTMLImageElement, string][] = [
 ];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
-  const base = UNIT_IMAGES[u.key];
-  if (!ready(base) || !UNIT_ANCHORS[u.key]) return false;
+  // казахская раса (игрок) рисуется отдельным набором спрайтов; враги/нейтралы — штатными
+  const isKz = u.owner === 'player' && !!KZ_BASE[u.key];
+  const kzKey = 'kz_' + u.key;
+  const base = isKz ? KZ_BASE[u.key] : UNIT_IMAGES[u.key];
+  const baseAnchorKey = isKz ? kzKey : u.key;
+  if (!ready(base) || !(UNIT_ANCHORS[baseAnchorKey] || UNIT_ANCHORS[u.key])) return false;
   const f = u.face;
   // реальное перемещение по полю (в бою на месте не «шагаем»)
   const move = u.walk ?? moving(u);
@@ -242,17 +273,31 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isMounted = isKnight || isCavalry; // всадник на коне
   // юниты с боковым 2-кадровым шагом, которым добавлен разворот на/от камеры (конница, монах, волк)
   const fbUnit = isMounted || isMonk || isWolf;
-  const hasDirWalk = isVill || isSword || isArch || isSpear; // пехота: 4-кадровая направленная ходьба
+  // казахская раса: направленная ходьба — только «перёд/спина» из набора расы; работа/рубка/лук
+  // рисуются базовым боковым кадром (у расы один боковой кадр), 4-кадровые циклы штатной расы не трогаем
+  const hasDirWalk = !isKz && (isVill || isSword || isArch || isSpear);
+  const fmode = u.fmode ?? 0;
+  const kzFB = isKz && move && (fmode === 1 || fmode === 2);
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
-  const working = isVill && !!u.wkind && !move &&
+  const working = !isKz && isVill && !!u.wkind && !move &&
     (u.state === 'gather' || u.state === 'build');
   // ополченец рубит мечом на месте (базовый кадр = замах/готовность, sslash = удар сверху-вниз)
-  const slashing = isSword && !move && u.atkAnim > 0.45 && ready(SW_SLASH[0]);
+  const slashing = !isKz && isSword && !move && u.atkAnim > 0.45 && ready(SW_SLASH[0]);
   // лучник стреляет: arelease — в момент выстрела (atkAnim высокий), aaim — натягивает/держит лук в зоне
-  const loosing = isArch && !move && u.atkAnim > 0.5 && ready(AR_RELEASE[0]);
-  const aiming = isArch && !move && !loosing && !!u.aiming && ready(AR_AIM[0]);
+  const loosing = !isKz && isArch && !move && u.atkAnim > 0.5 && ready(AR_RELEASE[0]);
+  const aiming = !isKz && isArch && !move && !loosing && !!u.aiming && ready(AR_AIM[0]);
 
-  if (working) {
+  if (kzFB) {
+    // раса игрока: «на камеру» — перёд, «от камеры» — спина (2-фазный цикл из кадра расы)
+    const cyc = fmode === 1 ? KZ_FRONT_CYCLE[u.key] : KZ_BACK_CYCLE[u.key];
+    const idx = Math.min(1, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 2));
+    const [img0, key0] = cyc && ready(cyc[idx]?.[0]) ? cyc[idx] : [null, kzKey];
+    if (img0 && ready(img0)) { im = img0; anKey = key0; flip = 1; }
+    else { im = base!; anKey = kzKey; }
+  } else if (isKz) {
+    // прочие состояния расы — единый боковой кадр (отражается по face)
+    im = base!; anKey = kzKey;
+  } else if (working) {
     // кадр работы по виду деятельности: [замах, удар] переключаются фазой цикла
     const pair = VILL_WORK[u.wkind!] ?? VILL_WORK.chop;
     const strike = (u.wphase ?? 0) > 0.62;
@@ -282,7 +327,6 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     else { im = base!; anKey = u.key; }
   } else if (hasDirWalk && move) {
     // 4-фазная ходьба по изо-направлению: сбоку (отражается по face) / спереди / со спины
-    const fmode = u.fmode ?? 0;
     const cyc = isVill
       ? (fmode === 1 ? VILL_WALK_FRONT : fmode === 2 ? VILL_WALK_BACK : VILL_WALK_SIDE)
       : isArch
@@ -311,10 +355,10 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const H = UNIT_TARGET_H[u.key] ?? 46;
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
-  // разворот на/от камеры (конница/монах/волк) — готовые кадры без бокового крена, но с вертикальным подскоком
-  const mountFB = fbUnit && move && (u.fmode === 1 || u.fmode === 2);
+  // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
+  const mountFB = kzFB || (fbUnit && move && (u.fmode === 1 || u.fmode === 2));
   // на готовых кадрах работы/рубки/стрельбы/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
-  const upright = working || slashing || loosing || aiming || mountFB || (hasDirWalk && move);
+  const upright = working || slashing || loosing || aiming || mountFB || isKz || (hasDirWalk && move);
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
