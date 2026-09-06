@@ -16,6 +16,34 @@ const normKey = (s: string) => s.normalize('NFC').toLowerCase().replace(/ё/g, '
 const CLIP_URLS: Record<string, string> = {};
 for (const f of CLIP_FILES) CLIP_URLS[normKey(f.replace(/\.mp3$/i, ''))] = `voices/${encodeURIComponent(f)}`;
 
+// ── казахские голоса расы игрока (public/voices/kaz-voises/). Канонический ключ → варианты файлов ──
+const KZ_CLIPS: Record<string, string[]> = {
+  'готов':    ['kaz-voises/Я готов - каз.mp3'],
+  'вперед':   ['kaz-voises/Вперед - каз.mp3', 'kaz-voises/Вперед2 - каз.mp3'],
+  'в атаку':  ['kaz-voises/В атаку - каз.mp3'],
+  'к бою':    ['kaz-voises/К бою - каз.mp3'],
+  'за короля':['kaz-voises/За короля - каз.mp3', 'kaz-voises/За короля2 - каз.mp3'],
+  'честь':    ['kaz-voises/Клянёмся честью - каз.mp3', 'kaz-voises/Клянёмся честью2 - каз.mp3'],
+};
+const KZ_CLIP_URLS: Record<string, string[]> = {};
+for (const [key, paths] of Object.entries(KZ_CLIPS)) {
+  KZ_CLIP_URLS[key] = paths.map(p => {
+    const slash = p.lastIndexOf('/');
+    return `voices/${p.slice(0, slash + 1)}${encodeURIComponent(p.slice(slash + 1))}`;
+  });
+}
+// казахские реплики по юнитам/событиям (ключи из KZ_CLIPS); пустой список → откат на русскую запись
+const KZ_PHRASES: Record<string, { select: string[]; move: string[]; attack: string[]; gather: string[] }> = {
+  villager:  { select: ['готов'], move: [], attack: [], gather: [] },
+  swordsman: { select: ['готов', 'к бою'], move: ['вперед', 'к бою'], attack: ['в атаку', 'за короля'], gather: [] },
+  spearman:  { select: ['к бою', 'готов'], move: ['вперед', 'к бою'], attack: ['в атаку', 'за короля'], gather: [] },
+  archer:    { select: ['готов', 'к бою'], move: ['вперед'], attack: ['в атаку', 'за короля'], gather: [] },
+  knight:    { select: ['честь', 'готов', 'к бою'], move: ['вперед'], attack: ['за короля', 'в атаку', 'честь'], gather: [] },
+  cavalry:   { select: ['готов', 'к бою'], move: ['вперед'], attack: ['в атаку', 'за короля'], gather: [] },
+  catapult:  { select: ['готов', 'к бою'], move: ['вперед'], attack: ['в атаку'], gather: [] },
+  monk:      { select: ['готов'], move: [], attack: [], gather: [] },
+};
+
 // ── голосовые реплики юнитов. Используются ТОЛЬКО фразы, для которых есть
 //    запись в voices/; близкие по смыслу записи переиспользуются юнитами. ──
 //    select — выделение/отклик; move — приказ идти/делать; attack — атака; gather — работа
@@ -198,20 +226,38 @@ export class SoundBank {
   }
 
   // ── голос: проиграть запись фразы ──
-  // event: select|move|attack|gather
+  // event: select|move|attack|gather. Игрок — казахская раса: сперва казахские записи,
+  // для команд без них (часть рабочих реплик) — откат на русскую озвучку.
   voice(unit: string, event: 'select' | 'move' | 'attack' | 'gather') {
     if (this.muted || !this.voiceOn) return;
-    const set = PHRASES[unit] || PHRASES.swordsman;
-    const list = set[event];
-    if (!list || !list.length) return;
     // выделение — отклик всегда; приказы/атака — реже, чтобы не трещало
     const prob = event === 'select' ? 1 : event === 'attack' ? 0.5 : 0.7;
     if (Math.random() > prob) return;
     if (!this.gate(`voice-${event}`, event === 'select' ? 150 : 260)) return;
-    const phrase = list[(Math.random() * list.length) | 0];
-    const url = CLIP_URLS[normKey(phrase)];
-    if (!url || this.missingClips.has(url)) return;
-    this.playUrl(url);
+
+    const pickUrl = (phrase: string): string | null => {
+      const k = normKey(phrase);
+      const kz = KZ_CLIP_URLS[k];
+      if (kz && kz.length) {
+        const u = kz[(Math.random() * kz.length) | 0];
+        if (!this.missingClips.has(u)) return u;
+      }
+      const ru = CLIP_URLS[k];
+      return ru && !this.missingClips.has(ru) ? ru : null;
+    };
+
+    const kzSet = KZ_PHRASES[unit];
+    const kzList = kzSet ? kzSet[event] : [];
+    if (kzList && kzList.length) {
+      const url = pickUrl(kzList[(Math.random() * kzList.length) | 0]);
+      if (url) { this.playUrl(url); return; }
+    }
+    // казахской реплики нет — русский набор
+    const set = PHRASES[unit] || PHRASES.swordsman;
+    const list = set[event];
+    if (!list || !list.length) return;
+    const url = pickUrl(list[(Math.random() * list.length) | 0]);
+    if (url) this.playUrl(url);
   }
 
   // ── игровые звуки (мягче и естественнее) ──
