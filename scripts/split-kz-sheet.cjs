@@ -49,7 +49,15 @@ function encodePNG(W, H, rgba) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', comp), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const file = path.join(RAW, name + '_sheet_raw.png');
+// режим: по умолчанию лист «слева=спина(_b), справа=перёд(_f)»;
+// mode='walk' — лист двух фаз шага (обе в профиль): слева фаза A (_wa), справа фаза B (_wb)
+const mode = process.argv[4] || 'fb';
+const rawName =
+  mode === 'walk' ? name + '_walk_raw.png' :
+  mode === 'fwalk' ? name + '_fwalk_raw.png' :
+  mode === 'bwalk' ? name + '_bwalk_raw.png' :
+  name + '_sheet_raw.png';
+const file = path.join(RAW, rawName);
 if (!fs.existsSync(file)) { console.error('missing', file); process.exit(1); }
 let { W, H, ch, data } = decodePNG(file);
 const isMag = (idx) => { const r = data[idx], g = data[idx + 1], b = data[idx + 2]; return r > 170 && b > 150 && g < 120 && (r - g) > 80 && (b - g) > 60; };
@@ -89,6 +97,11 @@ function emit(fig, suffix) {
   // чистка magenta/пурпурной каймы
   for (let i = 0; i < dw * dh; i++) { const o = i * 4; if (out[o + 3] === 0) continue;
     if (out[o] > 150 && out[o + 2] > 140 && out[o + 1] < out[o] - 40 && out[o + 1] < out[o + 2] - 30) out[o + 3] = 0; }
+  // стереть чёрную линию-«землю» у нижней кромки (near-black пиксели нижних рядов; сапоги коричневые — не трём)
+  for (let y = dh - 1; y >= dh - 5; y--) for (let x = 0; x < dw; x++) {
+    const o = (y * dw + x) * 4; if (out[o + 3] === 0) continue;
+    if (Math.max(out[o], out[o + 1], out[o + 2]) < 46) out[o + 3] = 0;
+  }
   for (let pass = 0; pass < 2; pass++) { const kill = [];
     for (let y = 0; y < dh; y++) for (let x = 0; x < dw; x++) { const o = (y * dw + x) * 4; if (out[o + 3] === 0) continue;
       const ne = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy]) => { const nx=x+dx,ny=y+dy; return nx<0||ny<0||nx>=dw||ny>=dh||out[(ny*dw+nx)*4+3]===0; });
@@ -101,6 +114,10 @@ function emit(fig, suffix) {
   const ax = Math.round((n ? sxv / n : dw / 2) * 10) / 10;
   console.log(`  "${name}${suffix}": { "ax": ${ax}, "ay": ${by + 1}, "baseW": ${dw}, "w": ${dw}, "h": ${dh} },`);
 }
-emit(figs[0], '_b'); // слева — спина
-emit(figs[1], '_f'); // справа — перёд
+const sufA = mode === 'walk' ? '_wa' : mode === 'bwalk' ? '_wba' : '_fwa'; // слева
+const sufB = mode === 'walk' ? '_wb' : mode === 'bwalk' ? '_wbb' : '_fwb'; // справа
+// fb: слева=спина(_b), справа=перёд(_f); walk: боковые фазы _wa/_wb;
+// fwalk: перёд-ходьба _fwa/_fwb; bwalk: спина-ходьба _wba/_wbb
+if (mode === 'fb') { emit(figs[0], '_b'); emit(figs[1], '_f'); }
+else { emit(figs[0], sufA); emit(figs[1], sufB); }
 console.log('split done', name);

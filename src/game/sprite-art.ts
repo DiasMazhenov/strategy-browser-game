@@ -344,7 +344,27 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_knight_f":    { "ax": 43.8, "ay": 128, "baseW": 85,  "w": 85,  "h": 128 },
   "kz_knight_b":    { "ax": 32.8, "ay": 128, "baseW": 87,  "w": 87,  "h": 128 },
   "kz_cavalry_f":   { "ax": 49.5, "ay": 150, "baseW": 99,  "w": 99,  "h": 150 },
-  "kz_cavalry_b":   { "ax": 65,   "ay": 150, "baseW": 110, "w": 110, "h": 150 }
+  "kz_cavalry_b":   { "ax": 65,   "ay": 150, "baseW": 110, "w": 110, "h": 150 },
+  // кадры ШАГА: боковые _wa/_wb (фаза A/B, в профиль; отражается по face)
+  "kz_villager_wa":  { "ax": 59,   "ay": 150, "baseW": 100, "w": 100, "h": 150 },
+  "kz_villager_wb":  { "ax": 57.2, "ay": 150, "baseW": 97,  "w": 97,  "h": 150 },
+  "kz_swordsman_wa": { "ax": 52.6, "ay": 147, "baseW": 104, "w": 104, "h": 150 },
+  "kz_swordsman_wb": { "ax": 48.9, "ay": 149, "baseW": 106, "w": 106, "h": 150 },
+  "kz_archer_wa":    { "ax": 46.4, "ay": 150, "baseW": 103, "w": 103, "h": 150 },
+  "kz_archer_wb":    { "ax": 48.8, "ay": 149, "baseW": 102, "w": 102, "h": 150 },
+  "kz_spearman_wa":  { "ax": 42.8, "ay": 149, "baseW": 76,  "w": 76,  "h": 150 },
+  "kz_spearman_wb":  { "ax": 42.8, "ay": 149, "baseW": 75,  "w": 75,  "h": 150 },
+  "kz_monk_wa":      { "ax": 62.5, "ay": 150, "baseW": 106, "w": 106, "h": 150 },
+  "kz_monk_wb":      { "ax": 57.3, "ay": 149, "baseW": 96,  "w": 96,  "h": 150 },
+  "kz_knight_wa":    { "ax": 39.7, "ay": 128, "baseW": 129, "w": 129, "h": 128 },
+  "kz_knight_wb":    { "ax": 60.2, "ay": 127, "baseW": 130, "w": 130, "h": 128 },
+  "kz_cavalry_wa":   { "ax": 72.4, "ay": 149, "baseW": 162, "w": 162, "h": 150 },
+  "kz_cavalry_wb":   { "ax": 76.1, "ay": 149, "baseW": 159, "w": 159, "h": 150 },
+  // перёд-шаг и спина-шаг крестьянина
+  "kz_villager_fwa": { "ax": 39.8, "ay": 149, "baseW": 74, "w": 74, "h": 150 },
+  "kz_villager_fwb": { "ax": 39.9, "ay": 149, "baseW": 74, "w": 74, "h": 150 },
+  "kz_villager_wba": { "ax": 41.7, "ay": 149, "baseW": 91, "w": 91, "h": 150 },
+  "kz_villager_wbb": { "ax": 44.1, "ay": 149, "baseW": 91, "w": 91, "h": 150 }
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {

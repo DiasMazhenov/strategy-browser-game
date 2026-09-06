@@ -125,6 +125,25 @@ import kzKnightF from '../assets/sprites/units/kz/kz_knight_f.png';
 import kzKnightB from '../assets/sprites/units/kz/kz_knight_b.png';
 import kzCavalryF from '../assets/sprites/units/kz/kz_cavalry_f.png';
 import kzCavalryB from '../assets/sprites/units/kz/kz_cavalry_b.png';
+// кадры ШАГА казахской расы (2 фазы на направление): бок _wa/_wb, перёд _fwa/_fwb, спина _wba/_wbb
+import kzVillagerWA from '../assets/sprites/units/kz/kz_villager_wa.png';
+import kzVillagerWB from '../assets/sprites/units/kz/kz_villager_wb.png';
+import kzSwordsmanWA from '../assets/sprites/units/kz/kz_swordsman_wa.png';
+import kzSwordsmanWB from '../assets/sprites/units/kz/kz_swordsman_wb.png';
+import kzArcherWA from '../assets/sprites/units/kz/kz_archer_wa.png';
+import kzArcherWB from '../assets/sprites/units/kz/kz_archer_wb.png';
+import kzSpearmanWA from '../assets/sprites/units/kz/kz_spearman_wa.png';
+import kzSpearmanWB from '../assets/sprites/units/kz/kz_spearman_wb.png';
+import kzMonkWA from '../assets/sprites/units/kz/kz_monk_wa.png';
+import kzMonkWB from '../assets/sprites/units/kz/kz_monk_wb.png';
+import kzKnightWA from '../assets/sprites/units/kz/kz_knight_wa.png';
+import kzKnightWB from '../assets/sprites/units/kz/kz_knight_wb.png';
+import kzCavalryWA from '../assets/sprites/units/kz/kz_cavalry_wa.png';
+import kzCavalryWB from '../assets/sprites/units/kz/kz_cavalry_wb.png';
+import kzVillagerFWA from '../assets/sprites/units/kz/kz_villager_fwa.png';
+import kzVillagerFWB from '../assets/sprites/units/kz/kz_villager_fwb.png';
+import kzVillagerWBA from '../assets/sprites/units/kz/kz_villager_wba.png';
+import kzVillagerWBB from '../assets/sprites/units/kz/kz_villager_wbb.png';
 
 const mk = (src: string): HTMLImageElement => { const im = new Image(); im.src = src; return im; };
 // кадр покоя/атаки
@@ -168,6 +187,26 @@ const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   monk: [[mk(kzMonkB), 'kz_monk_b'], [mk(kzMonkB), 'kz_monk_b']],
   knight: [[mk(kzKnightB), 'kz_knight_b'], [mk(kzKnightB), 'kz_knight_b']],
   cavalry: [[mk(kzCavalryB), 'kz_cavalry_b'], [mk(kzCavalryB), 'kz_cavalry_b']],
+};
+// ── кадры ШАГА: 2 фазы на направление (чередуются по sin(anim)); импорт PNG — это URL-строка, оборачиваем в mk() ──
+const W2 = (a: string, ka: string, b: string, kb: string): [HTMLImageElement, string][] =>
+  [[mk(a), ka], [mk(b), kb]];
+// боковой шаг (влево/вправо — кадр отражается по face)
+const KZ_WALK_SIDE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
+  villager: W2(kzVillagerWA, 'kz_villager_wa', kzVillagerWB, 'kz_villager_wb'),
+  swordsman: W2(kzSwordsmanWA, 'kz_swordsman_wa', kzSwordsmanWB, 'kz_swordsman_wb'),
+  archer: W2(kzArcherWA, 'kz_archer_wa', kzArcherWB, 'kz_archer_wb'),
+  spearman: W2(kzSpearmanWA, 'kz_spearman_wa', kzSpearmanWB, 'kz_spearman_wb'),
+  knight: W2(kzKnightWA, 'kz_knight_wa', kzKnightWB, 'kz_knight_wb'),
+  cavalry: W2(kzCavalryWA, 'kz_cavalry_wa', kzCavalryWB, 'kz_cavalry_wb'),
+  monk: W2(kzMonkWA, 'kz_monk_wa', kzMonkWB, 'kz_monk_wb'),
+};
+// перёд-шаг (на камеру) и спина-шаг (от камеры) — полноценный цикл у крестьянина
+const KZ_WALK_FRONT: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
+  villager: W2(kzVillagerFWA, 'kz_villager_fwa', kzVillagerFWB, 'kz_villager_fwb'),
+};
+const KZ_WALK_BACK: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
+  villager: W2(kzVillagerWBA, 'kz_villager_wba', kzVillagerWBB, 'kz_villager_wbb'),
 };
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
@@ -307,16 +346,22 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const loosing = !isKz && isArch && !move && u.atkAnim > 0.5 && ready(AR_RELEASE[0]);
   const aiming = !isKz && isArch && !move && !loosing && !!u.aiming && ready(AR_AIM[0]);
 
+  // фаза 2-кадрового шага расы: чередуем _wa/_wb (или _fwa/_fwb) по sin(anim)
+  const kzStep = Math.sin(u.anim) < 0 ? 1 : 0;
   if (kzFB) {
-    // раса игрока: «на камеру» — перёд, «от камеры» — спина (2-фазный цикл из кадра расы)
-    const cyc = fmode === 1 ? KZ_FRONT_CYCLE[u.key] : KZ_BACK_CYCLE[u.key];
-    const idx = Math.min(1, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 2));
+    // «на камеру» (fmode=1) / «от камеры» (fmode=2): в движении — кадры шага, иначе статичный перёд/спина
+    const walkCyc = fmode === 1 ? KZ_WALK_FRONT[u.key] : KZ_WALK_BACK[u.key];
+    const standCyc = fmode === 1 ? KZ_FRONT_CYCLE[u.key] : KZ_BACK_CYCLE[u.key];
+    const cyc = move && walkCyc ? walkCyc : standCyc;
+    const idx = move && walkCyc ? kzStep : 0;
     const [img0, key0] = cyc && ready(cyc[idx]?.[0]) ? cyc[idx] : [null, kzKey];
     if (img0 && ready(img0)) { im = img0; anKey = key0; flip = 1; }
     else { im = base!; anKey = kzKey; }
   } else if (isKz) {
-    // прочие состояния расы — единый боковой кадр (отражается по face)
-    im = base!; anKey = kzKey;
+    // бок: в движении — 2 фазы шага (отражается по face); покой/бой — статичный кадр
+    const cyc = move ? KZ_WALK_SIDE[u.key] : null;
+    if (cyc && ready(cyc[kzStep]?.[0])) { im = cyc[kzStep][0]; anKey = cyc[kzStep][1]; flip = f; }
+    else { im = base!; anKey = kzKey; }
   } else if (working) {
     // кадр работы по виду деятельности: [замах, удар] переключаются фазой цикла
     const pair = VILL_WORK[u.wkind!] ?? VILL_WORK.chop;
