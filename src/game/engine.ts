@@ -30,6 +30,11 @@ import kzImgBlacksmith from '../assets/sprites/kz/kz_blacksmith.png';
 import kzImgWall from '../assets/sprites/kz/kz_wall.png';
 import kzImgGate from '../assets/sprites/kz/kz_gate.png';
 import kzImgWallCorner from '../assets/sprites/kz/kz_wall_corner.png';
+// AI-арт рельефа (gpt image): редкие крупные вершины и холмы-курганы поверх ступенчатого рельефа
+import imgPeakSnow from '../assets/sprites/terrain/peak_snow.png';
+import imgPeakRock from '../assets/sprites/terrain/peak_rock.png';
+import imgHillGrass from '../assets/sprites/terrain/hill_grass.png';
+import imgHillRock from '../assets/sprites/terrain/hill_rock.png';
 
 // ── Загрузка детальных AI-спрайтов зданий с автопосадкой на ромб клетки ──
 const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
@@ -105,6 +110,15 @@ function makeExtraSprite(url: string): BldSprite {
 const CORNER_SPRITE = makeExtraSprite(imgWallCorner);
 // казахский саманный угловой бастион (раса игрока)
 const KZ_CORNER_SPRITE = makeExtraSprite(kzImgWallCorner);
+
+// ── AI-арт рельефа: крупные вершины/холмы (редкие декор-объекты поверх террас) ──
+const TERRAIN_FEATURES: { img: HTMLImageElement; scale: number }[] = [
+  { img: (() => { const i = new Image(); i.src = imgPeakSnow; return i; })(), scale: 1.55 },
+  { img: (() => { const i = new Image(); i.src = imgPeakRock; return i; })(), scale: 1.25 },
+  { img: (() => { const i = new Image(); i.src = imgHillGrass; return i; })(), scale: 0.85 },
+  { img: (() => { const i = new Image(); i.src = imgHillRock; return i; })(), scale: 0.95 },
+];
+const F_PEAK_SNOW = 0, F_PEAK_ROCK = 1, F_HILL_GRASS = 2, F_HILL_ROCK = 3;
 
 // спрайт стены/ворот/угла с учётом расы владельца: игрок → саманные восточные, прочие → каменные
 function wallSpriteFor(b: Bld, isCorner: boolean): BldSprite | undefined {
@@ -3186,24 +3200,32 @@ export class Game {
     type Drawable = { iy: number; draw: () => void };
     const drawList: Drawable[] = [];
 
-    // ── редкие ГОРНЫЕ ВЕРШИНЫ (не на каждой плитке): только локальные максимумы,
-    //    прорежены детерминированно — получается хребет, а не частокол пиков ──
+    // ── редкие AI-объекты рельефа (gpt image): крупные заснеженные/скальные вершины и
+    //    холмы-курганы. Ставятся только на локальных максимумах, прорежены и разнесены
+    //    минимальной дистанцией — получается хребет с редкими пиками, а не частокол ──
+    const placed: string[] = [];
+    const nearPlaced = (wx: number, wy: number, rad: number) => {
+      for (const k of placed) { const [px, py] = k.split(',').map(Number); if (Math.abs(px - wx) <= rad * S && Math.abs(py - wy) <= rad * S) return true; } return false;
+    };
     for (let wy = cy0; wy <= cy1; wy += S) {
       for (let wx = cx0; wx <= cx1; wx += S) {
         const lvl = hAt(wx, wy);
-        if (lvl < 4) continue;                       // только высокий горный пояс
         const cls = this.terrain.classAt(wx + S / 2, wy + S / 2);
-        if (cls !== 'mountain') continue;
-        // локальный максимум: не ниже соседей
-        if (lvl < hAt(wx + S, wy) || lvl < hAt(wx - S, wy) || lvl < hAt(wx, wy + S) || lvl < hAt(wx, wy - S)) continue;
-        // прореживание ~1/3 площадок (детерминированно по координатам)
-        const ph = ((wx * 73856093) ^ (wy * 19349663)) & 0xff;
-        if (ph < 150) continue;
+        const isMax = lvl >= hAt(wx + S, wy) && lvl >= hAt(wx - S, wy) && lvl >= hAt(wx, wy + S) && lvl >= hAt(wx, wy - S);
+        if (!isMax) continue;
+        const hc = ((wx * 73856093) ^ (wy * 19349663)) & 0xff;
+        let fi = -1, rad = 2;
+        if (cls === 'mountain') {
+          if (lvl >= 5 && hc > 232) { fi = F_PEAK_SNOW; rad = 5; }
+          else if (lvl >= 4 && hc > 196) { fi = F_PEAK_ROCK; rad = 3; }
+        } else if (cls === 'hill' && lvl >= 2 && hc > 200) {
+          fi = hc % 2 ? F_HILL_ROCK : F_HILL_GRASS; rad = 3;
+        }
+        if (fi < 0 || nearPlaced(wx, wy, rad)) continue;
+        placed.push(wx + ',' + wy);
         const [ix, iy0] = toIso(wx, wy);
-        const baseUp = upAt(wx, wy);
-        const iy = iy0 - baseUp;
-        const peakH = 30 + (ph % 14);                 // высота пика в px
-        drawList.push({ iy: iy0, draw: () => this.drawPeak(ix, iy, peakH) });
+        const iy = iy0 - upAt(wx, wy);
+        drawList.push({ iy: iy0, draw: () => this.drawTerrainFeature(fi, ix, iy) });
       }
     }
 
@@ -3420,48 +3442,20 @@ export class Game {
     }
   }
 
-  // Крупная редкая горная вершина: изо-пирамида со снежной шапкой (без повтора на каждой плитке).
-  // (ix,iy) — центр поднятой плитки (опора пика); пик уходит вверх на peakH.
-  drawPeak(ix: number, iy: number, peakH: number) {
+  // Редкий AI-объект рельефа (вершина/холм, gpt image): низ спрайта кладётся на опорную
+  // точку (ix,iy) — центр поднятой плитки; рисуется с мягкой тенью-подложкой.
+  drawTerrainFeature(fi: number, ix: number, iy: number) {
     const { ctx } = this;
-    const bx = 27, by = 15;            // полу-размеры ромба-основания
-    const ax = ix, ay = iy - peakH;    // вершина
-    // тень под пиком (на площадке)
-    ctx.fillStyle = 'rgba(8,12,10,0.30)';
-    ctx.beginPath();
-    ctx.moveTo(ix, iy + by - 1); ctx.lineTo(ix + bx - 2, iy); ctx.lineTo(ix, iy - by + 2); ctx.lineTo(ix - bx + 2, iy);
-    ctx.closePath(); ctx.fill();
-    // передняя ЛЕВАЯ грань (темнее): apex → левый угол → передний угол
-    ctx.fillStyle = '#56555e';
-    ctx.beginPath();
-    ctx.moveTo(ax, ay); ctx.lineTo(ix - bx, iy); ctx.lineTo(ix, iy + by); ctx.closePath(); ctx.fill();
-    // передняя ПРАВАЯ грань (светлее): apex → правый угол → передний угол
-    ctx.fillStyle = '#6c6a74';
-    ctx.beginPath();
-    ctx.moveTo(ax, ay); ctx.lineTo(ix + bx, iy); ctx.lineTo(ix, iy + by); ctx.closePath(); ctx.fill();
-    // скальные рёбра (лёгкая штриховка на правой грани)
-    ctx.strokeStyle = 'rgba(30,30,36,0.25)'; ctx.lineWidth = 1;
-    for (let k = 1; k <= 3; k++) {
-      const t = k / 4;
-      ctx.beginPath();
-      ctx.moveTo(ax + (ix + bx - ax) * t * 0.7, ay + (iy - ay) * t * 0.7);
-      ctx.lineTo(ax + (ix - ax) * t * 0.7 + (ix + bx - ix) * 0.0, ay + (iy + by - ay) * t * 0.7);
-      ctx.stroke();
-    }
-    // снежная шапка у вершины
-    const cap = peakH * 0.32;
-    ctx.fillStyle = '#eef2f5';
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(ax - bx * 0.34, ay + cap);
-    ctx.lineTo(ax + bx * 0.30, ay + cap * 0.9);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#c9d2dc'; // тень на снегу (правая сторона)
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(ax + bx * 0.30, ay + cap * 0.9);
-    ctx.lineTo(ax + bx * 0.10, ay + cap * 0.55);
-    ctx.closePath(); ctx.fill();
+    const f = TERRAIN_FEATURES[fi];
+    const img = f.img;
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    ctx.imageSmoothingEnabled = false;
+    const w = img.naturalWidth * f.scale, h = img.naturalHeight * f.scale;
+    // мягкая контактная тень-эллипс под объектом
+    ctx.fillStyle = 'rgba(8,14,8,0.28)';
+    ctx.beginPath(); ctx.ellipse(ix, iy + 2, w * 0.30, h * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+    // низ-центр спрайта → опорная точка
+    ctx.drawImage(img, ix - w / 2, iy - h + 2, w, h);
   }
 
   drawRelicIso(r: Relic, ix: number, iy: number) {
