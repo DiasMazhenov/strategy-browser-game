@@ -1779,6 +1779,17 @@ export class Game {
         if (u.key === 'wolf') this.updateWolf(u, dt); else this.updateAnimal(u, dt);
         const moved = Math.hypot(u.x - w0, u.y - z0) > 1.5;
         (u as Unit & { walk?: boolean }).walk = moved;
+        // изо-направление для волка (у прочего зверя кадров разворота нет — fmode остаётся 0)
+        if (moved && u.key === 'wolf') {
+          const sxv = (u.x - w0) - (u.y - z0), syv = ((u.x - w0) + (u.y - z0)) * 0.5;
+          u.mvx = (u.mvx ?? sxv) * 0.6 + sxv * 0.4;
+          u.mvy = (u.mvy ?? syv) * 0.6 + syv * 0.4;
+          if (Math.abs(u.mvy) > Math.abs(u.mvx) * 1.05 && Math.abs(u.mvy) > 0.4) {
+            u.fmode = u.mvy > 0 ? 1 : 2;  // на камеру — морда, от камеры — круп
+          } else {
+            u.fmode = 0;                  // вбок — боковой галоп
+          }
+        }
         u.anim += dt * (moved ? 12 : 2);
         continue;
       }

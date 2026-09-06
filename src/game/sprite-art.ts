@@ -271,6 +271,14 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
     "w": 150,
     "h": 82
   },
+  "mfw1": { "ax": 32, "ay": 149, "baseW": 65, "w": 65, "h": 150 },
+  "mfw2": { "ax": 37, "ay": 149, "baseW": 83, "w": 83, "h": 150 },
+  "mbw1": { "ax": 34, "ay": 149, "baseW": 68, "w": 68, "h": 150 },
+  "mbw2": { "ax": 36, "ay": 149, "baseW": 76, "w": 76, "h": 150 },
+  "wfw1": { "ax": 39, "ay": 90, "baseW": 77, "w": 77, "h": 91 },
+  "wfw2": { "ax": 36, "ay": 90, "baseW": 77, "w": 77, "h": 91 },
+  "wbw1": { "ax": 64, "ay": 90, "baseW": 131, "w": 131, "h": 91 },
+  "wbw2": { "ax": 64, "ay": 90, "baseW": 131, "w": 131, "h": 91 },
   "sheep": {
     "ax": 51,
     "ay": 96,

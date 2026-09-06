@@ -88,6 +88,14 @@ import uMonk from '../assets/sprites/units/monk.png';
 import uMonkW from '../assets/sprites/units/monk_w.png';
 import uWolf from '../assets/sprites/units/wolf.png';
 import uWolfW from '../assets/sprites/units/wolf_w.png';
+import uMFw1 from '../assets/sprites/units/mfw1.png';
+import uMFw2 from '../assets/sprites/units/mfw2.png';
+import uMBw1 from '../assets/sprites/units/mbw1.png';
+import uMBw2 from '../assets/sprites/units/mbw2.png';
+import uWFw1 from '../assets/sprites/units/wfw1.png';
+import uWFw2 from '../assets/sprites/units/wfw2.png';
+import uWBw1 from '../assets/sprites/units/wbw1.png';
+import uWBw2 from '../assets/sprites/units/wbw2.png';
 import uSheep from '../assets/sprites/units/sheep.png';
 import uSheepW from '../assets/sprites/units/sheep_w.png';
 import uCow from '../assets/sprites/units/cow.png';
@@ -197,6 +205,20 @@ const CV_WALK_FRONT: [HTMLImageElement, string][] = [
 const CV_WALK_BACK: [HTMLImageElement, string][] = [
   [mk(uCBw1), 'cbw1'], [mk(uCBw2), 'cbw2'], [mk(uCBw1), 'cbw1'], [mk(uCBw2), 'cbw2'],
 ];
+// ── монах (monk): боковой шаг остаётся штатным; анфас/тыл — 2 фазы на направление ──
+const MK_WALK_FRONT: [HTMLImageElement, string][] = [
+  [mk(uMFw1), 'mfw1'], [mk(uMFw2), 'mfw2'], [mk(uMFw1), 'mfw1'], [mk(uMFw2), 'mfw2'],
+];
+const MK_WALK_BACK: [HTMLImageElement, string][] = [
+  [mk(uMBw1), 'mbw1'], [mk(uMBw2), 'mbw2'], [mk(uMBw1), 'mbw1'], [mk(uMBw2), 'mbw2'],
+];
+// ── волк (wolf): боковой галоп штатный; анфас — 2 фазы, тыл — широкий круп (1 кадр, подскок процедурный) ──
+const WF_WALK_FRONT: [HTMLImageElement, string][] = [
+  [mk(uWFw1), 'wfw1'], [mk(uWFw2), 'wfw2'], [mk(uWFw1), 'wfw1'], [mk(uWFw2), 'wfw2'],
+];
+const WF_WALK_BACK: [HTMLImageElement, string][] = [
+  [mk(uWBw1), 'wbw1'], [mk(uWBw2), 'wbw2'], [mk(uWBw1), 'wbw1'], [mk(uWBw2), 'wbw2'],
+];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
   const base = UNIT_IMAGES[u.key];
@@ -215,7 +237,11 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isSpear = u.key === 'spearman';
   const isKnight = u.key === 'knight';
   const isCavalry = u.key === 'cavalry';
+  const isMonk = u.key === 'monk';
+  const isWolf = u.key === 'wolf';
   const isMounted = isKnight || isCavalry; // всадник на коне
+  // юниты с боковым 2-кадровым шагом, которым добавлен разворот на/от камеры (конница, монах, волк)
+  const fbUnit = isMounted || isMonk || isWolf;
   const hasDirWalk = isVill || isSword || isArch || isSpear; // пехота: 4-кадровая направленная ходьба
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
   const working = isVill && !!u.wkind && !move &&
@@ -240,14 +266,19 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     im = AR_AIM[0]; anKey = AR_AIM[1]; flip = f;
   } else if (slashing) {
     im = SW_SLASH[0]; anKey = SW_SLASH[1]; flip = f;
-  } else if (isMounted && move && (u.fmode === 1 || u.fmode === 2)) {
-    // конница скачет «на камеру» (fmode=1) или «от камеры» (fmode=2) — конь развёрнут головой/крупом
-    const cyc = u.fmode === 1
-      ? (isKnight ? KN_WALK_FRONT : CV_WALK_FRONT)
-      : (isKnight ? KN_WALK_BACK  : CV_WALK_BACK);
+  } else if (fbUnit && move && (u.fmode === 1 || u.fmode === 2)) {
+    // юниты с боковым шагом, развёрнутые «на камеру» (fmode=1) / «от камеры» (fmode=2):
+    // конница — конь мордой/крупом, монах — лицом/спиной, волк — мордой/крупом
+    const FB: Record<string, { f: [HTMLImageElement, string][]; b: [HTMLImageElement, string][] }> = {
+      knight:  { f: KN_WALK_FRONT,  b: KN_WALK_BACK },
+      cavalry: { f: CV_WALK_FRONT,  b: CV_WALK_BACK },
+      monk:    { f: MK_WALK_FRONT,  b: MK_WALK_BACK },
+      wolf:    { f: WF_WALK_FRONT,  b: WF_WALK_BACK },
+    };
+    const cyc = (FB[u.key]?.[u.fmode === 1 ? 'f' : 'b']) ?? null;
     const idx = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
-    const [img0, key0] = cyc[idx];
-    if (ready(img0)) { im = img0; anKey = key0; flip = 1; }
+    const [img0, key0] = cyc ? cyc[idx] : [null, u.key];
+    if (img0 && ready(img0)) { im = img0; anKey = key0; flip = 1; }
     else { im = base!; anKey = u.key; }
   } else if (hasDirWalk && move) {
     // 4-фазная ходьба по изо-направлению: сбоку (отражается по face) / спереди / со спины
@@ -280,8 +311,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const H = UNIT_TARGET_H[u.key] ?? 46;
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
-  // конница фронт/тыл — готовые кадры галопа (без бокового крена), но с вертикальным подскоком галопа
-  const mountFB = isMounted && move && (u.fmode === 1 || u.fmode === 2);
+  // разворот на/от камеры (конница/монах/волк) — готовые кадры без бокового крена, но с вертикальным подскоком
+  const mountFB = fbUnit && move && (u.fmode === 1 || u.fmode === 2);
   // на готовых кадрах работы/рубки/стрельбы/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
   const upright = working || slashing || loosing || aiming || mountFB || (hasDirWalk && move);
 
@@ -297,8 +328,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     // работа на месте: лёгкий присед в такт удару, без шага
     bob = workSwing * 2.2; rock = 0; lean = workSwing * 0.06; sway = 0;
   } else if (mountFB) {
-    // конница фронт/тыл на готовых кадрах галопа: ощутимый подскок, без бокового крена
-    bob = -Math.abs(gait) * 6; rock = 0; lean = 0; sway = 0;
+    // разворот на/от камеры на готовых кадрах: галоп (конь/волк) — выше подскок, монах — мягкий шаг
+    bob = isMonk ? -stepAbs * 3 : -Math.abs(gait) * 6; rock = 0; lean = 0; sway = 0;
   } else if (upright && move) {
     // пехота на готовых кадрах цикла: мягкий подскок, без бокового крена
     bob = -stepAbs * 3; rock = 0; lean = 0; sway = 0;
