@@ -180,19 +180,19 @@ export class Terrain {
    *   hAtWorld(wx,wy) — ступень в гексе, которому принадлежит мировая точка.
    */
   reliefGridHex(wx0: number, wy0: number, wx1: number, wy1: number, pad = 8) {
-    // геометрия изо-гекса (дублирует константы iso.ts, чтобы не тянуть зависимость)
-    // базис q=(44,0), r=(22,29); изо: ix=wx-wy, iy=(wx+wy)/2
-    const HQX = 44, HRX = 22, HRY = 29;
-    const s2h = (ix: number, iy: number) => {
-      const r = iy / HRY;
-      const q = (ix - HRX * r) / HQX;
+    // геометрия изо-гекса (дублирует iso.ts): regular flat-top гекс сторона HS в мире,
+    // мировой центр ячейки (q,r): wx=1.5·HS·q, wy=√3·HS·(q/2+r)
+    const HS = 20, S3 = HS * Math.sqrt(3);
+    const worldAt = (q: number, r: number): [number, number] =>
+      [HS * 1.5 * q, S3 * (q / 2 + r)];
+    // мировая точка → дробные аксиальные (cube), затем округление
+    const w2h = (wx: number, wy: number): [number, number] => {
+      const q = (2 / 3 * wx) / HS;
+      const r = (-1 / 3 * wx + (Math.sqrt(3) / 3) * wy) / HS;
       return [q, r];
     };
     const corners = [
-      s2h(wx0 - wy0, (wx0 + wy0) * 0.5),
-      s2h(wx1 - wy0, (wx1 + wy0) * 0.5),
-      s2h(wx1 - wy1, (wx1 + wy1) * 0.5),
-      s2h(wx0 - wy1, (wx0 + wy1) * 0.5),
+      w2h(wx0, wy0), w2h(wx1, wy0), w2h(wx1, wy1), w2h(wx0, wy1),
     ];
     const q0 = Math.floor(Math.min(...corners.map(c => c[0]))) - pad;
     const q1 = Math.ceil(Math.max(...corners.map(c => c[0]))) + pad;
@@ -200,12 +200,6 @@ export class Terrain {
     const r1 = Math.ceil(Math.max(...corners.map(c => c[1]))) + pad;
     const W = q1 - q0 + 1, H = r1 - r0 + 1;
     const idx = (q: number, r: number) => (r - r0) * W + (q - q0);
-    // аксиальный гекс → мировые координаты ЦЕНТРА (обратное изо-преобразование)
-    const worldAt = (q: number, r: number): [number, number] => {
-      const ix = HQX * q + HRX * r, iy = HRY * r;
-      const wx = ix / 2 + iy, wy = iy - ix / 2;
-      return [wx, wy];
-    };
     const raw = new Int16Array(W * H);
     for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) {
       const [wx, wy] = worldAt(q, r);
@@ -247,9 +241,7 @@ export class Terrain {
       q0, q1, r0, r1, worldAt,
       at: hAt,
       hAtWorld: (wx: number, wy: number) => {
-        const ix = wx - wy, iy = (wx + wy) * 0.5;
-        const rF = iy / HRY;
-        const qF = (ix - HRX * rF) / HQX;
+        const [qF, rF] = w2h(wx, wy);
         // cube rounding (аксиальные q,r)
         const x = qF, z = rF, y = -x - z;
         let rx = Math.round(x), ry = Math.round(y), rz = Math.round(z);

@@ -3141,20 +3141,19 @@ export class Game {
       ctx.strokeStyle = cB; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + drop); ctx.lineTo(p2[0], p2[1] + drop); ctx.stroke();
     };
-    // Изо-гекс (вершина вверх, вертикальные бока): видимые грани обрыва — ДВЕ передние
-    // плечевые кромки (уклон 1:2, как у изо-ромбов); вертикальные бока смотрят в
-    // ребро и при спуске вырождены, верхние плечи обращены от камеры.
-    //   ребро R(2)→B(3) — общее с соседом (q+1,r+1), правая передняя грань (светлее);
-    //   ребро B(3)→L(4) — общее с соседом (q, r+1), левая передняя грань (темнее).
+    // Спроецированный flat-top гекс: видимые грани обрыва — ТРИ передних (нижних)
+    // ребра (обращены к камере), каждое общее с конкретным аксиальным соседом:
+    //   ребро 0→1 (передне-левое, самое нижнее) → сосед (q+1, r);
+    //   ребро 1→2 (левое)                       → сосед (q,   r+1);
+    //   ребро 5→0 (правое)                      → сосед (q+1, r-1).
+    // Переднее ребро темнее (cB), боковые — cL/cR.
     const drawCliffsHex = (ix: number, iy: number, up: number, cls: string, q: number, r: number) => {
       if (up <= 0) return;
       const [cR, cL, cB] = cliffColors(cls);
       const vx = (i: number): [number, number] => [ix + HEX_PTS[i][0], iy + HEX_PTS[i][1] - up];
-      const R = vx(2), B = vx(3), L = vx(4);
-      const dR = up - upAtQ(q + 1, r + 1);   // сосед вниз-право (ребро R→B)
-      const dL = up - upAtQ(q, r + 1);       // сосед вниз-лево  (ребро B→L)
-      face(R, B, dR, cR, cB);  // правая передняя грань
-      face(B, L, dL, cL, cB);  // левая передняя грань
+      face(vx(0), vx(1), up - upAtQ(q + 1, r), cB, cB);  // переднее — самое тёмное
+      face(vx(1), vx(2), up - upAtQ(q, r + 1), cL, cB);  // левое
+      face(vx(5), vx(0), up - upAtQ(q + 1, r - 1), cR, cB); // правое
     };
 
     // видимый диапазон гексов: изо-экран камеры → дробные аксиальные координаты
@@ -3170,12 +3169,19 @@ export class Game {
     const rMin = Math.floor(Math.min(...corners.map(c => c.r))) - 1;
     const rMax = Math.ceil(Math.max(...corners.map(c => c.r))) + 1;
 
-    for (let r = rMin; r <= rMax; r++) {
-      for (let q = qMin; q <= qMax; q++) {
+    // painter's order: для flat-top проекции три передних соседа (q+1,r),(q,r+1),(q+1,r-1)
+    // имеют глубину s=2q+r ровно на 2 больше; идём по s снизу вверх, внутри s — по q.
+    const sMin = 2 * qMin + rMin - 3, sMax = 2 * qMax + rMax + 3;
+    for (let s = sMin; s <= sMax; s++) {
+      // r = s - 2q; допустимые q в [qMin,qMax], r в [rMin,rMax]
+      const qLo = Math.max(qMin, Math.ceil((s - rMax) / 2));
+      const qHi = Math.min(qMax, Math.floor((s - rMin) / 2));
+      for (let q = qLo; q <= qHi; q++) {
+        const r = s - 2 * q;
         const [hx, hy] = hexCenter(q, r);
         const ix = hx + camIX, iy = hy + camIY;
         // грубый куллинг по экранному прямоугольнику
-        if (ix < -halfW - 30 || ix > halfW + 30 || iy < -halfH - 20 || iy > halfH + 30) continue;
+        if (ix < -halfW - 30 || ix > halfW + 30 || iy < -halfH - 24 || iy > halfH + 40) continue;
         const [wx, wy] = relief.worldAt(q, r);
         const hash = ((wx * 73 - wy * 137) & 0xFFFF) ^ ((wx + wy) & 0xFFFF);
         const hv = hash & 0xFFFF;
