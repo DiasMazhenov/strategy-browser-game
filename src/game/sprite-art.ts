@@ -330,11 +330,21 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_cavalry":     { "ax": 101,  "ay": 150, "baseW": 202, "w": 202, "h": 150 },
   "kz_catapult":    { "ax": 67.5, "ay": 81,  "baseW": 135, "w": 135, "h": 81 },
   "kz_monk":        { "ax": 44.9, "ay": 150, "baseW": 80,  "w": 80,  "h": 150 },
-  // направленные кадры мечника/крестьянина (f=перёд, b=спина) — симметричные, якорь по центру
+  // направленные кадры (f=перёд/на камеру, b=спина/от камеры)
   "kz_swordsman_f": { "ax": 66.5, "ay": 150, "baseW": 133, "w": 133, "h": 150 },
   "kz_swordsman_b": { "ax": 67,   "ay": 150, "baseW": 134, "w": 134, "h": 150 },
   "kz_villager_f":  { "ax": 38.5, "ay": 150, "baseW": 77,  "w": 77,  "h": 150 },
-  "kz_villager_b":  { "ax": 45,   "ay": 150, "baseW": 90,  "w": 90,  "h": 150 }
+  "kz_villager_b":  { "ax": 45,   "ay": 150, "baseW": 90,  "w": 90,  "h": 150 },
+  "kz_archer_f":    { "ax": 41.3, "ay": 150, "baseW": 107, "w": 107, "h": 150 },
+  "kz_archer_b":    { "ax": 64.9, "ay": 150, "baseW": 129, "w": 129, "h": 150 },
+  "kz_spearman_f":  { "ax": 60.7, "ay": 150, "baseW": 110, "w": 110, "h": 150 },
+  "kz_spearman_b":  { "ax": 50,   "ay": 150, "baseW": 103, "w": 103, "h": 150 },
+  "kz_monk_f":      { "ax": 41.3, "ay": 150, "baseW": 88,  "w": 88,  "h": 150 },
+  "kz_monk_b":      { "ax": 36.7, "ay": 150, "baseW": 81,  "w": 81,  "h": 150 },
+  "kz_knight_f":    { "ax": 43.8, "ay": 128, "baseW": 85,  "w": 85,  "h": 128 },
+  "kz_knight_b":    { "ax": 32.8, "ay": 128, "baseW": 87,  "w": 87,  "h": 128 },
+  "kz_cavalry_f":   { "ax": 49.5, "ay": 150, "baseW": 99,  "w": 99,  "h": 150 },
+  "kz_cavalry_b":   { "ax": 65,   "ay": 150, "baseW": 110, "w": 110, "h": 150 }
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {

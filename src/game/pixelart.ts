@@ -115,6 +115,16 @@ import kzSwordsmanF from '../assets/sprites/units/kz/kz_swordsman_f.png';
 import kzSwordsmanB from '../assets/sprites/units/kz/kz_swordsman_b.png';
 import kzVillagerF from '../assets/sprites/units/kz/kz_villager_f.png';
 import kzVillagerB from '../assets/sprites/units/kz/kz_villager_b.png';
+import kzArcherF from '../assets/sprites/units/kz/kz_archer_f.png';
+import kzArcherB from '../assets/sprites/units/kz/kz_archer_b.png';
+import kzSpearmanF from '../assets/sprites/units/kz/kz_spearman_f.png';
+import kzSpearmanB from '../assets/sprites/units/kz/kz_spearman_b.png';
+import kzMonkF from '../assets/sprites/units/kz/kz_monk_f.png';
+import kzMonkB from '../assets/sprites/units/kz/kz_monk_b.png';
+import kzKnightF from '../assets/sprites/units/kz/kz_knight_f.png';
+import kzKnightB from '../assets/sprites/units/kz/kz_knight_b.png';
+import kzCavalryF from '../assets/sprites/units/kz/kz_cavalry_f.png';
+import kzCavalryB from '../assets/sprites/units/kz/kz_cavalry_b.png';
 
 const mk = (src: string): HTMLImageElement => { const im = new Image(); im.src = src; return im; };
 // кадр покоя/атаки
@@ -144,10 +154,20 @@ const KZ_BASE: Partial<Record<UnitKey, HTMLImageElement>> = {
 const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanF), 'kz_swordsman_f'], [mk(kzSwordsmanF), 'kz_swordsman_f']],
   villager: [[mk(kzVillagerF), 'kz_villager_f'], [mk(kzVillagerF), 'kz_villager_f']],
+  archer: [[mk(kzArcherF), 'kz_archer_f'], [mk(kzArcherF), 'kz_archer_f']],
+  spearman: [[mk(kzSpearmanF), 'kz_spearman_f'], [mk(kzSpearmanF), 'kz_spearman_f']],
+  monk: [[mk(kzMonkF), 'kz_monk_f'], [mk(kzMonkF), 'kz_monk_f']],
+  knight: [[mk(kzKnightF), 'kz_knight_f'], [mk(kzKnightF), 'kz_knight_f']],
+  cavalry: [[mk(kzCavalryF), 'kz_cavalry_f'], [mk(kzCavalryF), 'kz_cavalry_f']],
 };
 const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanB), 'kz_swordsman_b'], [mk(kzSwordsmanB), 'kz_swordsman_b']],
   villager: [[mk(kzVillagerB), 'kz_villager_b'], [mk(kzVillagerB), 'kz_villager_b']],
+  archer: [[mk(kzArcherB), 'kz_archer_b'], [mk(kzArcherB), 'kz_archer_b']],
+  spearman: [[mk(kzSpearmanB), 'kz_spearman_b'], [mk(kzSpearmanB), 'kz_spearman_b']],
+  monk: [[mk(kzMonkB), 'kz_monk_b'], [mk(kzMonkB), 'kz_monk_b']],
+  knight: [[mk(kzKnightB), 'kz_knight_b'], [mk(kzKnightB), 'kz_knight_b']],
+  cavalry: [[mk(kzCavalryB), 'kz_cavalry_b'], [mk(kzCavalryB), 'kz_cavalry_b']],
 };
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
