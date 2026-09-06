@@ -14,6 +14,10 @@ const TARGET_BASEW = {
   farm: 370, stable: 379, market: 360, blacksmith: 370,
 };
 const MAXDIM = 380;
+// стены/ворота: сегмент тянется на всю ширину кадра (tiling edge-to-edge) — масштаб по ШИРИНЕ кропа до целевого px
+const WALL_FULLW = { wall: 186, gate: 152 };
+// угловой бастион: цель по ширине фундамента (в игре рисуется 0.9*клетка по naturalWidth)
+const CORNER_BASEW = 130;
 
 function decodePNG(file) {
   const data = fs.readFileSync(file);
@@ -134,15 +138,27 @@ function process(key) {
     const c = px(x0 + x, y0 + y); tmp[o] = c[0]; tmp[o + 1] = c[1]; tmp[o + 2] = c[2]; tmp[o + 3] = 255;
   }
   const foot = measureFooting(tmp, cw, chh);
-  const targetBase = TARGET_BASEW[key] ?? 360;
-  let scale = targetBase / foot.baseW;
-  if (Math.max(cw, chh) * scale > MAXDIM) scale = MAXDIM / Math.max(cw, chh);
-  const dw = Math.round(cw * scale), dh = Math.round(chh * scale);
+  const fullW = WALL_FULLW[key];
+  let dw, dh, sxOf, syOf;
+  if (fullW) {
+    // стена/ворота: фиксированный кадр как у штатных (186/152 × 150) — сегмент edge-to-edge и нужная высота;
+    // вертикаль подтягиваем (AI рисует длиннее по диагонали), чтобы наклон лёг на изо-клетку.
+    dw = fullW; dh = 150;
+    sxOf = (dx) => Math.min(cw - 1, Math.floor(((dx + 0.5) / dw) * cw));
+    syOf = (dy) => Math.min(chh - 1, Math.floor(((dy + 0.5) / dh) * chh));
+  } else {
+    let scale;
+    if (key === 'wall_corner') scale = Math.min(CORNER_BASEW / foot.baseW, MAXDIM / Math.max(cw, chh));
+    else { scale = (TARGET_BASEW[key] ?? 360) / foot.baseW; if (Math.max(cw, chh) * scale > MAXDIM) scale = MAXDIM / Math.max(cw, chh); }
+    dw = Math.round(cw * scale); dh = Math.round(chh * scale);
+    sxOf = (dx) => Math.min(cw - 1, Math.floor((dx + 0.5) / scale));
+    syOf = (dy) => Math.min(chh - 1, Math.floor((dy + 0.5) / scale));
+  }
   const out = Buffer.alloc(dw * dh * 4);
   for (let dy = 0; dy < dh; dy++) {
-    const sy = Math.min(chh - 1, Math.floor((dy + 0.5) / scale));
+    const sy = syOf(dy);
     for (let dx = 0; dx < dw; dx++) {
-      const sx = Math.min(cw - 1, Math.floor((dx + 0.5) / scale));
+      const sx = sxOf(dx);
       const o = (dy * dw + dx) * 4;
       if (!cropMask[sy * cw + sx]) { out[o + 3] = 0; continue; }
       const c = px(x0 + sx, y0 + sy); out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; out[o + 3] = 255;
@@ -184,8 +200,13 @@ function process(key) {
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, `kz_${key}.png`), encodePNG(dw, dh, out));
   const m = measureFooting(out, dw, dh);
-  console.log(`  "kz_${key}": { "ax": ${+m.ax.toFixed(1)}, "ay": ${m.ay}, "baseW": ${m.baseW}, "w": ${dw}, "h": ${dh} },`);
+  // стены/ворота рисуются центрированными по X с основанием на кромке (ax/ay рантайм игнорирует),
+  // baseW = ширина кадра (сегмент на 2S); угол — makeExtraSprite (baseW=naturalWidth). Отдаём вручную.
+  const ax = (fullW || key === 'wall_corner') ? +(dw / 2).toFixed(1) : +m.ax.toFixed(1);
+  const ay = (fullW || key === 'wall_corner') ? dh - 1 : m.ay;
+  const baseW = fullW ? dw : (key === 'wall_corner' ? dw : m.baseW);
+  console.log(`  "kz_${key}": { "ax": ${ax}, "ay": ${ay}, "baseW": ${baseW}, "w": ${dw}, "h": ${dh} },`);
 }
 
-['towncenter', 'house', 'barracks', 'tower', 'farm', 'stable', 'market', 'blacksmith'].forEach(process);
+['towncenter', 'house', 'barracks', 'tower', 'farm', 'stable', 'market', 'blacksmith', 'wall', 'gate', 'wall_corner'].forEach(process);
 console.log('done');

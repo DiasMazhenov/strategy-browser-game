@@ -12,6 +12,10 @@ export const SPR_ANCHORS: Record<string, SprAnchor> = {
   "kz_stable":      { "ax": 189,   "ay": 217, "baseW": 377, "w": 379, "h": 218 },
   "kz_market":      { "ax": 179.5, "ay": 247, "baseW": 360, "w": 360, "h": 248 },
   "kz_blacksmith":  { "ax": 184.5, "ay": 315, "baseW": 368, "w": 370, "h": 317 },
+  // саманные стены/ворота расы: сегмент во всю ширину кадра (рисуется центрированным по X); угол — по naturalWidth
+  "kz_wall":        { "ax": 93,  "ay": 149, "baseW": 186, "w": 186, "h": 150 },
+  "kz_gate":        { "ax": 76,  "ay": 149, "baseW": 152, "w": 152, "h": 150 },
+  "kz_wall_corner": { "ax": 65,  "ay": 137, "baseW": 130, "w": 130, "h": 138 },
   "towncenter": {
     "ax": 164,
     "ay": 379,

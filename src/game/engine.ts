@@ -27,6 +27,9 @@ import kzImgFarm from '../assets/sprites/kz/kz_farm.png';
 import kzImgStable from '../assets/sprites/kz/kz_stable.png';
 import kzImgMarket from '../assets/sprites/kz/kz_market.png';
 import kzImgBlacksmith from '../assets/sprites/kz/kz_blacksmith.png';
+import kzImgWall from '../assets/sprites/kz/kz_wall.png';
+import kzImgGate from '../assets/sprites/kz/kz_gate.png';
+import kzImgWallCorner from '../assets/sprites/kz/kz_wall_corner.png';
 
 // ── Загрузка детальных AI-спрайтов зданий с автопосадкой на ромб клетки ──
 const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
@@ -36,7 +39,7 @@ const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
 // казахская раса игрока: восточные здания-замены (стены/ворота остаются общими)
 const KZ_SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
   towncenter: kzImgTowncenter, house: kzImgHouse, barracks: kzImgBarracks, tower: kzImgTower, farm: kzImgFarm,
-  stable: kzImgStable, market: kzImgMarket, blacksmith: kzImgBlacksmith,
+  stable: kzImgStable, market: kzImgMarket, blacksmith: kzImgBlacksmith, wall: kzImgWall, gate: kzImgGate,
 };
 interface BldSprite { img: HTMLImageElement; flash: HTMLCanvasElement | null; ax: number; ay: number; baseW: number }
 const BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
@@ -100,6 +103,15 @@ function makeExtraSprite(url: string): BldSprite {
   return sp;
 }
 const CORNER_SPRITE = makeExtraSprite(imgWallCorner);
+// казахский саманный угловой бастион (раса игрока)
+const KZ_CORNER_SPRITE = makeExtraSprite(kzImgWallCorner);
+
+// спрайт стены/ворот/угла с учётом расы владельца: игрок → саманные восточные, прочие → каменные
+function wallSpriteFor(b: Bld, isCorner: boolean): BldSprite | undefined {
+  const kz = b.owner === 'player';
+  if (isCorner) return kz ? KZ_CORNER_SPRITE : CORNER_SPRITE;
+  return kz ? KZ_BLD_SPRITES[b.key] : BLD_SPRITES[b.key];
+}
 
 export interface GameStats { score: number; kills: number; razed: number; gathered: number; timeSec: number; age: number; result: 'victory' | 'defeat'; difficulty: Difficulty; peakPop?: number; peakArmy?: number; built?: number; history?: { t: number; army: number; pop: number }[]; }
 export interface Banner { title: string; sub: string; t: number; dur: number; }
@@ -3586,9 +3598,8 @@ export class Game {
     const wallLike = b.key === 'wall' || b.key === 'gate';
     if (wallLike) {
       // угловой сегмент-бастион (стык двух осей) рисуем отдельным столбом
-      const isCorner = b.key === 'wall' && this.isWallCorner(b)
-        && CORNER_SPRITE.img.complete && CORNER_SPRITE.img.naturalWidth > 0;
-      const wspr = isCorner ? CORNER_SPRITE : BLD_SPRITES[b.key];
+      const isCorner = b.key === 'wall' && this.isWallCorner(b);
+      const wspr = wallSpriteFor(b, isCorner);
       const ready = !!wspr && wspr.img.complete && wspr.img.naturalWidth > 0;
       if (!ready || !wspr) { this.drawWallGate(b, ix, iy, selected); return; }
       const scale = (2 * S * (isCorner ? 0.9 : 1.0)) / wspr.baseW;
