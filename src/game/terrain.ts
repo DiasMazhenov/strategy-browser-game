@@ -180,10 +180,12 @@ export class Terrain {
    *   hAtWorld(wx,wy) — ступень в гексе, которому принадлежит мировая точка.
    */
   reliefGridHex(wx0: number, wy0: number, wx1: number, wy1: number, pad = 8) {
-    // изо-экраны углов → аксиальные дробные координаты → целочисленные границы
-    const s2h = (sx: number, sy: number) => {
-      const q = sx / 26;                       // HQX
-      const r = sy / (16 * Math.sqrt(3)) - q / 2; // HY, HQY
+    // геометрия изо-гекса (дублирует константы iso.ts, чтобы не тянуть зависимость)
+    // базис q=(44,0), r=(22,29); изо: ix=wx-wy, iy=(wx+wy)/2
+    const HQX = 44, HRX = 22, HRY = 29;
+    const s2h = (ix: number, iy: number) => {
+      const r = iy / HRY;
+      const q = (ix - HRX * r) / HQX;
       return [q, r];
     };
     const corners = [
@@ -192,15 +194,15 @@ export class Terrain {
       s2h(wx1 - wy1, (wx1 + wy1) * 0.5),
       s2h(wx0 - wy1, (wx0 + wy1) * 0.5),
     ];
-    let q0 = Math.floor(Math.min(...corners.map(c => c[0]))) - pad;
-    let q1 = Math.ceil(Math.max(...corners.map(c => c[0]))) + pad;
-    let r0 = Math.floor(Math.min(...corners.map(c => c[1]))) - pad;
-    let r1 = Math.ceil(Math.max(...corners.map(c => c[1]))) + pad;
+    const q0 = Math.floor(Math.min(...corners.map(c => c[0]))) - pad;
+    const q1 = Math.ceil(Math.max(...corners.map(c => c[0]))) + pad;
+    const r0 = Math.floor(Math.min(...corners.map(c => c[1]))) - pad;
+    const r1 = Math.ceil(Math.max(...corners.map(c => c[1]))) + pad;
     const W = q1 - q0 + 1, H = r1 - r0 + 1;
     const idx = (q: number, r: number) => (r - r0) * W + (q - q0);
-    // мир → изо-экран (дублирует toIso, чтобы не тянуть зависимость iso↔terrain)
+    // аксиальный гекс → мировые координаты ЦЕНТРА (обратное изо-преобразование)
     const worldAt = (q: number, r: number): [number, number] => {
-      const ix = 26 * q, iy = (16 * Math.sqrt(3) / 2) * q + 16 * Math.sqrt(3) * r;
+      const ix = HQX * q + HRX * r, iy = HRY * r;
       const wx = ix / 2 + iy, wy = iy - ix / 2;
       return [wx, wy];
     };
@@ -246,17 +248,15 @@ export class Terrain {
       at: hAt,
       hAtWorld: (wx: number, wy: number) => {
         const ix = wx - wy, iy = (wx + wy) * 0.5;
-        let q = ix / 26;
-        const r = iy / (16 * Math.sqrt(3)) - q / 2;
-        q = Math.round(q); let rr = Math.round(r);
-        // cube rounding
-        const x = q, z = rr, y = -x - z;
-        let rx = x, ry = y, rz = z;
+        const rF = iy / HRY;
+        const qF = (ix - HRX * rF) / HQX;
+        // cube rounding (аксиальные q,r)
+        const x = qF, z = rF, y = -x - z;
+        let rx = Math.round(x), ry = Math.round(y), rz = Math.round(z);
         const dx = Math.abs(rx - x), dy = Math.abs(ry - y), dz = Math.abs(rz - z);
         if (dx > dy && dx > dz) rx = -ry - rz;
         else if (dz > dy) rz = -rx - ry;
-        rr = rz; q = rx;
-        return hAt(q, rr);
+        return hAt(rx, rz);
       },
     };
   }

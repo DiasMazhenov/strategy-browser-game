@@ -11,22 +11,38 @@ export const TILE_STEP = 32; // world-space шаг привязки стен (м
 export const TILE_W = 64;    // legacy-совместимость
 export const TILE_H = 32;
 
-// ── Гексагональная решётка (изо-проекция flat-top гекса со стороной 32 в мире) ──
-export const HQX = 26;                 // экранный шаг q по X  (3/4 стороны × 2:1 ≈ 26)
-export const HY = 16 * Math.sqrt(3);   // ≈27.71 — шаг r по Y
-export const HQY = HY / 2;             // ≈13.86 — наклон q по Y
-export const HEX_PAD = 3;              // припуск канваса тайла
-// канвас тайла: с запасом на перехлёст текстуры между гексами (плотная база — строго по гексу)
-export const TILE_CW = 40 + HEX_PAD * 2;   // 46
-export const TILE_CH = Math.ceil(2 * HQY) + HEX_PAD * 2 + 4; // ≈38
+// ── ИЗОМЕТРИЧЕСКАЯ гексагональная решётка ──
+// Канонический изо-шестиугольник (как в изо-тайлмапах Unity/Godot): верхняя и
+// нижняя ВЕРШИНЫ, плечи идут по изо-диагоналям 2:1 (уклон 1:2 — те же ромбы, что
+// у зданий), боковые грани ВЕРТИКАЛЬНЫЕ (как боковины изо-кубов). Параметры:
+//   w  — половина ширины гекса (x до боковой грани);
+//   b  — половина длины вертикальной боковой грани;
+//   A  — вынос верхней/нижней вершины от центра; условие изо-уклона плеч: A-b = w/2.
+const HS_W = 22;                        // половина ширины (горизонтальная полу-ось)
+const HS_B = 9;                         // плечо: вертикальная боковая грань от -b до +b
+const HS_A = HS_B + HS_W / 2;           // 20 — вынос верхней/нижней вершины (плечо 1:2)
+export const HEX_PAD = 4;               // припуск канваса тайла (на перехлёст текстуры)
+// шаги аксиальной решётки в изо-экране: q — горизонтальный сосед (через вертикальную
+// грань), r — сосед вниз-право. Базис: q=(2w,0), r=(w,A+b).
+export const HQX = 2 * HS_W;            // 44 — шаг q по X
+export const HRX = HS_W;                // 22 — шаг r по X
+export const HRY = HS_A + HS_B;         // 29 — шаг r по Y
+// канвас тайла: гекс 2w шириной × 2A высотой, с припуском
+export const TILE_CW = 2 * HS_W + HEX_PAD * 2;   // 52
+export const TILE_CH = 2 * HS_A + HEX_PAD * 2;   // 48
 export const TCX = TILE_CW / 2;
 export const TCY = TILE_CH / 2;
-// вершины гекса относительно ЦЕНТРА — Вороной-ячейка решётки (hexCenter), делит ребро
-// с каждым из 6 соседей. Порядок: TL, TR, R, BR, BL, L.
-const HX = (HQX * HQX + HQY * HQY) / (2 * HQX);   // ≈16.69 — правая/левая вершины
-const VX = (HQX * HQX - HQY * HQY) / (2 * HQX);     // ≈9.31 — x у верхних/нижних вершин
+// вершины гекса относительно ЦЕНТРА. Порядок по часовой от вершины:
+// 0 T верх · 1 UR правое плечо · 2 R правый бок · 3 B низ · 4 L левый бок · 5 UL левое плечо.
+// Наклонные грани (0-1, 2-3, 3-4, 5-0) имеют уклон ±1/2 (изо-оси 2:1);
+// грани 1-2 и 4-5 — вертикальные. Вороной-ячейка решётки hexCenter.
 export const HEX_PTS: [number, number][] = [
-  [-VX, -HQY], [VX, -HQY], [HX, 0], [VX, HQY], [-VX, HQY], [-HX, 0],
+  [0, -HS_A],        // 0 T
+  [HS_W, -HS_B],     // 1 UR
+  [HS_W, HS_B],      // 2 R
+  [0, HS_A],         // 3 B
+  [-HS_W, HS_B],     // 4 L
+  [-HS_W, -HS_B],    // 5 UL
 ];
 
 /** World XY → isometric screen XY */
@@ -39,15 +55,15 @@ export function fromIso(sx: number, sy: number): [number, number] {
   return [sx / 2 + sy, sy - sx / 2];
 }
 
-/** изо-экранные координаты центра гекса (q,r) */
+/** изо-экранные координаты центра гекса (q,r): базис q=(2w,0), r=(w,A+b) */
 export function hexCenter(q: number, r: number): [number, number] {
-  return [HQX * q, HQY * q + HY * r];
+  return [HQX * q + HRX * r, HRY * r];
 }
 
 /** изо-экран → дробные аксиальные координаты гекса */
 export function screenToHex(ix: number, iy: number): { q: number; r: number } {
-  const q = ix / HQX;
-  const r = iy / HY - q / 2;
+  const r = iy / HRY;
+  const q = (ix - HRX * r) / HQX;
   return { q, r };
 }
 
@@ -83,6 +99,9 @@ import texDeep from '../assets/sprites/terrain/hex/deep.png';
 import texSand from '../assets/sprites/terrain/hex/sand.png';
 import texDesert from '../assets/sprites/terrain/hex/desert.png';
 import texField from '../assets/sprites/terrain/hex/field.png';
+import texForest from '../assets/sprites/terrain/hex/forest.png';
+import texMountain from '../assets/sprites/terrain/hex/mountain.png';
+import texHill from '../assets/sprites/terrain/hex/hill.png';
 
 export type HexKind =
   | 'grass' | 'dgrass' | 'dirt' | 'water' | 'deep' | 'sand'
@@ -91,6 +110,7 @@ export type HexKind =
 const TEX_URL: Partial<Record<HexKind, string>> = {
   grass: texGrass, dirt: texDirt, water: texWater, deep: texDeep,
   sand: texSand, desert: texDesert, field: texField,
+  forest: texForest, mountain: texMountain, hill: texHill,
 };
 // плотная подложка под текстуру (базовый цвет биома)
 const BASE: Record<HexKind, string> = {
@@ -98,12 +118,12 @@ const BASE: Record<HexKind, string> = {
   water: '#3a7fc0', deep: '#245a96', sand: '#d8c489', desert: '#d2ac5e',
   field: '#a3ad4e', forest: '#3f6b2f', mountain: '#62606a', hill: '#7f8c52',
 };
-// цвет тинта текстуры (null — без тинта)
+// цвет тинта текстуры (null — без тинта); лёгкий, чтобы AI-текстура читалась
 const TINT: Partial<Record<HexKind, string>> = {
-  dgrass: 'rgba(40,90,30,0.35)',
-  forest: 'rgba(30,70,20,0.45)',
-  mountain: 'rgba(120,120,135,0.35)',
-  hill: 'rgba(120,130,70,0.30)',
+  dgrass: 'rgba(40,90,30,0.28)',
+  forest: 'rgba(25,60,18,0.22)',
+  mountain: 'rgba(110,110,128,0.18)',
+  hill: 'rgba(110,120,65,0.16)',
 };
 
 const tileCache = new Map<string, HTMLCanvasElement>();
@@ -158,8 +178,8 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       g.save();
       hexPath(g, TCX, TCY);
       g.clip();
-      const tw = TILE_CW + 26, th = TILE_CH + 20;
-      const jx = jitter(v) * 12 - 6, jy = jitter(v + 7) * 8 - 4;
+      const tw = TILE_CW + 30, th = TILE_CH + 24;
+      const jx = jitter(v) * 14 - 7, jy = jitter(v + 7) * 10 - 5;
       g.imageSmoothingEnabled = true; // мягкая усадка текстуры
       g.drawImage(im, TCX - tw / 2 + jx, TCY - th / 2 + jy, tw, th);
       g.imageSmoothingEnabled = false;
@@ -182,35 +202,25 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       g.fillRect(0, 0, TILE_CW, TILE_CH);
       g.restore();
     }
-    // 4) процедурная детализация для тайлов без AI-текстуры
-    g.save();
-    hexPath(g, TCX, TCY);
-    g.clip();
-    if (kind === 'forest' || kind === 'dgrass') {
+    // 4) процедурная детализация только для тайлов без AI-текстуры (тёмная трава dgrass)
+    if (!url) {
+      g.save();
+      hexPath(g, TCX, TCY);
+      g.clip();
       g.fillStyle = 'rgba(20,50,16,0.35)';
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < 8; i++) {
         const px = TCX + ((i * 17 + v) % 44) - 22;
-        const py = TCY + ((i * 13 + (v >> 3)) % 20) - 10;
+        const py = TCY + ((i * 13 + (v >> 3)) % 36) - 18;
         g.fillRect(px, py, 2, 2);
       }
-    }
-    if (kind === 'mountain') {
-      for (let i = 0; i < 9; i++) {
-        g.fillStyle = i % 2 ? 'rgba(210,210,220,0.5)' : 'rgba(40,40,48,0.5)';
-        const px = TCX + ((i * 19 + v) % 48) - 24;
-        const py = TCY + ((i * 11 + (v >> 2)) % 22) - 11;
-        g.fillRect(px, py, 2, 2);
+      g.fillStyle = 'rgba(120,170,90,0.30)';
+      for (let i = 0; i < 5; i++) {
+        const px = TCX + ((i * 23 + v) % 40) - 20;
+        const py = TCY + ((i * 11 + (v >> 4)) % 34) - 17;
+        g.fillRect(px, py, 2, 1);
       }
+      g.restore();
     }
-    if (kind === 'hill') {
-      for (let i = 0; i < 6; i++) {
-        g.fillStyle = i % 2 ? 'rgba(150,140,100,0.5)' : 'rgba(90,100,55,0.5)';
-        const px = TCX + ((i * 17 + v) % 44) - 22;
-        const py = TCY + ((i * 13 + (v >> 2)) % 20) - 10;
-        g.fillRect(px, py, 2, 2);
-      }
-    }
-    g.restore();
     // 5) свет по верхним трём граням (дальний гребень), тень по нижним (обрыв к зрителю)
     const ridge = (a: number, b: number, color: string, w: number) => {
       g.strokeStyle = color; g.lineWidth = w; g.lineJoin = 'round';
@@ -220,14 +230,15 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       g.lineTo(TCX + p1[0], TCY + p1[1]);
       g.stroke();
     };
-    // верхний гребень: ребро 0-1 (горизонт, дальняя кромка) + сходящиеся грани
-    ridge(0, 1, 'rgba(255,255,230,0.28)', 1.4);
-    ridge(5, 0, 'rgba(255,255,230,0.16)', 1);
-    ridge(1, 2, 'rgba(255,255,230,0.16)', 1);
-    // нижние грани — в тени
-    ridge(3, 4, 'rgba(0,0,0,0.28)', 1.4);
-    ridge(2, 3, 'rgba(0,0,0,0.18)', 1);
-    ridge(4, 5, 'rgba(0,0,0,0.18)', 1);
+    // верхние плечи (дальняя кромка) — свет
+    ridge(0, 1, 'rgba(255,255,230,0.26)', 1.3);
+    ridge(5, 0, 'rgba(255,255,230,0.26)', 1.3);
+    // вертикальные бока — полу-тень
+    ridge(1, 2, 'rgba(0,0,0,0.12)', 1);
+    ridge(4, 5, 'rgba(255,255,230,0.10)', 1);
+    // нижние плечи (обрыв к зрителю) — тень
+    ridge(2, 3, 'rgba(0,0,0,0.30)', 1.3);
+    ridge(3, 4, 'rgba(0,0,0,0.30)', 1.3);
   });
   return tile;
 }

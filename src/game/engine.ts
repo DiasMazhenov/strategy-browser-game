@@ -2,7 +2,7 @@ import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, W
 import { SoundBank } from './audio';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries,
   getHexTile, hexPath, hexCenter, screenToHex,
-  HQX, HY, HQY, HEX_PTS, TCX, TCY,
+  HEX_PTS, TCX, TCY,
   type HexKind,
   TILE_STEP } from './iso';
 import { Terrain } from './terrain';
@@ -694,15 +694,15 @@ export class Game {
     const q0 = Math.floor(c0.q) - 2, q1 = Math.ceil(c1.q) + 2;
     const r0 = Math.floor(c0.r) - 2, r1 = Math.ceil(c1.r) + 2;
     for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) {
-      // мировой центр гекса
-      const ix = HQX * q, iy = HQY * q + HY * r;
-      const wx = ix / 2 + iy, wy = iy - ix / 2;
+      // изо-экранный и мировой центр гекса
+      const [hx, hy] = hexCenter(q, r);
+      const wx = hx / 2 + hy, wy = hy - hx / 2;
       if (wx < 0 || wy < 0 || wx > WORLD.w || wy > WORLD.h) continue;
       const gx = (wx / this.fogCell) | 0, gy = (wy / this.fogCell) | 0;
       if (gx < 0 || gy < 0 || gx >= this.fogGW || gy >= this.fogGH) continue;
       const idx = gy * this.fogGW + gx;
       if (this.fogVis[idx]) continue; // видно — без тумана
-      const sx = camIX + ix, sy = camIY + iy;
+      const sx = camIX + hx, sy = camIY + hy;
       hexPath(ctx, sx, sy, 1.06);
       ctx.fillStyle = this.fogExpl[idx] ? 'rgba(10,16,12,0.42)' : 'rgba(6,10,8,0.82)';
       ctx.fill();
@@ -3100,7 +3100,7 @@ export class Game {
     ctx.translate(-this.camIsoX(), -this.camIsoY());
 
     // ── isometric ground tiles: ГЕКСАГОНАЛЬНАЯ мозаика (flat-top гексы в 2:1) ──
-    // Решётка аксиальная (q,r); центр гекса в изо-экране: ix=HQX*q, iy=HQY*q+HY*r.
+    // Решётка аксиальная (q,r); центр гекса в изо-экране — hexCenter(q,r): q=(44,0), r=(22,29).
     // Каждый кеш-тайл — канвас TILE_CW×TILE_CH с гексом по центру (TCX,TCY).
     // порядок отрисовки: r — внешний цикл (сверху вниз), q — внутренний (слева направо):
     // корректный painter's order для гекс-решётки.
@@ -3141,26 +3141,20 @@ export class Game {
       ctx.strokeStyle = cB; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1] + drop); ctx.lineTo(p2[0], p2[1] + drop); ctx.stroke();
     };
-    // три ПЕРЕДНИЕ (нижние) грани обрыва гекса:
-    //   нижнее ребро BL→BR — общее с соседом r+1 (передняя грань, самая тёмная);
-    //   ребро R→BR — общее с соседом q+1 (правая грань);
-    //   ребро L→BL — общее с соседом q-1,r+1 (левая грань).
+    // Изо-гекс (вершина вверх, вертикальные бока): видимые грани обрыва — ДВЕ передние
+    // плечевые кромки (уклон 1:2, как у изо-ромбов); вертикальные бока смотрят в
+    // ребро и при спуске вырождены, верхние плечи обращены от камеры.
+    //   ребро R(2)→B(3) — общее с соседом (q+1,r+1), правая передняя грань (светлее);
+    //   ребро B(3)→L(4) — общее с соседом (q, r+1), левая передняя грань (темнее).
     const drawCliffsHex = (ix: number, iy: number, up: number, cls: string, q: number, r: number) => {
       if (up <= 0) return;
       const [cR, cL, cB] = cliffColors(cls);
-      const TL: [number, number] = [ix + HEX_PTS[0][0], iy + HEX_PTS[0][1] - up];
-      const TR: [number, number] = [ix + HEX_PTS[1][0], iy + HEX_PTS[1][1] - up];
-      const RR: [number, number] = [ix + HEX_PTS[2][0], iy + HEX_PTS[2][1] - up];
-      const BR: [number, number] = [ix + HEX_PTS[3][0], iy + HEX_PTS[3][1] - up];
-      const BL: [number, number] = [ix + HEX_PTS[4][0], iy + HEX_PTS[4][1] - up];
-      const LL: [number, number] = [ix + HEX_PTS[5][0], iy + HEX_PTS[5][1] - up];
-      void TL; void TR;
-      const dC = up - upAtQ(q, r + 1);       // сосед прямо вниз (ребро BL→BR)
-      const dE = up - upAtQ(q + 1, r);       // сосед справа-вниз (ребро R→BR)
-      const dW = up - upAtQ(q - 1, r + 1);   // сосед слева-вниз (ребро L→BL)
-      face(BL, BR, dC, cB, cB);  // передняя горизонтальная грань — самая тёмная
-      face(RR, BR, dE, cR, cB);  // правая наклонная грань
-      face(LL, BL, dW, cL, cB);  // левая наклонная грань
+      const vx = (i: number): [number, number] => [ix + HEX_PTS[i][0], iy + HEX_PTS[i][1] - up];
+      const R = vx(2), B = vx(3), L = vx(4);
+      const dR = up - upAtQ(q + 1, r + 1);   // сосед вниз-право (ребро R→B)
+      const dL = up - upAtQ(q, r + 1);       // сосед вниз-лево  (ребро B→L)
+      face(R, B, dR, cR, cB);  // правая передняя грань
+      face(B, L, dL, cL, cB);  // левая передняя грань
     };
 
     // видимый диапазон гексов: изо-экран камеры → дробные аксиальные координаты
@@ -3262,7 +3256,8 @@ export class Game {
         }
         if (fi < 0 || nearPlaced(q, r, rad)) continue;
         placed.push(q + ',' + r);
-        const ix = camIX + HQX * q, iy0 = camIY + HQY * q + HY * r;
+        const [fhx, fhy] = hexCenter(q, r);
+        const ix = camIX + fhx, iy0 = camIY + fhy;
         const iy = iy0 - upAtQ(q, r);
         drawList.push({ iy: iy0, draw: () => this.drawTerrainFeature(fi, ix, iy) });
       }

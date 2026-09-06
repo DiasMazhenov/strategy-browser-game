@@ -14,3 +14,5 @@ scripts/tile-test.cjs
 # исходники AI-спрайтов казахской расы (тяжёлые PNG на magenta-фоне; готовые кадры — в kz/*.png)
 src/assets/sprites/units/kz/raw/
 refs/
+
+image-search/
