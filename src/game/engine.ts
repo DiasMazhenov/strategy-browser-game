@@ -2625,7 +2625,16 @@ export class Game {
             }
             if (owner === 'player' && q.key !== 'villager') { this.soldiersTrained++; this.checkQuests(); }
             this.burst(sx, b.y, 10, ['#fff', '#f6d47c'], 80, 0.5);
-            if (owner === 'player') this.sound.train();
+            if (owner === 'player') {
+              this.sound.train();
+              // реплика при выходе из здания: воин из казармы — «Я готов», крестьянин — отклик рабочего
+              if (q.key === 'villager') {
+                // «Чего изволите» / «слушаю» — случайно
+                this.sound.playPhrase(Math.random() < 0.5 ? 'чего изволите' : 'слушаю');
+              } else if (b.key === 'barracks' || b.key === 'stable' || b.key === 'blacksmith' || b.key === 'towncenter') {
+                this.sound.playPhrase('готов');
+              }
+            }
           }
         }
       }

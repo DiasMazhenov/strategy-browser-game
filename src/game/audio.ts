@@ -239,6 +239,21 @@ export class SoundBank {
     this.playUrl(url);
   }
 
+  // проиграть КОНКРЕТНУЮ фразу по ключу: сперва казахская запись расы игрока,
+  // затем откат на русскую. Используется для реплик «юнит вышел из здания».
+  playPhrase(phrase: string) {
+    if (this.muted || !this.voiceOn) return;
+    const k = normKey(phrase);
+    const kz = KZ_CLIP_URLS[k];
+    let url: string | null = null;
+    if (kz && kz.length) {
+      const u = kz[(Math.random() * kz.length) | 0];
+      if (!this.missingClips.has(u)) url = u;
+    }
+    if (!url) { const ru = CLIP_URLS[k]; url = ru && !this.missingClips.has(ru) ? ru : null; }
+    if (url) this.playUrl(url);
+  }
+
   // ── голос: проиграть запись фразы ──
   // event: select|move|attack|gather. Игрок — казахская раса: сперва казахские записи,
   // для команд без них (часть рабочих реплик) — откат на русскую озвучку.
