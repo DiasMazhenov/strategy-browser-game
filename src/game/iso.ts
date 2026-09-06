@@ -108,6 +108,70 @@ export function getDarkGrassTile(): HTMLCanvasElement {
   });
 }
 
+// ── Water tiles (river / lake): two animated-looking static variants ──
+export function getWaterTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('water' + (variant % 2), TW, TH, (g) => {
+    diamondPath(g, TCX, TCY);
+    const deep = variant % 2 === 0;
+    g.fillStyle = deep ? '#2f6fb0' : '#3a7fc0';
+    g.fill();
+    // мягкая светлая кромка у берега (верхняя грань ромба светлее)
+    diamondPath(g, TCX, TCY - 1, TILE_W - 8, TILE_H - 8);
+    g.fillStyle = deep ? 'rgba(96,165,220,0.25)' : 'rgba(125,190,235,0.28)';
+    g.fill();
+    // блики-рябь
+    g.strokeStyle = 'rgba(200,232,255,0.5)';
+    g.lineWidth = 1;
+    const off = deep ? 0 : 3;
+    g.beginPath();
+    g.moveTo(TCX - 14, TCY - 2 + off); g.lineTo(TCX - 4, TCY - 5 + off); g.lineTo(TCX + 6, TCY - 3 + off);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(TCX + 2, TCY + 4 - off); g.lineTo(TCX + 12, TCY + 2 - off);
+    g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    g.fillRect(TCX - 8, TCY + 2, 3, 1);
+    g.fillRect(TCX + 8, TCY - 4, 3, 1);
+  });
+}
+
+// ── Hill tile (рельеф): каменистая площадка, свет по верхней кромке, обрыв в тени у нижней ──
+export function getHillTile(variant: number): HTMLCanvasElement {
+  return getCachedTile('hill' + (variant % 3), TW, TH, (g) => {
+    // базовый ромб — тёмный камень (обрыв)
+    diamondPath(g, TCX, TCY);
+    g.fillStyle = '#5f574a';
+    g.fill();
+    // верхняя площадка холма чуть меньше — приподнятая трава
+    diamondPath(g, TCX, TCY - 2, TILE_W - 6, TILE_H - 8);
+    g.fillStyle = variant % 3 === 0 ? '#8b965c' : '#7f8c52';
+    g.fill();
+    // каменистые вкрапления
+    for (let i = 0; i < 6; i++) {
+      const px = TCX + ((i * 17 + variant * 7) % 40) - 20;
+      const py = TCY + ((i * 13 + variant * 5) % 16) - 8;
+      g.fillStyle = i % 2 === 0 ? '#9a9066' : '#6f7a45';
+      g.fillRect(px, py, 2, 2);
+    }
+    // светлая грань — у верхнего ребра (дальний гребень)
+    g.strokeStyle = 'rgba(210,220,160,0.55)';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.moveTo(TCX - TILE_W / 2 + 3, TCY + 1);
+    g.lineTo(TCX, TCY - TILE_H / 2 + 2);
+    g.lineTo(TCX + TILE_W / 2 - 3, TCY + 1);
+    g.stroke();
+    // тень обрыва — у нижнего ребра (к зрителю)
+    g.fillStyle = 'rgba(40,34,26,0.45)';
+    g.beginPath();
+    g.moveTo(TCX - TILE_W / 2 + 6, TCY - 1);
+    g.lineTo(TCX + TILE_W / 2 - 6, TCY - 1);
+    g.lineTo(TCX, TCY + TILE_H / 2 - 1);
+    g.closePath();
+    g.fill();
+  });
+}
+
 // ── Draw isometric box (building block) ──
 // cx,cy = base center on screen. w,d = top-face pixel dims. h = pixel height.
 export function isoBox(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, d: number, h: number, topColor: string, leftColor: string, rightColor: string) {

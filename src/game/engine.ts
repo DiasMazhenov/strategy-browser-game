@@ -1,6 +1,7 @@
 import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
-import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, getGrassTile, getDirtTile, getDarkGrassTile, TILE_STEP } from './iso';
+import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, getGrassTile, getDirtTile, getDarkGrassTile, getWaterTile, getHillTile, TILE_STEP } from './iso';
+import { Terrain } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import imgTowncenter from '../assets/sprites/towncenter.png';
@@ -188,6 +189,7 @@ export class Game {
   units: Unit[] = []; blds: Bld[] = []; nodes: Node[] = []; relics: Relic[] = [];
   projs: Proj[] = []; parts: Particle[] = []; floaters: Floater[] = []; corpses: Corpse[] = [];
   decor: Decor[] = [];
+  terrain = new Terrain((Math.random() * 1e9) | 0);
   res = { wood: 260, food: 260, gold: 140 };
   eres = { wood: 300, food: 300, gold: 160 };
   age = 0; eage = 0;
@@ -260,7 +262,7 @@ export class Game {
     this.genWorld();
     if (opts.loadSave && this.loadFromSave()) { /* восстановлено из сохранения */ }
     this.bind();
-    this.centerOn(380, 1620, true);
+    this.centerOn(470, 2330, true);
     const isMobile = matchMedia('(pointer: coarse)').matches;
     this.cam.zoom = isMobile ? 0.7 : 0.9;
     this.hint = isMobile ? 'Касание — выбор • Касание земли — приказ • Потяните — рамка выбора' : 'ЛКМ-рамка — выделение • ПКМ — приказ • WASD камера • 1-8 тренировка';
@@ -327,19 +329,33 @@ export class Game {
     }
   }
   genWorld() {
-    // decor
+    const P = { x: 470, y: 2330 }, E = { x: 3140, y: 560 };
+    // террейн: безопасные зоны вокруг баз (суша, без рек/холмов)
+    this.terrain.addSafe(P.x, P.y, 340);
+    this.terrain.addSafe(E.x, E.y, 340);
+    const land = (x: number, y: number) => this.terrain.isLand(x, y);
+    // случайная точка на суше вне радиуса баз
+    const randLand = (baseAvoid = true): [number, number] => {
+      for (let t = 0; t < 60; t++) {
+        const x = rand(220, WORLD.w - 220), y = rand(220, WORLD.h - 220);
+        if (baseAvoid && (dist2(x, y, P.x, P.y) < 420 * 420 || dist2(x, y, E.x, E.y) < 420 * 420)) continue;
+        if (land(x, y)) return [x, y];
+      }
+      return [rand(220, WORLD.w - 220), rand(220, WORLD.h - 220)];
+    };
+    // decor — только на суше
     const decorCols: Record<string, string[]> = {
       green: ['#5da24a', '#6fae55', '#87b96a', '#d9c26a', '#c9b458'],
       autumn: ['#c87a2e', '#d9a13b', '#a85b24', '#b06b2a', '#d9c26a'],
       winter: ['#cfd8e3', '#b9c4d2', '#e2e8f0', '#9fb2c6', '#dce5ef'],
       desert: ['#d9b868', '#c9a555', '#e3c87a', '#b8934a', '#d9c26a'],
     };
-    for (let i = 0; i < 420; i++) {
+    for (let i = 0; i < 760; i++) {
+      const [x, y] = randLand(false);
       const cols = decorCols[this.settings.biome] || decorCols.green;
-      this.decor.push({ x: rand(0, WORLD.w), y: rand(0, WORLD.h), k: (Math.random() * 3) | 0, s: rand(2, 5), c: cols[(Math.random() * cols.length) | 0] });
+      this.decor.push({ x, y, k: (Math.random() * 3) | 0, s: rand(2, 5), c: cols[(Math.random() * cols.length) | 0] });
     }
-    const P = { x: 380, y: 1620 }, E = { x: 2220, y: 380 };
-    // starting forests arcs
+    // лес у базы (дуга) — гарантированно рядом со стартом
     const arc = (cx: number, cy: number, n: number, r0: number, a0: number) => {
       for (let i = 0; i < n; i++) {
         const a = a0 + (i / n) * Math.PI * 1.2 + rand(-0.15, 0.15);
@@ -352,20 +368,31 @@ export class Game {
     this.addNode('gold', P.x + 190, P.y + 130, 900); this.addNode('gold', P.x - 90, P.y - 230, 700);
     this.addNode('food', E.x - 120, E.y + 150, 700); this.addNode('food', E.x + 170, E.y - 60, 700);
     this.addNode('gold', E.x - 190, E.y - 130, 900); this.addNode('gold', E.x + 90, E.y + 230, 700);
-    // mid forests
-    const forests = [[900, 900], [1500, 1300], [1200, 500], [1900, 1100], [700, 500], [1700, 1700], [1300, 1650]];
-    for (const [fx, fy] of forests) {
-      const n = 9 + ((Math.random() * 6) | 0);
-      for (let i = 0; i < n; i++) this.addNode('wood', fx + rand(-130, 130), fy + rand(-110, 110), 200);
+    // леса: гуще на серединной полосе между базами + случайные рощи по всей карте
+    const M = { x: (P.x + E.x) / 2, y: (P.y + E.y) / 2 };
+    for (let i = 0; i < 14; i++) {
+      const t = rand(-0.7, 1.7);
+      const fx = P.x + (E.x - P.x) * t + rand(-260, 260);
+      const fy = P.y + (E.y - P.y) * t + rand(-260, 260);
+      if (!land(fx, fy)) continue;
+      const n = 8 + ((Math.random() * 7) | 0);
+      for (let k = 0; k < n; k++) this.addNode('wood', fx + rand(-140, 140), fy + rand(-120, 120), 200);
     }
-    // scattered gold/berries
-    const spots: [number, number][] = [[1000, 1400], [1600, 700], [1300, 1000], [800, 1000], [2000, 1500], [500, 900], [1450, 1450]];
-    for (const [sx, sy] of spots) {
-      if (Math.random() < 0.75) this.addNode('gold', sx + rand(-40, 40), sy + rand(-40, 40), 800);
-      if (Math.random() < 0.8) this.addNode('food', sx + rand(-110, 110), sy + rand(-90, 90), 550);
+    for (let i = 0; i < 22; i++) {
+      const [fx, fy] = randLand();
+      const n = 7 + ((Math.random() * 7) | 0);
+      for (let k = 0; k < n; k++) {
+        const tx = fx + rand(-150, 150), ty = fy + rand(-130, 130);
+        if (land(tx, ty)) this.addNode('wood', tx, ty, 200);
+      }
     }
-    // central gold rush
-    this.addNode('gold', 1300, 1000, 1500); this.addNode('gold', 1350, 1040, 1200);
+    // золото/ягоды: вокруг центрального «золотого спора» и в случайных точках суши
+    this.addNode('gold', M.x + 50, M.y + 40, 1500); this.addNode('gold', M.x + 100, M.y + 80, 1200);
+    for (let i = 0; i < 16; i++) {
+      const [sx, sy] = randLand();
+      if (Math.random() < 0.8) this.addNode('gold', sx + rand(-50, 50), sy + rand(-50, 50), 850);
+      if (Math.random() < 0.75) this.addNode('food', sx + rand(-110, 110), sy + rand(-90, 90), 550);
+    }
     // TCs
     this.addBld('towncenter', 'player', P.x, P.y, 1);
     this.addBld('towncenter', 'enemy', E.x, E.y, 1);
@@ -374,14 +401,13 @@ export class Game {
     const v2 = this.addUnit('villager', 'player', P.x + 50, P.y - 60);
     const v3 = this.addUnit('villager', 'player', P.x - 40, P.y + 70);
     const v4 = this.addUnit('villager', 'player', P.x + 70, P.y + 50);
-    // auto-task starting vills
     const woods = this.nodes.filter(n => n.kind === 'wood' && dist2(n.x, n.y, P.x, P.y) < 340 * 340);
     const foods = this.nodes.filter(n => n.kind === 'food' && dist2(n.x, n.y, P.x, P.y) < 340 * 340);
     if (woods[0]) this.orderGather(v1, woods[0].id);
     if (woods[1]) this.orderGather(v2, woods[1].id);
     if (foods[0]) this.orderGather(v3, foods[0].id);
     if (foods[1]) this.orderGather(v4, foods[1].id);
-    // starting army — instant fun
+    // starting army
     const s1 = this.addUnit('swordsman', 'player', P.x + 130, P.y - 20);
     const s2 = this.addUnit('swordsman', 'player', P.x + 160, P.y + 20);
     this.addUnit('archer', 'player', P.x + 110, P.y + 60);
@@ -394,42 +420,33 @@ export class Game {
     }
     this.addUnit('swordsman', 'enemy', E.x - 120, E.y + 40);
     this.addUnit('swordsman', 'enemy', E.x - 150, E.y - 20);
-    // wolves — one pack near player for instant combat
-    const packs: [number, number][] = [[760, 1280], [1100, 1050], [1500, 900], [950, 700], [1750, 1350], [2600, 1200], [2900, 2000], [600, 2200], [3200, 700]];
-    for (const [wx, wy] of packs) for (let i = 0; i < 3; i++) {
-      const w = this.addUnit('wolf', 'neutral', wx + rand(-50, 50), wy + rand(-50, 50));
-      w.wx = wx; w.wy = wy;
-    }
-    // скот и дичь: пасутся стадами/семьями
-    const herds: [number, number, UnitKey, number][] = [
-      [600, 1500, 'sheep', 4], [520, 1560, 'sheep', 3],          // овечки у старта игрока
-      [2400, 500, 'cow', 3], [2300, 560, 'sheep', 2],            // скот у соперника
-      [1200, 1500, 'cow', 2], [2000, 1800, 'sheep', 4],
-      [2800, 1000, 'deer', 3], [900, 400, 'deer', 3], [3100, 1700, 'deer', 3], [1500, 2100, 'cow', 2],
-    ];
-    for (const [hx, hy, kind, n] of herds) for (let i = 0; i < n; i++) {
-      const a = this.addUnit(kind, 'neutral', hx + rand(-45, 45), hy + rand(-40, 40));
-      a.wx = hx; a.wy = hy;
-    }
-    // доп. ресурсы на расширенной карте: леса, золото, ягоды
-    const extraForests: [number, number][] = [[2700, 1400], [3000, 2200], [500, 2300], [2300, 2100], [3200, 1100], [1100, 2400], [2600, 400]];
-    for (const [fx, fy] of extraForests) for (let i = 0; i < 8 + ((Math.random() * 5) | 0); i++) this.addNode('wood', fx + rand(-140, 140), fy + rand(-120, 120), 200);
-    const extraGold: [number, number][] = [[2900, 900], [2500, 2300], [700, 2500], [3300, 1500], [1800, 2200], [1000, 1900]];
-    for (const [gx, gy] of extraGold) this.addNode('gold', gx + rand(-40, 40), gy + rand(-40, 40), 900);
-    const extraFood: [number, number][] = [[2800, 1300], [450, 2100], [3100, 2400], [2100, 600], [1300, 2600], [2600, 1900]];
-    for (const [fx, fy] of extraFood) this.addNode('food', fx + rand(-60, 60), fy + rand(-50, 50), 600);
+    // ── дикие животные: случайно разбросаны по всей карте ──
+    const spawnPack = (kind: UnitKey, packs: number, size: [number, number]) => {
+      for (let p = 0; p < packs; p++) {
+        const [hx, hy] = randLand();
+        const n = size[0] + ((Math.random() * (size[1] - size[0] + 1)) | 0);
+        for (let i = 0; i < n; i++) {
+          const a = this.addUnit(kind, 'neutral', hx + rand(-55, 55), hy + rand(-50, 50));
+          a.wx = hx; a.wy = hy;
+        }
+      }
+    };
+    spawnPack('wolf', 12, [2, 3]);   // волчьи стаи
+    spawnPack('sheep', 8, [3, 5]);   // отары овец
+    spawnPack('cow', 6, [2, 3]);     // коровы
+    spawnPack('deer', 8, [3, 4]);    // олени
     // вражеские лагеря в центре карты — зачисти ради награды
-    const camps: [number, number][] = [[1300, 1250], [1700, 900]];
-    for (const [cx, cy] of camps) {
+    for (let i = 0; i < 3; i++) {
+      const [cx, cy] = i === 0 ? [M.x, M.y] : randLand();
       this.addBld('tower', 'enemy', cx, cy, 1);
-      for (let i = 0; i < 2; i++) { const g = this.addUnit('swordsman', 'enemy', cx + rand(-40, 40), cy + rand(-40, 40)); g.state = 'idle'; }
+      for (let k = 0; k < 2; k++) { const g = this.addUnit('swordsman', 'enemy', cx + rand(-40, 40), cy + rand(-40, 40)); g.state = 'idle'; }
       this.addNode('gold', cx + 60, cy - 50, 700);
-      // реликвия у лагеря — заберите после зачистки
       this.relics.push({ id: this.nextId++, x: cx - 70, y: cy + 40, taken: false, phase: rand(0, 6) });
     }
     // ещё реликвии в разброс по карте
-    for (let i = 0; i < 3; i++) {
-      this.relics.push({ id: this.nextId++, x: rand(600, WORLD.w - 600), y: rand(400, WORLD.h - 400), taken: false, phase: rand(0, 6) });
+    for (let i = 0; i < 4; i++) {
+      const [rx, ry] = randLand();
+      this.relics.push({ id: this.nextId++, x: rx, y: ry, taken: false, phase: rand(0, 6) });
     }
   }
 
@@ -479,7 +496,7 @@ export class Game {
     else if (k === 't') this.ageUp();
     else if (k === 'g') { if (this.selUnits().length) { this.attackArmed = !this.attackArmed; this.rallyArmed = false; this.patrolArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === 'y') { if (this.selUnits().some(u => u.key !== 'villager')) { this.patrolArmed = !this.patrolArmed; this.attackArmed = false; this.sound.select(); this.pushHud(); } }
-    else if (k === 'h') this.centerOn(380, 1620);
+    else if (k === 'h') this.centerOn(470, 2330);
     else if (k === '.' || k === 'ю') this.jumpToIdleVillager();
     else if (k === 'm') this.toggleMute();
     else if (k === '+' || k === '=') this.zoomBy(0.15);
@@ -1481,7 +1498,7 @@ export class Game {
       3: 'Имперская мощь! Открыто Чудо света ⭐ — постройте его для победы',
     };
     this.pushBanner(`${next.icon} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
-    this.burst(380, 1620, 40, ['#f6d47c', '#fff'], 160);
+    this.burst(470, 2330, 40, ['#f6d47c', '#fff'], 160);
     this.checkQuests();
     this.pushHud();
   }
@@ -2906,16 +2923,20 @@ export class Game {
     const cx1 = Math.ceil((this.cam.x + margin) / S) * S;
     const cy0 = Math.floor((this.cam.y - margin) / S) * S;
     const cy1 = Math.ceil((this.cam.y + margin) / S) * S;
+    const PX = 470, PY = 2330, EX = 3140, EY = 560;
     for (let wy = cy0; wy <= cy1; wy += S) {
       for (let wx = cx0; wx <= cx1; wx += S) {
         if (wx < -S || wx > WORLD.w + S || wy < -S || wy > WORLD.h + S) continue;
         const [ix, iy] = toIso(wx, wy);
-        // pick tile variant
-        const isBase = (Math.abs(wx - 380) < 180 && Math.abs(wy - 1620) < 180) || (Math.abs(wx - 2220) < 180 && Math.abs(wy - 380) < 180);
-        // use a hash for variety
+        const cx = wx + S / 2, cy = wy + S / 2; // центр клетки для террейна
         const hash = ((wx * 73 + wy * 137) & 0xFFFF);
-        const tile = isBase ? dirtTile : (hash % 5 === 0 ? dkGrass : grassTile);
-        // tile canvas center is at (33, 17), so offset by that
+        const isBase = (Math.abs(cx - PX) < 190 && Math.abs(cy - PY) < 190) || (Math.abs(cx - EX) < 190 && Math.abs(cy - EY) < 190);
+        const tc = this.terrain.classAt(cx, cy);
+        let tile;
+        if (isBase) tile = dirtTile;
+        else if (tc === 'water') tile = getWaterTile(hash);
+        else if (tc === 'hill') tile = getHillTile(hash);
+        else tile = hash % 5 === 0 ? dkGrass : grassTile;
         ctx.drawImage(tile, ix - 33, iy - 17);
       }
     }
@@ -3541,6 +3562,16 @@ export class Game {
     ctx.beginPath(); ctx.rect(x, y, W, H); ctx.clip();
     ctx.fillStyle = '#33582b'; ctx.fillRect(x, y, W, H);
     const sx = W / WORLD.w, sy = H / WORLD.h;
+    // рельеф: вода (реки/озёра) и холмы — по сетке террейна
+    const cell = 90;
+    for (let wy = 0; wy < WORLD.h; wy += cell) {
+      for (let wx = 0; wx < WORLD.w; wx += cell) {
+        const tc = this.terrain.classAt(wx + cell / 2, wy + cell / 2);
+        if (tc === 'grass') continue;
+        ctx.fillStyle = tc === 'water' ? '#3b82f6' : '#8a8266';
+        ctx.fillRect(x + wx * sx - 0.5, y + wy * sy - 0.5, Math.max(2, cell * sx) + 1, Math.max(2, cell * sy) + 1);
+      }
+    }
     // nodes
     for (const n of this.nodes) {
       if (n.amount <= 0) continue;

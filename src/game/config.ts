@@ -1,6 +1,7 @@
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
-export const WORLD = { w: 3600, h: 2800 };
+// Карта увеличена в ~2 раза по площади (коэф. √2 по каждой оси с 3600×2800)
+export const WORLD = { w: 5090, h: 3960 };
 
 export const AGES = [
   { id: 0, name: 'Тёмный век', cost: null as null | { food: number; gold: number }, mult: 1.0, icon: '🌑' },
