@@ -2,7 +2,7 @@
   "name": "react-vite-tailwind",
   "private": true,
   "version": "1.0.0",
-  "_gameVersion": "1.0.029",
+  "_gameVersion": "1.0.030",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -13,7 +13,7 @@ const RAW = path.join(__dirname, '..', 'src', 'assets', 'sprites', 'kz', 'raw');
 const OUT = path.join(__dirname, '..', 'src', 'assets', 'sprites', 'kz');
 
 // целевая высота готового спрайта (px)
-const TARGET_H = { kz_wall: 200, kz_gate: 250 };
+const TARGET_H = { kz_wall: 200, kz_gate: 250, kz_wall_corner: 200 };
 
 function decodePNG(file) {
   const data = fs.readFileSync(file);
@@ -113,3 +113,4 @@ function process(name) {
 
 process('kz_wall');
 process('kz_gate');
+process('kz_wall_corner');

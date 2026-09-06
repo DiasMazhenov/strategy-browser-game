@@ -15,7 +15,7 @@ export const SPR_ANCHORS: Record<string, SprAnchor> = {
   // саманные стены/ворота расы: сегмент во всю ширину кадра (рисуется центрированным по X); угол — по naturalWidth
   "kz_wall":        { "ax": 168, "ay": 200, "baseW": 335, "w": 335, "h": 200 },
   "kz_gate":        { "ax": 209, "ay": 250, "baseW": 418, "w": 418, "h": 250 },
-  "kz_wall_corner": { "ax": 65,  "ay": 137, "baseW": 130, "w": 130, "h": 138 },
+  "kz_wall_corner": { "ax": 91,  "ay": 200, "baseW": 181, "w": 181, "h": 200 },
   "towncenter": {
     "ax": 164,
     "ay": 379,
