@@ -65,9 +65,13 @@ function process(name) {
   // к другу, оба заметно выше G. Коричневая кладка/тёмный проём не триггерят (там B низкий).
   const isMag = (c) => c[0] > 95 && c[2] > 88 && Math.abs(c[0] - c[2]) < 60 &&
     c[1] < c[0] * 0.62 && c[1] < c[2] * 0.62 && (c[0] - c[1]) > 40 && (c[2] - c[1]) > 40;
+  // полупрозрачная кромка-бахрома: пиксель подмешивает magenta-фон к кладке ⇒ R и B
+  // высокие, а G заметно ниже (у песочной кладки G высокий, у бирюзы R низкий — не задевает).
+  const isFringe = (c) => c[0] > 120 && c[2] > 105 && Math.abs(c[0] - c[2]) < 130 &&
+    c[1] < c[0] * 0.72 && c[1] < c[2] * 0.78 && (c[0] - c[1]) > 45 && (c[2] - c[1]) > 30;
   // карта непрозрачных (всё, что не magenta)
   const solid = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) { const x = i % W, y = (i / W) | 0; solid[i] = isMag(px(x, y)) ? 0 : 1; }
+  for (let i = 0; i < W * H; i++) { const x = i % W, y = (i / W) | 0; solid[i] = (isMag(px(x, y)) || isFringe(px(x, y))) ? 0 : 1; }
   // крупнейшая связная компонента
   const lab = new Int32Array(W * H).fill(-1);
   let best = -1, bestN = 0;
