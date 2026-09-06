@@ -55,7 +55,7 @@ export const BUILDING_DEFS = {
   tower:      { name: 'Сторожевая башня', hp: 550, size: 56, cost: { wood: 120, food: 0, gold: 80 }, buildTime: 14, sight: 300, attack: { dmg: 12, range: 215, cd: 1.1 }, desc: 'Стреляет по врагам' },
   farm:       { name: 'Ферма',         hp: 220,  size: 72,  cost: { wood: 90, food: 0, gold: 0 }, buildTime: 8,  sight: 140, attack: null, desc: 'Бесконечная еда' },
   wall:       { name: 'Стена',         hp: 900,  size: 44,  cost: { wood: 30, food: 0, gold: 0 }, buildTime: 5,  sight: 120, attack: null, desc: 'Преграждает путь врагам' },
-  gate:       { name: 'Ворота',        hp: 600,  size: 66,  cost: { wood: 45, food: 0, gold: 0 }, buildTime: 6,  sight: 130, attack: null, desc: 'Проход для своих, стена для врага' },
+  gate:       { name: 'Ворота',        hp: 600,  size: 44,  cost: { wood: 45, food: 0, gold: 0 }, buildTime: 6,  sight: 130, attack: null, desc: 'Проход для своих, стена для врага' },
   wonder:     { name: 'Чудо света',    hp: 3000, size: 130, cost: { wood: 600, food: 600, gold: 900 }, buildTime: 40, sight: 360, attack: null, desc: 'Имперский монумент — постройте для победы', ageReq: 3 },
 } as const;
 
