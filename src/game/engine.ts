@@ -212,6 +212,8 @@ interface Bld {
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
   nationId?: string;                                            // народ-племя (id из NATIONS), владеющий лагерем
+  pastureX?: number; pastureY?: number;                         // точка дальнего пастбища загона
+  pastureStocked?: boolean;                                     // стадо (5 овец + 5 коров) уже создано
 }
 interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
@@ -2630,7 +2632,46 @@ export class Game {
   }
 
   // ── ПАСТУХ: полцикла на выпас (ищет скот в поле), затем пригоняет его в загон ──
-  // ближайшая суша к точке (для выбора пастбища — не в воду/гору)
+  // найти дальнее ровное пастбище: ≥50 клеток (≈1700 мир.ед.) от базы игрока, ровное поле
+  private findPasture(pen: Bld): [number, number] {
+    const base = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
+    const bx = base ? base.x : pen.x, by = base ? base.y : pen.y;
+    const flatOpen = (x: number, y: number): boolean => {
+      const c = this.terrain.classAt(x, y);
+      if (c === 'water' || c === 'deep' || c === 'mountain' || c === 'forest') return false;
+      // ровное: ступень рельефа 0 в нескольких точках вокруг
+      const g = this.terrain.reliefGridHex(x - 60, y - 60, x + 60, y + 60);
+      for (let ox = -50; ox <= 50; ox += 50) for (let oy = -50; oy <= 50; oy += 50) {
+        if (g.hAtWorld(x + ox, y + oy) > 1) return false;
+      }
+      return true;
+    };
+    // ищем по кольцам радиуса 1700..2600 (≈50-75 гексов от базы)
+    for (let r = 1700; r <= 2700; r += 90) {
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 + pen.id * 1.7 + r * 0.01;
+        const x = bx + Math.cos(a) * r, y = by + Math.sin(a) * r;
+        if (x < 120 || y < 120 || x > WORLD.w - 120 || y > WORLD.h - 120) continue;
+        if (flatOpen(x, y)) return [x, y];
+      }
+    }
+    // запасной вариант — просто дальняя суша
+    return this.landNear(bx + 1800, by + 1200);
+  }
+
+  // создать стадо на пастбище: 5 овец + 5 коров
+  private stockPasture(x: number, y: number) {
+    for (let i = 0; i < 5; i++) {
+      const a = this.addUnit('sheep', 'neutral', x + rand(-70, 70), y + rand(-70, 70));
+      a.wx = x; a.wy = y; // домашняя точка стада = пастбище (не убегут к старому спавну)
+    }
+    for (let i = 0; i < 5; i++) {
+      const a = this.addUnit('cow', 'neutral', x + rand(-70, 70), y + rand(-70, 70));
+      a.wx = x; a.wy = y;
+    }
+    this.burst(x, y - 20, 16, ['#d1fae5', '#a7f3d0', '#fff'], 130, 0.8);
+  }
+
   private landNear(x: number, y: number): [number, number] {
     if (this.terrain.classAt(x, y) === 'grass' || this.terrain.classAt(x, y) === 'desert') return [x, y];
     for (let r = 40; r <= 400; r += 40) {
@@ -2647,27 +2688,23 @@ export class Game {
   updateShepherd(u: Unit, dt: number) {
     const pen = this.blds.find(b => b.id === u.penId && b.done >= 1);
     if (!pen) { this.releaseShepherd(u); return; }
-    const GRAZE = 22, PEN_T = 18;             // фазы цикла: выпас и загон
+    const GRAZE = 24, PEN_T = 20;             // фазы цикла: выпас и загон
     const t0 = u.herdT ?? 0;
     u.herdT = t0 + dt;
     const cycle = GRAZE + PEN_T;
     const phase = (t0 % cycle) < GRAZE ? 0 : 1;          // 0 выпас, 1 загон
-    const phasePrev = ((t0 - dt + cycle) % cycle) < GRAZE ? 0 : 1;
 
-    // в начале фазы ВЫПАСА выбираем свежее пастбище в поле у загона
-    if (phase === 0 && phasePrev === 1) { u.herdX = undefined; u.herdY = undefined; }
-    if (u.herdX == null || u.herdY == null) {
-      const ang = (u.id * 2.399 + u.herdT * 0.01) % (Math.PI * 2);
-      const [px, py] = this.landNear(pen.x + Math.cos(ang) * 280, pen.y + Math.sin(ang) * 280);
-      u.herdX = px; u.herdY = py;
-    }
+    // пастбище загона — дальнее ровное поле со стадом (создаётся при назначении)
+    if (pen.pastureX == null) { const [px, py] = this.findPasture(pen); pen.pastureX = px; pen.pastureY = py; }
+    if (!pen.pastureStocked && phase === 0) { this.stockPasture(pen.pastureX!, pen.pastureY!); pen.pastureStocked = true; }
+    u.herdX = pen.pastureX; u.herdY = pen.pastureY;
     const gateX = pen.x + 70, gateY = pen.y + 50;
 
     // цель притяжения скота: фаза выпаса → пастбище, фаза загона → центр загона
     const lureX = phase === 0 ? u.herdX! : pen.x;
     const lureY = phase === 0 ? u.herdY! : pen.y;
     // радиус притяжения: на пастбище собираем скот вокруг точки, в загон — гоним всех рядом с загоном
-    const lureR = phase === 0 ? 420 : 1600;
+    const lureR = phase === 0 ? 600 : 2600;
 
     // скот в радиусе метим точкой притяжения (своя логика updateAnimal ведёт его к ней)
     for (const a of this.units) {
@@ -2743,12 +2780,13 @@ export class Game {
     vill.herder = true; vill.penId = pen.id; vill.herdT = 0; vill.herding = [];
     vill.state = 'gather'; vill.wkind = undefined; vill.nodeId = -1; vill.buildId = -1; vill.targetU = -1; vill.targetB = -1;
     vill.speed = 175; // верхом на коне — быстрее обычного рабочего (118)
-    // сразу выбираем дальнее пастбище, чтобы пастух немедленно поскакал из базы в поле
-    const ang = (vill.id * 2.399) % (Math.PI * 2);
-    const [px, py] = this.landNear(pen.x + Math.cos(ang) * 340, pen.y + Math.sin(ang) * 340);
-    vill.herdX = px; vill.herdY = py;
-    this.floater(px, py - 40, '🐎 Пастбище', '#a3e635', 13);
-    this.floater(pen.x, pen.y - 50, '🐎 Пастух назначен — скачет на поле', '#a3e635', 14);
+    // пастбище этого загона: дальнее ровное поле (≥50 клеток от базы) со стадом
+    if (pen.pastureX == null) { const [px, py] = this.findPasture(pen); pen.pastureX = px; pen.pastureY = py; }
+    if (!pen.pastureStocked) { this.stockPasture(pen.pastureX!, pen.pastureY!); pen.pastureStocked = true; }
+    vill.herdX = pen.pastureX; vill.herdY = pen.pastureY;
+    this.floater(pen.pastureX!, pen.pastureY! - 40, '🐑 Пастбище', '#a3e635', 14);
+    this.floater(pen.x, pen.y - 50, '🐎 Пастух скачет на дальнее пастбище', '#a3e635', 14);
+    this.pushBanner('🐎 Пастух отправился в поле', 'Скачет на дальнее пастбище (5 овец и 5 коров ждут), затем пригонит стадо в загон', 4);
     this.sound.ack('villager'); this.pushHud();
   }
 
