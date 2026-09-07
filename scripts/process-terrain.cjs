@@ -9,8 +9,8 @@ const path = require('path');
 const RAW = path.join(__dirname, '..', 'src', 'assets', 'sprites', 'terrain', 'raw');
 const OUT = path.join(__dirname, '..', 'src', 'assets', 'sprites', 'terrain');
 const TARGET_W = { hill_grass: 124, hill_rock: 128 };
-const TARGET_H = { peak_snow: 128, peak_rock: 118 };
-const MAXH = 200;
+const TARGET_H = { peak_snow: 196, peak_rock: 172 };
+const MAXH = 240;
 
 function decodePNG(file) {
   const data = fs.readFileSync(file);

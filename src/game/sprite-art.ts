@@ -398,6 +398,8 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_villager_mine2":   { "ax": 48,   "ay": 153, "baseW": 96, "w": 96, "h": 150 },
   "kz_villager_gather1": { "ax": 31,   "ay": 156, "baseW": 62, "w": 62, "h": 150 },
   "kz_villager_gather2": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 },
+  "kz_villager_fish1":   { "ax": 24.5, "ay": 148, "baseW": 96, "w": 96, "h": 150 },
+  "kz_villager_fish2":   { "ax": 24.9, "ay": 148, "baseW": 95, "w": 95, "h": 150 },
   // ── казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям ──
   "kz_scout":     { "ax": 55.7, "ay": 149, "baseW": 85,  "w": 85,  "h": 150 },
   "kz_scout_sw1": { "ax": 50.5, "ay": 151, "baseW": 101, "w": 101, "h": 150 },

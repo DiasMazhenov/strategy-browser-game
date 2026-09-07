@@ -164,6 +164,8 @@ import kzVmine1 from '../assets/sprites/units/kz/kz_villager_mine1.png';
 import kzVmine2 from '../assets/sprites/units/kz/kz_villager_mine2.png';
 import kzVgather1 from '../assets/sprites/units/kz/kz_villager_gather1.png';
 import kzVgather2 from '../assets/sprites/units/kz/kz_villager_gather2.png';
+import kzVfish1 from '../assets/sprites/units/kz/kz_villager_fish1.png';
+import kzVfish2 from '../assets/sprites/units/kz/kz_villager_fish2.png';
 // казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
 import kzScout from '../assets/sprites/units/kz/kz_scout.png';
 import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
@@ -259,6 +261,7 @@ const KZ_VILL_WORK: Record<string, [HTMLImageElement, HTMLImageElement, string, 
   chop:   [mk(kzVchop1),   mk(kzVchop2),   'kz_villager_chop1',   'kz_villager_chop2'],
   mine:   [mk(kzVmine1),   mk(kzVmine2),   'kz_villager_mine1',   'kz_villager_mine2'],
   gather: [mk(kzVgather1), mk(kzVgather2), 'kz_villager_gather1', 'kz_villager_gather2'],
+  fish:   [mk(kzVfish1),   mk(kzVfish2),   'kz_villager_fish1',   'kz_villager_fish2'],
 };
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
@@ -944,7 +947,7 @@ export function diamondRingHalf(ctx: CanvasRenderingContext2D, ix: number, iy: n
 interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number; anim: number; atkAnim: number; state: string; carry?: { type: string; amt: number }; hp?: number; maxHp?: number; walk?: boolean; level?: number;
   // изо-направление корпуса: 0 — сбоку (по face), 1 — спереди (к камере), 2 — спина (от камеры)
   fmode?: 0 | 1 | 2;
-  wkind?: 'chop' | 'mine' | 'gather';   // текущая работа крестьянина (для кадра)
+  wkind?: 'chop' | 'mine' | 'gather' | 'fish';   // текущая работа крестьянина (для кадра)
   wphase?: number;                      // фаза рабочего цикла 0..1 (замах→удар)
   aiming?: boolean;                     // лучник в зоне выстрела (натягивает/держит лук)
 }
@@ -979,7 +982,7 @@ function ln(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y
 
 const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.state === 'gather' || u.state === 'return' || u.state === 'build';
 
-export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean) {
+export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
   const mounted = u.key === 'knight' || u.key === 'cavalry';
   const shadowR = u.key === 'catapult' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
@@ -1001,7 +1004,18 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
   const y = iy + snap(bob);
   const t = TEAM[u.owner];
 
+  // в воде юнит «по пояс/по грудь» погружён: обрезаем тело ниже ватерлинии
+  const unitH = UNIT_TARGET_H[u.key] ?? (mounted ? 52 : 46);
+  const sub = water > 0;                 // мелкая — на четверть, глубокая — наполовину
+  const subD = water === 2 ? unitH * 0.5 : unitH * 0.25;
   // детальный AI-спрайт (если есть) — с покадровой анимацией
+  if (sub) {
+    // обрезаем всё ниже ватерлинии (ноги под водой не видны)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ix - 60, iy + 8 - unitH, 120, unitH - subD);
+    ctx.clip();
+  }
   const usedSprite = drawUnitSprite(ctx, u, ix, iy, time, selected);
   if (!usedSprite) {
     if (u.key === 'wolf') drawWolf(ctx, u, x, y, sw, time);
@@ -1009,6 +1023,22 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
     else if (u.key === 'catapult') drawCatapult(ctx, u, x, y, sw, time);
     else if (mounted) { drawHorse(ctx, u, x, y, sw, time); drawRider(ctx, u, x, y, sw, atk, time, t); }
     else drawHumanoid(ctx, u, x, y, sw, atk, time, t);
+  }
+  if (sub) {
+    ctx.restore();
+    // ватерлиния: полупрозрачная вода поверх нижней кромки видимого тела + тень в воде
+    const wy = iy + 8 - subD;
+    ctx.fillStyle = water === 2 ? 'rgba(29, 78, 137, 0.5)' : 'rgba(47, 111, 176, 0.42)';
+    ctx.beginPath();
+    ctx.ellipse(ix, wy, shadowR + 4, (shadowR + 4) / 2.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // блики ряби по краям ватерлинии
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.5)';
+    ctx.lineWidth = 1;
+    const rp = Math.sin(time * 3 + (u as unknown as { id?: number }).id! * 1.7) * 2;
+    ctx.beginPath();
+    ctx.ellipse(ix, wy + 1, shadowR + 2 + rp, (shadowR + 2) / 2.6, 0, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   // HP-полоса (высота — над спрайтом, если он есть)

@@ -115,8 +115,8 @@ const KZ_CORNER_SPRITE = makeExtraSprite(kzImgWallCorner);
 
 // ── AI-арт рельефа: крупные вершины/холмы (редкие декор-объекты поверх террас) ──
 const TERRAIN_FEATURES: { img: HTMLImageElement; scale: number }[] = [
-  { img: (() => { const i = new Image(); i.src = imgPeakSnow; return i; })(), scale: 1.55 },
-  { img: (() => { const i = new Image(); i.src = imgPeakRock; return i; })(), scale: 1.25 },
+  { img: (() => { const i = new Image(); i.src = imgPeakSnow; return i; })(), scale: 1.7 },
+  { img: (() => { const i = new Image(); i.src = imgPeakRock; return i; })(), scale: 1.45 },
   { img: (() => { const i = new Image(); i.src = imgHillGrass; return i; })(), scale: 0.85 },
   { img: (() => { const i = new Image(); i.src = imgHillRock; return i; })(), scale: 0.95 },
 ];
@@ -139,7 +139,7 @@ interface Unit {
   tx: number; ty: number; targetU: number; targetB: number; nodeId: number; buildId: number;
   carry: Carry; gatherT: number; anim: number; face: number; atkAnim: number; retarget: number; idleT: number; flash: number;
   fmode?: 0 | 1 | 2;                              // изо-направление корпуса: 0 сбоку, 1 спереди (к камере), 2 спина
-  wkind?: 'chop' | 'mine' | 'gather';             // текущая работа крестьянина (для кадра анимации)
+  wkind?: 'chop' | 'mine' | 'gather' | 'fish';      // текущая работа крестьянина (для кадра анимации)
   wphase?: number;                                // фаза рабочего цикла 0..1
   aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
@@ -2357,12 +2357,21 @@ export class Game {
     }
   }
 
+  // горы непроходимы (огромные пики — не просто рельеф); вода мелкая проходима
+  terrainBlocked(wx: number, wy: number): boolean {
+    return this.terrain.classAt(wx, wy) === 'mountain';
+  }
+
   moveToward(u: Unit, tx: number, ty: number, dt: number, arrive = 6): boolean {
     const dx = tx - u.x, dy = ty - u.y;
     const d = Math.hypot(dx, dy);
     if (d < arrive) return true;
     const s = Math.min(u.speed * dt, d);
-    u.x += (dx / d) * s; u.y += (dy / d) * s;
+    const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
+    // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
+    if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
+    else if (!this.terrainBlocked(nx, u.y)) u.x = nx;
+    else if (!this.terrainBlocked(u.x, ny)) u.y = ny;
     if (Math.abs(dx) > 4) u.face = dx > 0 ? 1 : -1;
     return false;
   }
@@ -2403,9 +2412,10 @@ export class Game {
     const free = (cx: number, cy: number): boolean => {
       if (cx < cx0 || cx > cx1 || cy < cy0 || cy > cy1) return false;
       const [wx, wy] = cellCenter(cx, cy);
-      if (cx === sC.cx && cy === sC.cy) return true;
-      if (cx === gC.cx && cy === gC.cy) return true;
-      return !blocked(wx, wy);
+      if (cx === sC.cx && cy === sC.cy) return true; // старт всегда свободен (сдвинет коллизия)
+      // цель на горе недостижима — но считаем клетку цельной, чтобы сработал поиск ближайшей
+      if (cx === gC.cx && cy === gC.cy) return !this.terrainBlocked(wx, wy) && !blocked(wx, wy);
+      return !this.terrainBlocked(wx, wy) && !blocked(wx, wy);
     };
     const startFree = free(sC.cx, sC.cy);
     const goalFree = free(gC.cx, gC.cy);
@@ -2479,6 +2489,7 @@ export class Game {
       const seg = 8;
       for (let i = 1; i < seg; i++) {
         const wx = u.x + dxg * (i / seg), wy = u.y + dyg * (i / seg);
+        if (this.terrainBlocked(wx, wy)) return true; // гора перекрывает прямой путь
         for (const b of this.blds) {
           const isWall = b.key === 'wall' || b.key === 'gate';
           const gatePass = b.key === 'gate' && b.owner === u.owner;
@@ -2629,8 +2640,8 @@ export class Game {
       }
       // рабочий на берегу: разворот к воде/косяку
       if (Math.abs(n.x - u.x) > 4) u.face = n.x > u.x ? 1 : -1;
-      // вид работы: лес — топор, золото/руда — кирка, рыба/фрукты/ягоды — сбор (удочка)
-      u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : 'gather';
+      // вид работы: лес — топор, золото/руда — кирка, рыба — удочка (стоит на берегу), фрукты/ягоды — сбор
+      u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : n.kind === 'fish' ? 'fish' : 'gather';
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
       const cycN = 0.55 / this.gatherMult();
       u.wphase = u.gatherT / cycN;
@@ -2990,21 +3001,23 @@ export class Game {
     u.idleT = 0;
     this.scoutTick(u);
   }
-  // враг ли это для разведчика (волки/враждебные; дружественные племена — нет)
+  // враг ли это для разведчика (враждебные племена/соперник; волки НЕ страшны — иммунитет)
   scoutHostile(u: Unit, e: Unit): boolean {
     if (e.owner === 'neutral' && e.tribe) {
       const nid = this.unitTribeNation(e);
       if (nid) return this.tribeRel[nid] === 'hostile' || !!e.aggro;
       return true;
     }
-    return this.hostile(u.owner, e.owner) || (e.owner === 'neutral' && e.key === 'wolf');
+    if (e.owner === 'neutral' && e.key === 'wolf') return false; // волки не нападают на разведчика
+    return this.hostile(u.owner, e.owner);
   }
   acquireScoutEnemy(u: Unit, radius: number): number {
     let best = -1, bd = radius * radius;
     for (const e of this.units) {
       if (e.hp <= 0) continue;
       if (e.owner === 'neutral') {
-        if (e.key !== 'wolf' && !e.tribe) continue; // скот не трогаем
+        if (e.key === 'wolf') continue; // волки не добыча разведчика — он проходит мимо
+        if (!e.tribe) continue; // скот не трогаем
         if (e.tribe) { const nid = this.unitTribeNation(e); if (nid && this.tribeRel[nid] === 'friend') continue; if (nid && this.tribeRel[nid] !== 'hostile' && !e.aggro) continue; }
       } else if (e.owner === u.owner) continue;
       else { if (!this.hostile(u.owner, e.owner)) continue; }
@@ -3149,7 +3162,8 @@ export class Game {
         const a = (i / tries) * Math.PI * 2 + u.id * 1.7 + this.time * 0.02;
         const wx = u.x + Math.cos(a) * rad, wy = u.y + Math.sin(a) * rad;
         if (wx < 40 || wy < 40 || wx > WORLD.w - 40 || wy > WORLD.h - 40) continue;
-        if (this.terrain.classAt(wx, wy) === 'deep') continue;
+        const cls = this.terrain.classAt(wx, wy);
+        if (cls === 'deep' || cls === 'mountain') continue; // ни в воду, ни в горы
         if (!explored(wx, wy)) { const d = Math.abs(Math.cos(a) * rad) + Math.abs(Math.sin(a) * rad); if (d < bd) { bd = d; best = [wx, wy]; } }
       }
       if (best) return best;
@@ -3242,6 +3256,7 @@ export class Game {
     let bd = 170 * 170;
     for (const e of this.units) {
       if (e.owner === 'neutral' || e.hp <= 0) continue;
+      if (e.key === 'scout') continue; // разведчик не добыча: волки его не чуют (иммунитет)
       const d = dist2(u.x, u.y, e.x, e.y);
       if (d < bd) { bd = d; prey = e; }
     }
@@ -3253,11 +3268,11 @@ export class Game {
       } else this.moveToward(u, prey.x, prey.y, dt);
       return;
     }
-    // leash + wander
-    if (dist2(u.x, u.y, u.wx, u.wy) > 220 * 220) { this.moveToward(u, u.wx, u.wy, dt); return; }
+    // leash + wander (зверь бродит и по горам — иначе застрял бы у подножия)
+    if (dist2(u.x, u.y, u.wx, u.wy) > 220 * 220) { u.x += Math.sign(u.wx - u.x) * u.speed * dt; u.y += Math.sign(u.wy - u.y) * u.speed * dt; return; }
     u.idleT += dt;
     if (u.idleT > rand(2, 4)) { u.idleT = 0; u.tx = u.wx + rand(-90, 90); u.ty = u.wy + rand(-90, 90); }
-    this.moveToward(u, u.tx, u.ty, dt, 8);
+    u.x += Math.sign(u.tx - u.x) * u.speed * dt; u.y += Math.sign(u.ty - u.y) * u.speed * dt;
   }
 
   strike(att: Unit, tu?: Unit, tb?: Bld) {
@@ -4366,7 +4381,10 @@ export class Game {
       if (u.owner !== 'player' && !this.canSeeEnemy(u.x, u.y)) continue;
       const [ix, iy] = toIso(u.x, u.y);
       const ey = iy - upAt(u.x, u.y);
-      drawList.push({ iy: ey, draw: () => this.drawUnitIso(u, ix, ey) });
+      // глубина воды под юнитом: 1 мелкая (на четверть), 2 глубокая (наполовину)
+      const wcls = this.terrain.classAt(u.x, u.y);
+      const water = wcls === 'deep' ? 2 : wcls === 'water' ? 1 : 0;
+      drawList.push({ iy: ey, draw: () => this.drawUnitIso(u, ix, ey, water) });
     }
 
     // sort by iso Y (depth sort)
@@ -4957,9 +4975,9 @@ export class Game {
   }
 
 
-  drawUnitIso(u: Unit, ix: number, iy: number) {
+  drawUnitIso(u: Unit, ix: number, iy: number, water = 0) {
     // y-подскок юнита компенсирован внутри pixelart через bob — передаём «земную» точку
-    drawPixelUnit(this.ctx, u, ix, iy, this.time, this.selected.has(u.id));
+    drawPixelUnit(this.ctx, u, ix, iy, this.time, this.selected.has(u.id), water);
   }
 
 
