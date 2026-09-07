@@ -26,6 +26,7 @@ import kzImgHouse from '../assets/sprites/kz/kz_house.png';
 import kzImgBarracks from '../assets/sprites/kz/kz_barracks.png';
 import kzImgTower from '../assets/sprites/kz/kz_tower.png';
 import kzImgFarm from '../assets/sprites/kz/kz_farm.png';
+import kzImgPen from '../assets/sprites/kz/kz_pen.png';
 import kzImgStable from '../assets/sprites/kz/kz_stable.png';
 import kzImgMarket from '../assets/sprites/kz/kz_market.png';
 import kzImgBlacksmith from '../assets/sprites/kz/kz_blacksmith.png';
@@ -45,7 +46,7 @@ const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
 };
 // казахская раса игрока: восточные здания-замены (стены/ворота остаются общими)
 const KZ_SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
-  towncenter: kzImgTowncenter, house: kzImgHouse, barracks: kzImgBarracks, tower: kzImgTower, farm: kzImgFarm,
+  towncenter: kzImgTowncenter, house: kzImgHouse, barracks: kzImgBarracks, tower: kzImgTower, farm: kzImgFarm, pen: kzImgPen,
   stable: kzImgStable, market: kzImgMarket, blacksmith: kzImgBlacksmith, wall: kzImgWall, gate: kzImgGate,
 };
 interface BldSprite { img: HTMLImageElement; flash: HTMLCanvasElement | null; ax: number; ay: number; baseW: number }
@@ -140,6 +141,10 @@ interface Unit {
   carry: Carry; gatherT: number; anim: number; face: number; atkAnim: number; retarget: number; idleT: number; flash: number;
   fmode?: 0 | 1 | 2;                              // изо-направление корпуса: 0 сбоку, 1 спереди (к камере), 2 спина
   wkind?: 'chop' | 'mine' | 'gather' | 'fish';      // текущая работа крестьянина (для кадра анимации)
+  herder?: boolean;                    // рабочий назначен пастухом к загону
+  penId?: number;                      // id загона, к которому прикреплён пастух
+  herdT?: number;                      // фаза цикла выпаса (счётчик)
+  herding?: number[];                  // id животных, которых гонит пастух
   wphase?: number;                                // фаза рабочего цикла 0..1
   aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
@@ -201,6 +206,7 @@ interface Bld {
   cd: number; rallyX: number; rallyY: number; rallyNode: number; flash: number; smokeT: number;
   research: { id: string; t: number; total: number } | null;   // текущее исследование
   garrison: number[];                                           // id юнитов внутри (оборона)
+  upg?: { range: number; dmg: number; archers: number };        // улучшения башни (дальность/урон/лучники)
   gate: boolean;                                                // ворота (проходны для игрока)
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
@@ -225,6 +231,7 @@ export interface SelSnapshot {
   techs?: { id: string; name: string; desc: string; icon: string; cost: string; done: boolean; available: boolean; busy: boolean }[];
   research?: { id: string; name: string; t: number; total: number } | null;
   garrison?: number; garrisonCap?: number;
+  towerUpg?: { range: number; dmg: number; archers: number; maxRange: number; maxDmg: number; maxArchers: number };
 }
 export interface TechTreeRow {
   id: string; name: string; desc: string; icon: string;
@@ -424,7 +431,7 @@ export class Game {
     const b: Bld = {
       id: this.nextId++, key, owner, x, y, size: d.size, hp: d.hp * done, maxHp: d.hp,
       done, buildT: 0, queue: [], cd: 0, rallyX: x + (owner === 'player' ? 110 : -110), rallyY: y + 90, rallyNode: -1, flash: 0, smokeT: 0,
-      research: null, garrison: [], gate: false,
+      research: null, garrison: [], upg: key === 'tower' ? { range: 0, dmg: 0, archers: 0 } : undefined, gate: false,
     };
     this.blds.push(b);
     return b;
@@ -605,24 +612,29 @@ export class Game {
     }
     // рыбалка (как в AoE): косяки рыбы на МЕЛКОЙ воде у берега — рабочий стоит на
     // суше/мелководье и «собирает» еду. Ищем воду, рядом с которой есть суша.
-    if (rng() < 0.55) {
+    if (rng() < 0.8) {
       const shoreWater = (x: number, y: number) => {
         const b = biomeAt(x, y);
-        if (b !== 'water') return false;
-        // рядом в радиусе ~90 есть суша (куда встать рабочему)?
-        for (let a = 0; a < 8; a++) {
-          const ang = (a / 8) * Math.PI * 2;
-          if (land(x + Math.cos(ang) * 90, y + Math.sin(ang) * 90)) return true;
+        if (b !== 'water' && b !== 'deep') return false;
+        // рядом в радиусе ~110 есть суша/мелководье (куда встать рабочему)?
+        for (let a = 0; a < 10; a++) {
+          const ang = (a / 10) * Math.PI * 2;
+          const c = biomeAt(x + Math.cos(ang) * 110, y + Math.sin(ang) * 110);
+          if (land(x + Math.cos(ang) * 110, y + Math.sin(ang) * 110) || c === 'water') return true;
         }
         return false;
       };
-      const p = this.chunkPoint(cx, cz, rng, shoreWater);
-      if (p) {
-        // 1–3 косяка в этом прибрежном чанке
-        const schools = 1 + ((rng() * 2) | 0);
-        for (let i = 0; i < schools; i++) {
-          const fx = p[0] + (rng() - 0.5) * 180, fy = p[1] + (rng() - 0.5) * 180;
-          if (biomeAt(fx, fy) === 'water') this.addNode('fish', fx, fy, 600);
+      // несколько точек промысла на прибрежный чанк
+      for (let t = 0; t < 2; t++) {
+        const p = this.chunkPoint(cx, cz, rng, shoreWater);
+        if (p) {
+          // 2–4 косяка в этом прибрежном чанке
+          const schools = 2 + ((rng() * 3) | 0);
+          for (let i = 0; i < schools; i++) {
+            const fx = p[0] + (rng() - 0.5) * 220, fy = p[1] + (rng() - 0.5) * 220;
+            const fc = biomeAt(fx, fy);
+            if (fc === 'water' || fc === 'deep') this.addNode('fish', fx, fy, 600);
+          }
         }
       }
     }
@@ -867,6 +879,7 @@ export class Game {
     else if (k === '7') this.train('catapult');
     else if (k === '8') this.train('monk');
     else if (k === '9') this.train('scout');
+    else if (k === 'h') this.enterPlacement('pen');
     else if (k === 'q') this.enterPlacement('house');
     else if (k === 'e') this.enterPlacement('barracks');
     else if (k === 'r') this.enterPlacement('tower');
@@ -1328,6 +1341,15 @@ export class Game {
       for (const v of us.filter(u => u.key === 'villager')) { v.state = 'gather'; v.buildId = tb.id; v.nodeId = -1; v.tx = tb.x + rand(-30, 30); v.ty = tb.y + rand(-24, 24); v.gatherT = 0; }
       this.sound.move(); this.spawnRing(x, y, '#a3e635'); return;
     }
+    // own pen → назначить пастуха (рабочий верхом пасёт скот и загоняет в загон)
+    if (tb && tb.owner === 'player' && tb.key === 'pen' && tb.done >= 1 && hasVill) {
+      const vills = us.filter(u => u.key === 'villager');
+      // один пастух на загон: берём первого рабочего
+      this.assignShepherd(vills[0], tb);
+      this.spawnRing(tb.x, tb.y, '#a3e635');
+      if (hasMil) this.orderAttackMove(us.filter(u => u.key !== 'villager'), x, y);
+      return;
+    }
     // own construction → assist
     if (tb && tb.owner === 'player' && tb.done < 1 && hasVill) {
       for (const v of us.filter(u => u.key === 'villager')) { v.state = 'build'; v.buildId = tb.id; v.tx = tb.x + rand(-60, 60); v.ty = tb.y + rand(-50, 50); }
@@ -1351,6 +1373,7 @@ export class Game {
   orderGather(v: Unit, nodeId: number) {
     const n = this.nodes.find(n => n.id === nodeId);
     if (!n) return;
+    v.herder = false; v.penId = undefined; // пастух снят с должности другим приказом
     if (v.carry.amt > 0 && v.carry.type !== n.kind) this.deposit(v);
     v.state = 'gather'; v.nodeId = nodeId; v.buildId = -1; v.targetU = -1; v.targetB = -1;
     v.tx = n.x + rand(-8, 8); v.ty = n.y + rand(-8, 8);
@@ -1533,6 +1556,31 @@ export class Game {
     return true;
   }
 
+  // ── улучшения сторожевой башни ──
+  towerUpgradeCost(kind: 'range' | 'dmg' | 'archers', lvl: number): number {
+    const base = kind === 'range' ? 90 : kind === 'dmg' ? 110 : 150;
+    return Math.round(base * (1 + lvl * 0.8));
+  }
+  upgradeTower(bid: number, kind: 'range' | 'dmg' | 'archers'): boolean {
+    const b = this.blds.find(b => b.id === bid);
+    if (!b || b.key !== 'tower' || b.owner !== 'player' || b.done < 1) return false;
+    b.upg = b.upg ?? { range: 0, dmg: 0, archers: 0 };
+    const max = kind === 'archers' ? 2 : 3;
+    if ((b.upg[kind] ?? 0) >= max) { this.floater(b.x, b.y - 60, 'Максимальный уровень', '#94a3b8', 14); return false; }
+    const lvl = b.upg[kind] ?? 0;
+    const gold = this.towerUpgradeCost(kind, lvl);
+    if (this.res.gold < gold) { this.floater(b.x, b.y - 60, `Нужно ${gold} 🪙`, '#f87171', 15); this.sound.error(); return false; }
+    this.res.gold -= gold;
+    b.upg[kind] = lvl + 1;
+    if (kind === 'dmg') { b.maxHp += 80; b.hp += 80; } // укрепление при уроне
+    const nm = kind === 'range' ? '📐 Дальность обзора' : kind === 'dmg' ? '🏹 Сила урона' : '🎯 Лучники на башне';
+    this.burst(b.x, b.y - 60, 14, ['#fde047', '#f6d47c', '#fff'], 120, 0.7);
+    this.sound.coin();
+    this.floater(b.x, b.y - 70, `${nm} ур.${lvl + 1}`, '#fde047', 15);
+    this.pushHud();
+    return true;
+  }
+
   // ── сохранение / загрузка партии ──
   serialize(): string {
     const data = {
@@ -1542,7 +1590,7 @@ export class Game {
       soldiersTrained: this.soldiersTrained, barracksBuilt: this.barracksBuilt, wolvesSlain: this.wolvesSlain,
       cam: this.cam, tech: this.tech, questsDone: this.questsDone,
       units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0 })),
-      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null })),
+      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null })),
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       relicsHeld: this.relicsHeld,
       dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
@@ -1582,6 +1630,7 @@ export class Game {
       (d.blds || []).forEach((bd: { key: BuildingKey; owner: 'player'|'enemy'; x: number; y: number; hp: number; done: number; queue: { key: UnitKey; t: number; total: number }[]; rallyX: number; rallyY: number; axis?: 'x'|'y'|null }, i: number) => {
         const b = this.addBld(bd.key, bd.owner, bd.x, bd.y, Math.max(0.15, bd.done));
         b.hp = bd.hp; b.done = bd.done; b.queue = bd.queue || []; b.rallyX = bd.rallyX; b.rallyY = bd.rallyY;
+        if ((bd as unknown as { upg?: { range: number; dmg: number; archers: number } }).upg) b.upg = (bd as unknown as { upg: { range: number; dmg: number; archers: number } }).upg;
         if ((bd.key === 'wall' || bd.key === 'gate') && bd.axis) b.axis = bd.axis;
         bMap.set(i, b.id);
       });
@@ -2571,7 +2620,83 @@ export class Game {
     return false;
   }
 
+  // ── ПАСТУХ: полцикла на выпас (ищет скот в поле), затем пригоняет его в загон ──
+  updateShepherd(u: Unit, dt: number) {
+    const pen = this.blds.find(b => b.id === u.penId && b.done >= 1);
+    if (!pen) { u.herder = false; u.penId = undefined; u.state = 'idle'; return; }
+    const phase = Math.floor((u.herdT ?? 0) / 26) % 2; // 0 = выпас (26с), 1 = загон (26с)
+    u.herdT = (u.herdT ?? 0) + dt;
+    if (phase === 0) {
+      // ВЫПАС: едем в поле (в сторону от загона), к свободному скоту
+      if (!u.herding || !u.herding.length) {
+        u.herding = [];
+        for (const a of this.units) {
+          if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
+          if (dist2(a.x, a.y, pen.x, pen.y) < 150 * 150) continue; // уже у загона
+          if (dist2(a.x, a.y, u.x, u.y) < 900 * 900) u.herding.push(a.id);
+        }
+      }
+      // гоним ближайшую скотину: двигаемся к ней и подталкиваем в сторону загона
+      const an = u.herding!.map(id => this.units.find(a => a.id === id)).filter(a => a && a.hp > 0) as Unit[];
+      const target = an.sort((a, b) => dist2(a.x, a.y, u.x, u.y) - dist2(b.x, b.y, u.x, u.y))[0];
+      if (target) {
+        // скотина убегает от пастуха — направляем её к загону (как волк пугает, но в сторону загона)
+        const toPen = Math.atan2(pen.y - target.y, pen.x - target.x);
+        target.x += Math.cos(toPen) * target.speed * 0.9 * dt;
+        target.y += Math.sin(toPen) * target.speed * 0.9 * dt;
+        target.anim += dt * 10;
+        if (dist2(target.x, target.y, pen.x, pen.y) < 150 * 150) u.herding = u.herding!.filter(id => id !== target.id);
+        // пастух заходит со стороны, противоположной загону, чтобы гнать скот к нему
+        const gx = target.x - Math.cos(toPen) * 26, gy = target.y - Math.sin(toPen) * 26;
+        this.moveTowardPath(u, gx, gy, dt, 14);
+      } else {
+        // скота в поле нет — возвращаемся к загону и ждём
+        if (dist2(u.x, u.y, pen.x, pen.y) > 140 * 140) this.moveTowardPath(u, pen.x, pen.y - 60, dt, 30);
+      }
+    } else {
+      // ЗАГОН: собираем всю скотину у загона внутрь; на месте даём еду (стрижка/удой)
+      let gathered = false;
+      for (const a of this.units) {
+        if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
+        const d = dist2(a.x, a.y, pen.x, pen.y);
+        if (d < 200 * 200) {
+          // подтягиваем к центру загона
+          const ang = Math.atan2(pen.y - a.y, pen.x - a.x);
+          a.x += Math.cos(ang) * a.speed * 0.6 * dt;
+          a.y += Math.sin(ang) * a.speed * 0.6 * dt;
+          a.anim += dt * 6;
+          if (d < 120 * 120) gathered = true;
+        }
+      }
+      // пастух стоит у ворот загона
+      if (dist2(u.x, u.y, pen.x, pen.y) > 120 * 120) this.moveTowardPath(u, pen.x + 70, pen.y + 50, dt, 24);
+      // еда капает, пока скот в загоне (полцикла)
+      if (gathered) {
+        u.gatherT += dt;
+        const cyc = 2.2 / this.gatherMult();
+        if (u.gatherT >= cyc) {
+          u.gatherT = 0;
+          const gain = 3 * this.gatherMult();
+          this.res.food += gain; this.gatheredTotal += gain; this.score += gain * 0.3;
+          if (Math.random() < 0.5) this.burst(pen.x, pen.y - 10, 3, ['#fda4af', '#fb7185', '#fff'], 70, 0.5);
+          if (Math.random() < 0.3) this.sound.gatherFood();
+          this.checkQuests();
+        }
+      }
+    }
+  }
+
+  // назначить рабочего пастухом к загону
+  assignShepherd(vill: Unit, pen: Bld) {
+    vill.herder = true; vill.penId = pen.id; vill.herdT = 0; vill.herding = [];
+    vill.state = 'gather'; vill.wkind = undefined; vill.nodeId = -1;
+    this.floater(pen.x, pen.y - 50, '🐎 Пастух назначен', '#a3e635', 14);
+    this.sound.ack('villager'); this.pushHud();
+  }
+
   updateVillager(u: Unit, dt: number) {
+    // пастух: цикл выпаса — выходит на поле, собирает скот, загоняет в загон
+    if (u.herder && u.penId != null && u.state !== 'move' && u.state !== 'attackmove') { this.updateShepherd(u, dt); return; }
     // боевой приоритет: есть боевая цель/приказ — самооборона от нападающих/волков или охота
     const wantFight = u.state === 'attackmove' || u.targetU >= 0 || u.hunt;
     if (wantFight) {
@@ -2639,7 +2764,7 @@ export class Game {
       // рыбалка в стиле AoE: косяк стоит на воде, рабочий остаётся на суше (берегу) и
       // удит — радиус подхода больше, цель доводим не в воду, а до дистанции заброса.
       const isFish = n.kind === 'fish';
-      const reach = isFish ? n.r + 46 : n.r + 14;
+      const reach = isFish ? n.r + 64 : n.r + 14;
       const arrive = isFish ? reach : reach * 0.7;
       if (dist2(u.x, u.y, n.x, n.y) > reach * reach) {
         u.wkind = undefined;
@@ -3558,8 +3683,12 @@ export class Game {
       // далёкие нейтральные башни племён спят — не сканируют цели (огромная карта, много лагерей)
       const dormantBld = b.owner === 'neutral' && !this.activeZone(b.x, b.y, atk ? atk.range + 1800 : 2200);
       if (atk && !dormantBld) {
+        const up = b.upg;
+        const rangeUp = b.owner === 'player' && up ? 1 + up.range * 0.18 : 1;
+        const dmgUp = b.owner === 'player' && up ? 1 + up.dmg * 0.35 : 1;
+        const archers = b.owner === 'player' && up ? up.archers : 0; // лучники: до 2 доп. залпов
         b.cd -= dt;
-        const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1);
+        const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1) * rangeUp;
         if (b.cd <= 0) {
           let best: Unit | null = null; let bd = tRange * tRange;
           for (const e of this.units) {
@@ -3575,11 +3704,22 @@ export class Game {
           if (best) {
             // гарнизон усиливает защиту: каждый укрытый +12% к скорости стрельбы
             const gar = b.garrison.length;
-            b.cd = atk.cd / (1 + Math.min(gar, 6) * 0.12);
-            const dx = best.x - b.x, dy = best.y - b.y, d = Math.max(1, Math.hypot(dx, dy));
+            b.cd = atk.cd / (1 + Math.min(gar, 6) * 0.12) / (archers ? 1 + archers * 0.25 : 1);
+            const dx = best.x - b.x, dy = best.y - b.y;
+            const ang0 = Math.atan2(dy, dx);
             const garDmg = 1 + Math.min(gar, 6) * 0.08;
-            this.projs.push({ x: b.x, y: b.y - 52, vx: (dx / d) * 460, vy: (dy / d) * 460, tx: best.x, ty: best.y, targetU: best.id, targetB: -1, dmg: atk.dmg * (b.owner === 'player' ? AGES[this.age].mult : AGES[this.eage].mult) * garDmg, owner: b.owner, life: 1.2, kind: b.key === 'towncenter' ? 'rock' : 'bolt' });
+            const ageM = b.owner === 'player' ? AGES[this.age].mult : AGES[this.eage].mult;
+            const baseDmg = atk.dmg * ageM * garDmg * dmgUp;
+            // залпы: основной + до 2 от лучников (короткий веер по цели)
+            const salvo = 1 + archers;
+            for (let s = 0; s < salvo; s++) {
+              const spread = s === 0 ? 0 : (s === 1 ? 0.12 : -0.12);
+              const px0 = b.x + rand(-8, 8), py0 = b.y - 52 - s * 6;
+              const ang = ang0 + spread;
+              this.projs.push({ x: px0, y: py0, vx: Math.cos(ang) * 470, vy: Math.sin(ang) * 470, tx: best.x, ty: best.y, targetU: best.id, targetB: -1, dmg: baseDmg * (s === 0 ? 1 : 0.7), owner: b.owner, life: 1.2, kind: b.key === 'towncenter' ? 'rock' : 'bolt' });
+            }
             this.sound.arrow();
+            if (archers && Math.random() < 0.3) this.burst(b.x, b.y - 46, 3, ['#fde68a', '#fff'], 60, 0.4);
           }
         }
       }
@@ -4104,6 +4244,9 @@ export class Game {
         queue: b.queue.map(q => ({ key: q.key, label: UNIT_DEFS[q.key].name, t: q.t, total: q.total })),
         count: 1,
         garrison: b.garrison.length, garrisonCap: this.garrisonCap(b),
+        towerUpg: b.key === 'tower' && b.owner === 'player' ? {
+          range: b.upg?.range ?? 0, dmg: b.upg?.dmg ?? 0, archers: b.upg?.archers ?? 0, maxRange: 3, maxDmg: 3, maxArchers: 2,
+        } : undefined,
         research: b.research ? { id: b.research.id, name: TECHS[b.research.id]?.name ?? '', t: b.research.t, total: b.research.total } : null,
         techs: b.owner === 'player' ? this.techsFor(b.key).map(id => {
           const t = TECHS[id];

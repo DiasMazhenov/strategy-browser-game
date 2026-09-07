@@ -11,7 +11,7 @@ const OUT = path.join(__dirname, '..', 'src', 'assets', 'sprites', 'kz');
 // целевая ширина изо-фундамента (baseW) — как у штатных зданий, чтобы посадка/коллизии совпадали
 const TARGET_BASEW = {
   towncenter: 307, house: 347, barracks: 364, tower: 153,
-  farm: 370, stable: 379, market: 360, blacksmith: 370,
+  farm: 370, stable: 379, market: 360, blacksmith: 370, pen: 330,
 };
 const MAXDIM = 380;
 // стены/ворота: сегмент тянется на всю ширину кадра (tiling edge-to-edge) — масштаб по ШИРИНЕ кропа до целевого px
@@ -208,5 +208,5 @@ function process(key) {
   console.log(`  "kz_${key}": { "ax": ${ax}, "ay": ${ay}, "baseW": ${baseW}, "w": ${dw}, "h": ${dh} },`);
 }
 
-['towncenter', 'house', 'barracks', 'tower', 'farm', 'stable', 'market', 'blacksmith', 'wall', 'gate', 'wall_corner'].forEach(process);
+['pen'].forEach(process);
 console.log('done');

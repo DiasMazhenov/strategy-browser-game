@@ -166,6 +166,8 @@ import kzVgather1 from '../assets/sprites/units/kz/kz_villager_gather1.png';
 import kzVgather2 from '../assets/sprites/units/kz/kz_villager_gather2.png';
 import kzVfish1 from '../assets/sprites/units/kz/kz_villager_fish1.png';
 import kzVfish2 from '../assets/sprites/units/kz/kz_villager_fish2.png';
+import kzShep1 from '../assets/sprites/units/kz/kz_shepherd_1.png';
+import kzShep2 from '../assets/sprites/units/kz/kz_shepherd_2.png';
 // казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
 import kzScout from '../assets/sprites/units/kz/kz_scout.png';
 import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
@@ -263,6 +265,11 @@ const KZ_VILL_WORK: Record<string, [HTMLImageElement, HTMLImageElement, string, 
   gather: [mk(kzVgather1), mk(kzVgather2), 'kz_villager_gather1', 'kz_villager_gather2'],
   fish:   [mk(kzVfish1),   mk(kzVfish2),   'kz_villager_fish1',   'kz_villager_fish2'],
 };
+// казахский пастух верхом на коне с кнутом: 2 кадра (кнут вверху / кнут внизу в рыси)
+const KZ_SHEPHERD: [HTMLImageElement, string][] = [
+  [mk(kzShep1), 'kz_shepherd_1'],
+  [mk(kzShep2), 'kz_shepherd_2'],
+];
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
 const WALK_ANCHOR_A: Partial<Record<UnitKey, string>> = {
@@ -496,8 +503,14 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
       im = base!; anKey = u.key; // покой/готовность — боевой кадр
     }
   }
+  // казахский рабочий-пастух: всегда верхом на коне с кнутом (2 кадра рыси)
+  if (isKz && isVill && (u as U & { herder?: boolean }).herder) {
+    const sh = move ? (Math.sin(u.anim) < 0 ? 1 : 0) : 0;
+    const pair = KZ_SHEPHERD[sh];
+    if (ready(pair[0])) { im = pair[0]; anKey = pair[1]; flip = f; }
+  }
   const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
-  const H = UNIT_TARGET_H[u.key] ?? 46;
+  const H = anKey.startsWith('kz_shepherd') ? 54 : (UNIT_TARGET_H[u.key] ?? 46);
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
   // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
@@ -507,7 +520,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
-  const mounted = u.key === 'knight' || u.key === 'cavalry';
+  const isHerder = !!(u as U & { herder?: boolean }).herder && u.key === 'villager' && u.owner === 'player';
+  const mounted = isMounted || isHerder;
   const beast = u.key === 'wolf';
   const siege = u.key === 'catapult';
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
@@ -950,6 +964,7 @@ interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number;
   wkind?: 'chop' | 'mine' | 'gather' | 'fish';   // текущая работа крестьянина (для кадра)
   wphase?: number;                      // фаза рабочего цикла 0..1 (замах→удар)
   aiming?: boolean;                     // лучник в зоне выстрела (натягивает/держит лук)
+  herder?: boolean;                     // рабочий-пастух (верхом на коне с кнутом)
 }
 
 const TEAM = {
@@ -983,7 +998,8 @@ function ln(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y
 const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.state === 'gather' || u.state === 'return' || u.state === 'build';
 
 export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
-  const mounted = u.key === 'knight' || u.key === 'cavalry';
+  const herder = u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder;
+  const mounted = u.key === 'knight' || u.key === 'cavalry' || herder;
   const shadowR = u.key === 'catapult' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
   diamondShadow(ctx, ix + 2, iy + 8, shadowR, shadowR / 2.2, 'rgba(0,0,0,0.28)');

@@ -8,6 +8,7 @@ export const SPR_ANCHORS: Record<string, SprAnchor> = {
   "kz_house":       { "ax": 173,   "ay": 298, "baseW": 347, "w": 347, "h": 300 },
   "kz_barracks":    { "ax": 181.5, "ay": 232, "baseW": 318, "w": 364, "h": 249 },
   "kz_tower":       { "ax": 76,    "ay": 239, "baseW": 101, "w": 153, "h": 256 },
+  "kz_pen":         { "ax": 164.5, "ay": 178, "baseW": 330, "w": 330, "h": 179 },
   "kz_farm":        { "ax": 191.5, "ay": 204, "baseW": 368, "w": 380, "h": 205 },
   "kz_stable":      { "ax": 189,   "ay": 217, "baseW": 377, "w": 379, "h": 218 },
   "kz_market":      { "ax": 179.5, "ay": 247, "baseW": 360, "w": 360, "h": 248 },
@@ -400,6 +401,8 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_villager_gather2": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 },
   "kz_villager_fish1":   { "ax": 24.5, "ay": 148, "baseW": 96, "w": 96, "h": 150 },
   "kz_villager_fish2":   { "ax": 24.9, "ay": 148, "baseW": 95, "w": 95, "h": 150 },
+  "kz_shepherd_1": { "ax": 59.9, "ay": 159, "baseW": 140, "w": 140, "h": 150 },
+  "kz_shepherd_2": { "ax": 58.4, "ay": 147, "baseW": 141, "w": 141, "h": 150 },
   // ── казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям ──
   "kz_scout":     { "ax": 55.7, "ay": 149, "baseW": 85,  "w": 85,  "h": 150 },
   "kz_scout_sw1": { "ax": 50.5, "ay": 151, "baseW": 101, "w": 101, "h": 150 },

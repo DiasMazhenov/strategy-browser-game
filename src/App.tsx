@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.046';
+export const GAME_VERSION = '1.0.047';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -400,6 +400,31 @@ export default function App() {
                       <MiniBtn onClick={() => g()?.trade('food')} title="Обмен еды на золото">🍖→🪙</MiniBtn>
                     </div>
                   )}
+                  {hud.sel.bkey === 'tower' && hud.sel.towerUpg && (
+                    <div className="mt-1.5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-1.5">
+                      <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-amber-300/90">Улучшения башни</div>
+                      <div className="flex flex-wrap gap-1">
+                        {([
+                          ['range', '📐 Дальность', '+18% дальности обзора и стрельбы за уровень'],
+                          ['dmg', '🏹 Урон', '+35% урона и +80 прочности за уровень'],
+                          ['archers', '🎯 Лучники', '+1 лучник на башне: дополнительный залп (макс 2)'],
+                        ] as const).map(([k, lbl, tip]) => {
+                          const tu = hud.sel.towerUpg!;
+                          const lvl = k === 'range' ? tu.range : k === 'dmg' ? tu.dmg : tu.archers;
+                          const cap = k === 'range' ? tu.maxRange : k === 'dmg' ? tu.maxDmg : tu.maxArchers;
+                          const cost = Math.round((k === 'range' ? 90 : k === 'dmg' ? 110 : 150) * (1 + lvl * 0.8));
+                          const maxed = lvl >= cap;
+                          return (
+                            <MiniBtn key={k}
+                              onClick={() => { if (!maxed) g()?.upgradeTower(hud.sel.bid!, k); }}
+                              title={`${tip} · ${maxed ? 'максимум' : `${cost}🪙`}`}>
+                              {lbl} {lvl}/{cap}{maxed ? ' ✓' : ` (${cost}🪙)`}
+                            </MiniBtn>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {(hud.sel.done ?? 1) >= 1 && (hud.sel.hp ?? 0) < (hud.sel.bmax ?? 1) - 1 && (
                       <MiniBtn onClick={() => g()?.repairBuilding(hud.sel.bid!)} title="Отправить крестьян чинить (тратит дерево)">🔧 Чинить</MiniBtn>
@@ -487,6 +512,7 @@ export default function App() {
                   <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={BUILDING_DEFS.barracks.cost} ok={canAfford(BUILDING_DEFS.barracks.cost)} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
                   <TrainBtn label="Башня" icon="🗼" key_="R" cost={BUILDING_DEFS.tower.cost} ok={canAfford(BUILDING_DEFS.tower.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
                   <TrainBtn label="Ферма" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
+                  <TrainBtn label="Загон" icon="🐑" key_="H" cost={BUILDING_DEFS.pen.cost} ok={canAfford(BUILDING_DEFS.pen.cost)} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
                   <TrainBtn label="Конюшня" icon="🐴" key_="Z" cost={BUILDING_DEFS.stable.cost} ok={canAfford(BUILDING_DEFS.stable.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
                   <TrainBtn label="Кузница" icon="🔨" key_="X" cost={BUILDING_DEFS.blacksmith.cost} ok={canAfford(BUILDING_DEFS.blacksmith.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
                   <TrainBtn label="Рынок" icon="🏪" key_="C" cost={BUILDING_DEFS.market.cost} ok={canAfford(BUILDING_DEFS.market.cost)} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
@@ -882,6 +908,7 @@ function bldIcon(k: BuildingKey) {
   if (k === 'stable') return '🐴';
   if (k === 'blacksmith') return '🔨';
   if (k === 'market') return '🏪';
+  if (k === 'pen') return '🐑';
   if (k === 'wonder') return '⭐';
   if (k === 'wall') return '🧱';
   if (k === 'gate') return '🚪';
