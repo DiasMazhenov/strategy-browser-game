@@ -960,6 +960,8 @@ export class Game {
       // разведчик-крот, внедрённый у вражеской базы, раскрывает вокруг себя большую область
       let sight = u.key === 'scout' ? 480 : 150;
       if (u.key === 'scout' && u.infDone) sight = Math.max(sight, 720);
+      // пастух в поле видит далеко — чтобы его стадо на дальнем пастбище всегда было видно
+      if (u.key === 'villager' && u.herder) sight = 560;
       mark(u.x, u.y, sight);
     }
     for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight);
