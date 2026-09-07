@@ -145,6 +145,7 @@ interface Unit {
   penId?: number;                      // id загона, к которому прикреплён пастух
   herdT?: number;                      // фаза цикла выпаса (счётчик)
   herding?: number[];                  // id животных, которых гонит пастух
+  herdX?: number; herdY?: number;      // точка притяжения скота (пастбище/загон) во время выпаса
   wphase?: number;                                // фаза рабочего цикла 0..1
   aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
@@ -2629,69 +2630,84 @@ export class Game {
   }
 
   // ── ПАСТУХ: полцикла на выпас (ищет скот в поле), затем пригоняет его в загон ──
+  // ближайшая суша к точке (для выбора пастбища — не в воду/гору)
+  private landNear(x: number, y: number): [number, number] {
+    if (this.terrain.classAt(x, y) === 'grass' || this.terrain.classAt(x, y) === 'desert') return [x, y];
+    for (let r = 40; r <= 400; r += 40) {
+      for (let a = 0; a < 8; a++) {
+        const ang = (a / 8) * Math.PI * 2;
+        const tx = x + Math.cos(ang) * r, ty = y + Math.sin(ang) * r;
+        const c = this.terrain.classAt(tx, ty);
+        if (c !== 'water' && c !== 'deep' && c !== 'mountain') return [tx, ty];
+      }
+    }
+    return [x, y];
+  }
+
   updateShepherd(u: Unit, dt: number) {
     const pen = this.blds.find(b => b.id === u.penId && b.done >= 1);
     if (!pen) { this.releaseShepherd(u); return; }
-    const phase = Math.floor((u.herdT ?? 0) / 26) % 2; // 0 = выпас (26с), 1 = загон (26с)
-    u.herdT = (u.herdT ?? 0) + dt;
+    const GRAZE = 22, PEN_T = 18;             // фазы цикла: выпас и загон
+    const t0 = u.herdT ?? 0;
+    u.herdT = t0 + dt;
+    const cycle = GRAZE + PEN_T;
+    const phase = (t0 % cycle) < GRAZE ? 0 : 1;          // 0 выпас, 1 загон
+    const phasePrev = ((t0 - dt + cycle) % cycle) < GRAZE ? 0 : 1;
+
+    // в начале фазы ВЫПАСА выбираем свежее пастбище в поле у загона
+    if (phase === 0 && phasePrev === 1) { u.herdX = undefined; u.herdY = undefined; }
+    if (u.herdX == null || u.herdY == null) {
+      const ang = (u.id * 2.399 + u.herdT * 0.01) % (Math.PI * 2);
+      const [px, py] = this.landNear(pen.x + Math.cos(ang) * 280, pen.y + Math.sin(ang) * 280);
+      u.herdX = px; u.herdY = py;
+    }
+    const gateX = pen.x + 70, gateY = pen.y + 50;
+
+    // цель притяжения скота: фаза выпаса → пастбище, фаза загона → центр загона
+    const lureX = phase === 0 ? u.herdX! : pen.x;
+    const lureY = phase === 0 ? u.herdY! : pen.y;
+    // радиус притяжения: на пастбище собираем скот вокруг точки, в загон — гоним всех рядом с загоном
+    const lureR = phase === 0 ? 420 : 1600;
+
+    // скот в радиусе метим точкой притяжения (своя логика updateAnimal ведёт его к ней)
+    for (const a of this.units) {
+      if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
+      if (phase === 0 && dist2(a.x, a.y, pen.x, pen.y) < 120 * 120) continue; // уже в загоне — не трогаем
+      // на выпасе подтягиваем скот рядом с пастбищем; в фазе загона — скот рядом с загоном/пастухом
+      const near = phase === 0 ? dist2(a.x, a.y, lureX, lureY) : Math.min(dist2(a.x, a.y, pen.x, pen.y), dist2(a.x, a.y, u.x, u.y));
+      if (near < lureR * lureR) {
+        a.herdX = lureX + rand(-24, 24); a.herdY = lureY + rand(-24, 24);
+        a.anim += dt * 8;
+      } else if (phase === 0 && a.herdX != null && dist2(a.herdX, a.herdY!, lureX, lureY) > 460 * 460) {
+        a.herdX = undefined; a.herdY = undefined; // ушёл от этого пастбища — отпускаем
+      }
+    }
+
     if (phase === 0) {
-      // ВЫПАС: едем в поле (в сторону от загона), к свободному скоту
-      if (!u.herding || !u.herding.length) {
-        u.herding = [];
-        for (const a of this.units) {
-          if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
-          if (dist2(a.x, a.y, pen.x, pen.y) < 150 * 150) continue; // уже у загона
-          if (dist2(a.x, a.y, u.x, u.y) < 900 * 900) u.herding.push(a.id);
-        }
-      }
-      // гоним ближайшую скотину: двигаемся к ней и подталкиваем в сторону загона
-      const an = u.herding!.map(id => this.units.find(a => a.id === id)).filter(a => a && a.hp > 0) as Unit[];
-      const target = an.sort((a, b) => dist2(a.x, a.y, u.x, u.y) - dist2(b.x, b.y, u.x, u.y))[0];
-      if (target) {
-        // скотина убегает от пастуха — направляем её к загону (как волк пугает, но в сторону загона)
-        const toPen = Math.atan2(pen.y - target.y, pen.x - target.x);
-        target.x += Math.cos(toPen) * target.speed * 0.9 * dt;
-        target.y += Math.sin(toPen) * target.speed * 0.9 * dt;
-        target.anim += dt * 10;
-        if (dist2(target.x, target.y, pen.x, pen.y) < 150 * 150) u.herding = u.herding!.filter(id => id !== target.id);
-        // пастух заходит со стороны, противоположной загону, чтобы гнать скот к нему
-        const gx = target.x - Math.cos(toPen) * 26, gy = target.y - Math.sin(toPen) * 26;
-        this.moveTowardPath(u, gx, gy, dt, 14);
-      } else {
-        // скота в поле нет — возвращаемся к загону и ждём
-        if (dist2(u.x, u.y, pen.x, pen.y) > 140 * 140) this.moveTowardPath(u, pen.x, pen.y - 60, dt, 30);
-      }
+      // ВЫПАС: скачем на пастбище и пасёмся там
+      this.moveTowardPath(u, u.herdX!, u.herdY!, dt, 26);
     } else {
-      // ЗАГОН: собираем всю скотину у загона внутрь; на месте даём еду (стрижка/удой)
-      let gathered = false;
+      // ЗАГОН: едем к воротам загона, загоняем скот
+      this.moveTowardPath(u, gateX, gateY, dt, 24);
+      let inPen = 0;
       for (const a of this.units) {
         if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
-        const d = dist2(a.x, a.y, pen.x, pen.y);
-        if (d < 200 * 200) {
-          // подтягиваем к центру загона
-          const ang = Math.atan2(pen.y - a.y, pen.x - a.x);
-          a.x += Math.cos(ang) * a.speed * 0.6 * dt;
-          a.y += Math.sin(ang) * a.speed * 0.6 * dt;
-          a.anim += dt * 6;
-          if (d < 120 * 120) gathered = true;
-        }
+        if (dist2(a.x, a.y, pen.x, pen.y) < 120 * 120) inPen++;
       }
-      // пастух стоит у ворот загона
-      if (dist2(u.x, u.y, pen.x, pen.y) > 120 * 120) this.moveTowardPath(u, pen.x + 70, pen.y + 50, dt, 24);
-      // еда капает, пока скот в загоне (полцикла)
-      if (gathered) {
+      if (inPen > 0) {
         u.gatherT += dt;
-        const cyc = 2.2 / this.gatherMult();
+        const cyc = 2.0 / this.gatherMult();
         if (u.gatherT >= cyc) {
           u.gatherT = 0;
-          const gain = 3 * this.gatherMult();
+          const gain = Math.round((2 + inPen) * this.gatherMult());
           this.res.food += gain; this.gatheredTotal += gain; this.score += gain * 0.3;
-          if (Math.random() < 0.5) this.burst(pen.x, pen.y - 10, 3, ['#fda4af', '#fb7185', '#fff'], 70, 0.5);
-          if (Math.random() < 0.3) this.sound.gatherFood();
+          if (Math.random() < 0.6) this.burst(pen.x, pen.y - 10, 3, ['#fda4af', '#fb7185', '#fff'], 70, 0.5);
+          if (Math.random() < 0.35) this.sound.gatherFood();
           this.checkQuests();
         }
       }
     }
+    void PEN_T;
   }
 
   // кнопка «Пасти скот»: выбранные рабочие по одному назначаются к ближайшим/свободным загонам
@@ -3380,6 +3396,21 @@ export class Game {
 
   // скот/дичь: пасутся рядом с домом и убегают от опасности
   updateAnimal(u: Unit, dt: number) {
+    // скот, которого пригоняет пастух: идём к точке притяжения (пастбище/загон),
+    // не пугаемся пастуха и не блуждаем вокруг своего спавна
+    if ((u.key === 'sheep' || u.key === 'cow') && u.herdX != null) {
+      const dx = u.herdX - u.x, dy = u.herdY! - u.y, d = Math.hypot(dx, dy);
+      if (d > 10) {
+        const sp = Math.min(u.speed, 110);
+        u.x += (dx / d) * sp * dt; u.y += (dy / d) * sp * dt;
+        u.anim += dt * 9;
+        if (Math.abs(dx) > 4) u.face = dx > 0 ? 1 : -1;
+      }
+      // снять метку, если рядом больше нет пастуха (загон достроен/снесён)
+      const herderActive = this.units.some(h => h.herder && h.penId != null && dist2(h.x, h.y, u.x, u.y) < 700 * 700);
+      if (!herderActive && d <= 30) u.herdX = undefined;
+      return;
+    }
     const isDeer = u.key === 'deer';
     const skittish = isDeer ? 150 : 120;
     // ищем угрозу рядом: волк/воин для всех; для оленя — ещё и охотящийся крестьянин
