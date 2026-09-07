@@ -1857,6 +1857,11 @@ export class Game {
       const need = s + n.r;
       if (Math.abs(x - n.x) < need && Math.abs(y - n.y) < need) return false;
     }
+    // террейн: ни на горах, ни на воде (фундамент по сетке точек вокруг центра)
+    for (let ox = -s; ox <= s; ox += 22) for (let oy = -s; oy <= s; oy += 22) {
+      const tc = this.terrain.classAt(x + ox, y + oy);
+      if (tc === 'mountain' || tc === 'water' || tc === 'deep') return false;
+    }
     return true;
   }
 
@@ -2366,7 +2371,10 @@ export class Game {
     const dx = tx - u.x, dy = ty - u.y;
     const d = Math.hypot(dx, dy);
     if (d < arrive) return true;
-    const s = Math.min(u.speed * dt, d);
+    // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
+    const midC = this.terrain.classAt((u.x + tx) / 2, (u.y + ty) / 2);
+    const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
+    const s = Math.min(u.speed * wade * dt, d);
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
     // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
     if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
