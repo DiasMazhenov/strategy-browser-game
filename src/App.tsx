@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.048';
+export const GAME_VERSION = '1.0.049';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -324,6 +324,17 @@ export default function App() {
                     <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕ Снять выбор</MiniBtn>
                   </div>
                   {/* приказы разведчика */}
+                  {/* приказ рабочему: пасти скот у загона */}
+                  {hud.sel.types?.some(t => t.key === 'villager') && (
+                    <div className="mt-1.5 rounded-xl border border-lime-400/25 bg-lime-500/10 p-1.5">
+                      <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-lime-200">🐑 Пастух</div>
+                      <div className="flex flex-wrap gap-1">
+                        <MiniBtn title="Рабочий верхом на коне пасёт скот и загоняет его в ближайший Загон (построй: Загон, клавиша H)" onClick={() => g()?.herdOrder()}>
+                          🐎 Пасти скот
+                        </MiniBtn>
+                      </div>
+                    </div>
+                  )}
                   {hud.sel.types?.some(t => t.key === 'scout') && (
                     <div className="mt-1.5 rounded-xl border border-sky-400/25 bg-sky-500/10 p-1.5">
                       <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-sky-200"><Compass className="h-3.5 w-3.5" />Приказы разведчика</div>

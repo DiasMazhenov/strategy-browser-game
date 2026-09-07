@@ -1381,7 +1381,7 @@ export class Game {
   orderGather(v: Unit, nodeId: number) {
     const n = this.nodes.find(n => n.id === nodeId);
     if (!n) return;
-    v.herder = false; v.penId = undefined; // пастух снят с должности другим приказом
+    v.herder = false; v.penId = undefined; v.speed = UNIT_DEFS.villager.speed; // пастух снят с должности
     if (v.carry.amt > 0 && v.carry.type !== n.kind) this.deposit(v);
     v.state = 'gather'; v.nodeId = nodeId; v.buildId = -1; v.targetU = -1; v.targetB = -1;
     v.tx = n.x + rand(-8, 8); v.ty = n.y + rand(-8, 8);
@@ -2631,7 +2631,7 @@ export class Game {
   // ── ПАСТУХ: полцикла на выпас (ищет скот в поле), затем пригоняет его в загон ──
   updateShepherd(u: Unit, dt: number) {
     const pen = this.blds.find(b => b.id === u.penId && b.done >= 1);
-    if (!pen) { u.herder = false; u.penId = undefined; u.state = 'idle'; return; }
+    if (!pen) { this.releaseShepherd(u); return; }
     const phase = Math.floor((u.herdT ?? 0) / 26) % 2; // 0 = выпас (26с), 1 = загон (26с)
     u.herdT = (u.herdT ?? 0) + dt;
     if (phase === 0) {
@@ -2694,10 +2694,39 @@ export class Game {
     }
   }
 
+  // кнопка «Пасти скот»: выбранные рабочие по одному назначаются к ближайшим/свободным загонам
+  herdOrder() {
+    const vills = this.selUnits().filter(u => u.owner === 'player' && u.key === 'villager');
+    if (!vills.length) { this.floater(this.cam.x, this.cam.y - 80, 'Выберите рабочего', '#94a3b8', 14); return; }
+    // готовые загоны игрока, сортированы по расстоянию до группы
+    const pens = this.blds
+      .filter(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1)
+      .sort((a, b) => dist2(a.x, a.y, vills[0].x, vills[0].y) - dist2(b.x, b.y, vills[0].x, vills[0].y));
+    if (!pens.length) { this.floater(this.cam.x, this.cam.y - 90, 'Сначала постройте Загон (🐑, клавиша H)', '#f87171', 15); this.sound.error(); return; }
+    // распределяем: 1 пастух на загон (если уже есть — следующий рабочий к следующему загону)
+    let assigned = 0;
+    for (const v of vills) {
+      // свободный загон (без пастуха), иначе любой ближайший
+      const pen = pens.find(p => !this.units.some(u => u.herder && u.penId === p.id && u.id !== v.id)) ?? pens[0];
+      this.assignShepherd(v, pen);
+      assigned++;
+    }
+    this.floater(pens[0].x, pens[0].y - 50, assigned > 1 ? `🐎 Пастухов: ${assigned}` : '🐎 Пастух назначен', '#a3e635', 14);
+    this.spawnRing(pens[0].x, pens[0].y, '#a3e635');
+  }
+
+  // снять рабочего с должности пастуха (снесли загон / другой приказ)
+  releaseShepherd(vill: Unit) {
+    vill.herder = false; vill.penId = undefined; vill.herding = undefined; vill.herdT = 0;
+    vill.speed = UNIT_DEFS.villager.speed;
+    if (vill.state === 'gather') vill.state = 'idle';
+  }
+
   // назначить рабочего пастухом к загону
   assignShepherd(vill: Unit, pen: Bld) {
     vill.herder = true; vill.penId = pen.id; vill.herdT = 0; vill.herding = [];
-    vill.state = 'gather'; vill.wkind = undefined; vill.nodeId = -1;
+    vill.state = 'gather'; vill.wkind = undefined; vill.nodeId = -1; vill.buildId = -1; vill.targetU = -1; vill.targetB = -1;
+    vill.speed = 175; // верхом на коне — быстрее обычного рабочего (118)
     this.floater(pen.x, pen.y - 50, '🐎 Пастух назначен', '#a3e635', 14);
     this.sound.ack('villager'); this.pushHud();
   }
