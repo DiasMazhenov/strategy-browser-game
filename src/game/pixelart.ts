@@ -98,8 +98,12 @@ import uWBw1 from '../assets/sprites/units/wbw1.png';
 import uWBw2 from '../assets/sprites/units/wbw2.png';
 import uSheep from '../assets/sprites/units/sheep.png';
 import uSheepW from '../assets/sprites/units/sheep_w.png';
+import uSheepF from '../assets/sprites/units/sheep_f.png';
+import uSheepB from '../assets/sprites/units/sheep_b.png';
 import uCow from '../assets/sprites/units/cow.png';
 import uCowW from '../assets/sprites/units/cow_w.png';
+import uCowF from '../assets/sprites/units/cow_f.png';
+import uCowB from '../assets/sprites/units/cow_b.png';
 import uDeer from '../assets/sprites/units/deer.png';
 import uDeerW from '../assets/sprites/units/deer_w.png';
 // ── казахская раса (игрок): кочевые батыры — отдельный набор спрайтов (старые остаются врагам/нейтралам) ──
@@ -368,10 +372,17 @@ const WF_WALK_BACK: [HTMLImageElement, string][] = [
   [mk(uWBw1), 'wbw1'], [mk(uWBw2), 'wbw2'], [mk(uWBw1), 'wbw1'], [mk(uWBw2), 'wbw2'],
 ];
 
+// ── скот: направленные кадры «перёд/спина» (овца/корова — gpt-image спрайты) ──
+const LIVE_FRONT: Partial<Record<UnitKey, [HTMLImageElement, string]>> = {
+  cow: [mk(uCowF), 'cow_f'], sheep: [mk(uSheepF), 'sheep_f'],
+};
+const LIVE_BACK: Partial<Record<UnitKey, [HTMLImageElement, string]>> = {
+  cow: [mk(uCowB), 'cow_b'], sheep: [mk(uSheepB), 'sheep_b'],
+};
+
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
-  // скот (овцы/коровы/олени) рисуем процедурным пиксель-артом: плотные непрозрачные
-  // кадры со всех сторон (бок/перёд/спина) и анимацией шага — AI-спрайт коровы был полупрозрачным
-  if (u.key === 'sheep' || u.key === 'cow' || u.key === 'deer') return false;
+  // олень рисуется процедурно (нет gpt-кадров); овцы/коровы — спрайтами ниже
+  if ((u.key as string) === 'deer') return false;
   // казахская раса (игрок) рисуется отдельным набором спрайтов; враги/нейтралы — штатными
   const isKz = u.owner === 'player' && !!KZ_BASE[u.key];
   const kzKey = 'kz_' + u.key;
@@ -394,6 +405,10 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isCavalry = u.key === 'cavalry';
   const isMonk = u.key === 'monk';
   const isWolf = u.key === 'wolf';
+  const isCowUnit = u.key === 'cow';
+  const isSheepUnit = u.key === 'sheep';
+  const isLivestock = u.key === 'cow' || u.key === 'sheep' || (u.key as string) === 'deer';
+  const liveFB = isLivestock && (u.fmode === 1 || u.fmode === 2); // скот мордой/крупом к камере
   const isMounted = isKnight || isCavalry; // всадник на коне
   // юниты с боковым 2-кадровым шагом, которым добавлен разворот на/от камеры (конница, монах, волк)
   const fbUnit = isMounted || isMonk || isWolf;
@@ -480,6 +495,20 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     const [img0, key0] = cyc ? cyc[idx] : [null, u.key];
     if (img0 && ready(img0)) { im = img0; anKey = key0; flip = 1; }
     else { im = base!; anKey = u.key; }
+  } else if ((isCowUnit || isSheepUnit) && (u.fmode === 1 || u.fmode === 2)) {
+    // скот мордой/крупом к камере: статичные кадры перёд/спина (боковой шаг — ниже через A/B)
+    const pair = u.fmode === 1 ? LIVE_FRONT[u.key] : LIVE_BACK[u.key];
+    if (pair && ready(pair[0])) { im = pair[0]; anKey = pair[1]; flip = 1; }
+    else { im = base!; anKey = u.key; }
+  } else if ((isCowUnit || isSheepUnit)) {
+    // скот сбоку/в покое: базовый кадр + 2 кадра шага (отражается по face)
+    const wA = UNIT_WALK_A[u.key], wB = UNIT_WALK_B[u.key];
+    if (move && ready(wA) && ready(wB)) {
+      const useB = Math.sin(u.anim) < 0;
+      im = (useB ? wB : wA)!;
+      anKey = (useB ? WALK_ANCHOR_B : WALK_ANCHOR_A)[u.key]!;
+    } else { im = base!; anKey = u.key; }
+    flip = f;
   } else if (hasDirWalk && move) {
     // 4-фазная ходьба по изо-направлению: сбоку (отражается по face) / спереди / со спины
     const cyc = isVill
@@ -519,7 +548,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
   const mountFB = kzFB || kzScoutUnit || (fbUnit && move && (u.fmode === 1 || u.fmode === 2));
   // на готовых кадрах работы/рубки/стрельбы/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
-  const upright = working || slashing || loosing || aiming || mountFB || isKz || (hasDirWalk && move);
+  const upright = working || slashing || loosing || aiming || mountFB || liveFB || isKz || (hasDirWalk && move) || isLivestock;
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
