@@ -151,6 +151,7 @@ interface Unit {
   wx: number; wy: number; // wander anchor for wolves
   hidden?: number;        // id здания-укрытия (гарнизон)
   relicTarget?: number;   // id реликвии, за которой идёт монах
+  hunt?: boolean;         // крестьянин получил явный приказ охотиться/атаковать (преследует дичь)
   xp?: number; level?: number; kills?: number; // опыт и ранг героя
   // ── обход препятствий (A* по сетке): waypoints в мире ──
   path?: { x: number; y: number }[]; // маршрут вокруг стен (мировые точки)
@@ -1148,7 +1149,13 @@ export class Game {
 
   orderAttack(us: Unit[], target: Unit) {
     for (const u of us) {
-      if (u.key === 'villager') { u.state = 'move'; u.tx = target.x; u.ty = target.y; continue; }
+      if (u.key === 'villager') {
+        // крестьянин по приказу идёт и бьёт цель (дичь = охота, волк/воин = оборона/атака)
+        u.hunt = true;
+        u.state = 'attackmove'; u.targetU = target.id; u.targetB = -1;
+        u.tx = target.x; u.ty = target.y; u.nodeId = -1; u.buildId = -1;
+        continue;
+      }
       u.state = 'attackmove'; u.targetU = target.id; u.targetB = -1; u.tx = target.x; u.ty = target.y;
     }
     this.sound.move(); this.spawnRing(target.x, target.y, '#f87171');
@@ -2260,10 +2267,59 @@ export class Game {
     return false;
   }
 
+  // крестьянин в бою: преследует и бьёт цель (воин/волк — оборона, дичь — охота по
+  // приказу). Возвращает true, пока есть валидная цель и крестьянин занят боем.
+  villagerCombat(u: Unit, dt: number): boolean {
+    let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
+    // цель валидна, если жива и это враг/волк ИЛИ дичь по явному приказу охоты (u.hunt)
+    const valid = (e: Unit): boolean =>
+      e.hp > 0 && (this.hostile(u.owner, e.owner) || (e.owner === 'neutral' && !e.tribe && !!u.hunt));
+    if (tu && !valid(tu)) { tu = undefined; u.targetU = -1; }
+    // явная ли это цель приказа (охота/атака) — тогда преследуем дичь; авто-оборона дичь не трогает
+    const isPrey = (e: Unit) => e.owner === 'neutral' && !e.tribe;
+    if (!tu) {
+      // нет цели: сканируем угрозу в радиусе обороны (волки/воины), дичь не выбираем
+      const f = this.acquireEnemy(u, 140);
+      if (f.tu >= 0) { const cand = this.units.find(e => e.id === f.tu); if (cand && valid(cand) && !isPrey(cand)) { u.targetU = f.tu; tu = cand; } }
+    }
+    if (tu) {
+      const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+      const reach = u.range + 6;
+      if (d <= reach) {
+        if (Math.abs(tu.x - u.x) > 3) u.face = tu.x > u.x ? 1 : -1;
+        if (u.cd <= 0) this.strike(u, tu, undefined);
+        u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
+      } else {
+        // преследуем: врагов/волков — всегда (оборона); дичь — только по приказу (hunt)
+        if (isPrey(tu) && !u.hunt) { u.targetU = -1; return false; }
+        this.moveTowardPath(u, tu.x, tu.y, dt, reach * 0.7);
+        u.wkind = undefined;
+      }
+      return true;
+    }
+    return false;
+  }
+
   updateVillager(u: Unit, dt: number) {
-    // в покое и на марше рабочие кадры не показываем
-    if (u.state === 'idle') { u.idleT += dt; u.wkind = undefined; return; }
-    if (u.state === 'move' || u.state === 'attackmove') { u.wkind = undefined; if (this.moveTowardPath(u, u.tx, u.ty, dt)) u.state = 'idle'; return; }
+    // боевой приоритет: есть боевая цель/приказ — самооборона от нападающих/волков или охота
+    const wantFight = u.state === 'attackmove' || u.targetU >= 0 || u.hunt;
+    if (wantFight) {
+      if (this.villagerCombat(u, dt)) { u.wkind = undefined; return; }
+      // бой завершился: снимаем охоту/цель; с грузом — сдавать, иначе — к ресурсу/покою
+      u.targetU = -1; u.hunt = false; u.wkind = undefined;
+      if (u.state === 'attackmove') u.state = 'idle';
+      if (u.carry.amt > 0) { u.state = 'return'; this.sendToDrop(u); return; }
+      u.state = 'idle'; u.idleT = 0;
+    }
+    // в покое — подбираем ближайший ресурс рядом и идём работать (авто-добыча),
+    // но не убегаем за полкарты (дальше 1600 — ждём явного приказа)
+    if (u.state === 'idle') {
+      u.idleT += dt; u.wkind = undefined;
+      const near = this.nearestResource(u.x, u.y);
+      if (near && dist2(u.x, u.y, near.x, near.y) < 1600 * 1600) { this.orderGather(u, near.id); return; }
+      return;
+    }
+    if (u.state === 'move') { u.wkind = undefined; if (this.moveTowardPath(u, u.tx, u.ty, dt)) { u.state = 'idle'; u.idleT = 0; } return; }
     if (u.state === 'build') {
       const b = this.blds.find(b => b.id === u.buildId);
       if (!b || b.done >= 1) { u.state = 'idle'; u.buildId = -1; u.wkind = undefined; return; }
@@ -2302,8 +2358,9 @@ export class Game {
       if (!n || n.amount <= 0) {
         if (u.carry.amt > 0) { u.state = 'return'; this.sendToDrop(u); }
         else {
-          const alt = this.nearestNode(u.x, u.y, u.carry.type || 'wood');
-          if (alt && dist2(alt.x, alt.y, u.x, u.y) < 700 * 700) this.orderGather(u, alt.id);
+          // ресурс кончился: свободный рабочий сразу идёт к ближайшему ЛЮБОМУ ресурсу
+          const alt = this.nearestResource(u.x, u.y);
+          if (alt && dist2(alt.x, alt.y, u.x, u.y) < 1500 * 1500) this.orderGather(u, alt.id);
           else u.state = 'idle';
         }
         return;
@@ -2343,15 +2400,29 @@ export class Game {
           const n = this.nodes.find(n => n.id === u.nodeId);
           if (n && n.amount > 0) { u.state = 'gather'; }
           else {
-            const alt = this.nearestNode(u.x, u.y, u.carry.type || 'wood');
+            const alt = this.nearestResource(u.x, u.y);
             if (alt) this.orderGather(u, alt.id);
             else u.state = 'idle';
           }
         }
         return;
       }
-      this.moveTowardPath(u, tc.x + rand(-4, 4), tc.y + rand(-4, 4), dt, 80);
+      // стабильная цель сдачи (без покадрового rand — иначе A*/направление «дрожат»
+      // и рабочий едет медленно/топчется у центра); идём к точке, заданной sendToDrop
+      this.moveTowardPath(u, u.tx || tc.x, u.ty || tc.y, dt, 70);
     }
+  }
+
+  // ближайший ресурсный узел ЛЮБОГО типа (для авто-работы свободного крестьянина)
+  nearestResource(x: number, y: number, prefer?: 'wood' | 'food' | 'gold' | 'fish'): Node | null {
+    let best: Node | null = null; let bd = 1e12;
+    for (const n of this.nodes) {
+      if (n.amount <= 0) continue;
+      let d = dist2(x, y, n.x, n.y);
+      if (prefer && n.kind === prefer) d *= 0.5; // лёгкий приоритет предпочитаемого типа
+      if (d < bd) { bd = d; best = n; }
+    }
+    return best;
   }
 
   nearestDrop(u: Unit): Bld | null {
@@ -2369,7 +2440,14 @@ export class Game {
   }
   sendToDrop(u: Unit) {
     const tc = this.nearestDrop(u);
-    if (tc) { u.tx = tc.x; u.ty = tc.y; }
+    if (!tc) return;
+    // стабильная точка сдачи у кромки здания (а не в центре зоны коллизии — там рабочий
+    // толкается и топчется). Встаём со стороны, откуда пришёл, на радиусе ~TC+8.
+    const dx = u.x - tc.x, dy = u.y - tc.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const r = tc.size / 2 + 10;
+    u.tx = tc.x + (dx / d) * r;
+    u.ty = tc.y + (dy / d) * r;
   }
 
   // враждебны ли стороны: волки (нейтралы) враждебны всегда; игрок и ИИ — только в состоянии войны
@@ -2414,10 +2492,23 @@ export class Game {
       // нетронутое нейтральное племя (воины/башни) пассивно: авто-боем не трогаем
       if (e.tribe && !e.aggro) continue;
       // пассивный скот не цель авто-боя (бить можно только явным приказом)
+      // дичь/скот — добыча охоты (см. acquirePrey); в авто-оборону не входит
       if (e.owner === 'neutral' && e.key !== 'wolf' && !e.tribe && u.state !== 'attackmove') continue;
       if (u.owner === 'player' && e.owner === 'neutral' && e.key === 'wolf' && u.state !== 'attackmove') {
-        // villagers don't auto-aggro wolves; military does
-        if (u.key === 'villager') continue;
+        // крестьяне обороняются от волков в малом радиусе (оборона), но не гоняются за ними
+        // через всю карту: военные берут волка обычным радиусом, крестьяне — отдельно ниже
+        if (u.key === 'villager') {
+          const d = dist2(u.x, u.y, e.x, e.y);
+          if (d < 150 * 150 && d < bd) { bd = d; bu = e.id; bb = -1; }
+        }
+        continue;
+      }
+      // крестьяне обороняются от вражеских воинов/племени только в малом радиусе (не
+      // отходят далеко от работы и не ищут врагов по всей карте)
+      if (u.key === 'villager' && u.owner === 'player' && u.state !== 'attackmove') {
+        const d = dist2(u.x, u.y, e.x, e.y);
+        if (d < 120 * 120 && d < bd) { bd = d; bu = e.id; bb = -1; }
+        continue;
       }
       const d = dist2(u.x, u.y, e.x, e.y);
       if (d < bd) { bd = d; bu = e.id; bb = -1; }
@@ -2581,21 +2672,28 @@ export class Game {
 
   // скот/дичь: пасутся рядом с домом и убегают от опасности
   updateAnimal(u: Unit, dt: number) {
-    const skittish = u.key === 'deer' ? 170 : 120;
-    // ищем угрозу рядом (волк или воин)
+    const isDeer = u.key === 'deer';
+    const skittish = isDeer ? 150 : 120;
+    // ищем угрозу рядом: волк/воин для всех; для оленя — ещё и охотящийся крестьянин
+    // (скот/корова не пугаются рабочих и остаются лёгкой добычей)
+    const threatFrom = (e: Unit): boolean => {
+      if (e.owner === 'neutral' || e.hp <= 0) return false;
+      if (e.key === 'monk') return false;
+      if (e.key === 'villager') return isDeer && !!e.hunt;
+      return true;
+    };
     let flee = false;
     for (const e of this.units) {
-      if (e.owner === 'neutral' || e.hp <= 0) continue;
-      if (e.key === 'villager' || e.key === 'monk') continue;
-      if (dist2(u.x, u.y, e.x, e.y) < skittish * skittish) { flee = true; break; }
+      if (threatFrom(e) && dist2(u.x, u.y, e.x, e.y) < skittish * skittish) { flee = true; break; }
     }
     if (flee) {
       // бежим от ближайшего врага
       let threat: Unit | undefined; let bd = skittish * skittish;
-      for (const e of this.units) { if (e.owner === 'neutral' || e.key === 'villager' || e.key === 'monk') continue; const d = dist2(u.x, u.y, e.x, e.y); if (d < bd) { bd = d; threat = e; } }
+      for (const e of this.units) { if (!threatFrom(e)) continue; const d = dist2(u.x, u.y, e.x, e.y); if (d < bd) { bd = d; threat = e; } }
       if (threat) {
         const dx = u.x - threat.x, dy = u.y - threat.y, d = Math.max(1, Math.hypot(dx, dy));
-        const sp = u.key === 'deer' ? 200 : 120;
+        // олень быстрее скота, но не недостижим для крестьян (118): группа догоняет/загоняет
+        const sp = u.key === 'deer' ? 135 : 120;
         u.x += (dx / d) * sp * dt; u.y += (dy / d) * sp * dt;
         u.x = clamp(u.x, 20, WORLD.w - 20); u.y = clamp(u.y, 20, WORLD.h - 20);
         u.face = dx > 0 ? 1 : -1;
@@ -2697,6 +2795,10 @@ export class Game {
     if (t.key !== 'villager' && t.owner !== 'neutral' && !from) { /* noop */ }
     if (t.owner !== 'neutral' && t.key !== 'villager' && from && this.hostile(t.owner, from.owner) && t.targetU < 0 && t.targetB < 0) {
       if (from.hp !== undefined) { t.targetU = from.id; t.state = 'attackmove'; }
+    }
+    // крестьянин, которого атаковали (воином/волком), обороняется: даёт сдачи обидчику
+    if (t.key === 'villager' && from && from.hp > 0 && this.hostile(t.owner, from.owner)) {
+      if (t.state !== 'attackmove') { t.targetU = from.id; t.state = 'attackmove'; }
     }
     if (t.owner === 'neutral' && from) { /* wolves handled by proximity */ }
     if (t.hp <= 0) this.killUnit(t, from?.owner, from);
