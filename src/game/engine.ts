@@ -8,7 +8,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
-import { NATIONS, NATION_BY_ID, type FacRel } from './nations';
+import { NATIONS, NATION_BY_ID, TRIBE_IDS, type FacRel } from './nations';
 import imgTowncenter from '../assets/sprites/towncenter.png';
 import imgHouse from '../assets/sprites/house.png';
 import imgBarracks from '../assets/sprites/barracks.png';
@@ -255,7 +255,7 @@ export interface HudSnapshot {
 export interface NationHud {
   id: string; name: string; ruler: string; title: string; portrait: string; color: string;
   kind: 'rival' | 'tribe';
-  met: boolean; rel: string; atWar: boolean; power: number; camps: number;
+  met: boolean; rel: string; atWar: boolean; power: number; camps: number; gift: number;
   canGreet: boolean; // можно ли открыть приветствие/переговоры (встречен)
 }
 
@@ -653,9 +653,8 @@ export class Game {
   // лагерь нейтрального племени: башня-деревня + воины (пассивны, пока не тронут).
   // Народ племени детерминирован по позиции лагеря (три кочевых/оседлых народа циклично).
   tribeNationAt(x: number, y: number): string {
-    const tribes = ['pecheneg', 'oghuz', 'khwarezm'];
     const h = Math.abs((Math.round(x / 900) * 73856093) ^ (Math.round(y / 900) * 19349663));
-    return tribes[h % tribes.length];
+    return TRIBE_IDS[h % TRIBE_IDS.length];
   }
   spawnTribeCamp(x: number, y: number, rng: () => number) {
     const hut = this.addBld('tower', 'neutral', x, y, 1);
@@ -770,8 +769,9 @@ export class Game {
     } else {
       // племя
       if (act === 'gift') {
-        if (this.res.gold >= 40) { this.res.gold -= 40; this.tribeRel[nid] = 'friend'; this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} обещает не трогать ваши караваны и границы`, 4); this.sound.coin(); }
-        else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 40 🪙', '#f87171', 15); }
+        const cost = def.choices.find(c => c.act === 'gift')?.gold ?? 40;
+        if (this.res.gold >= cost) { this.res.gold -= cost; this.tribeRel[nid] = 'friend'; this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} обещает не трогать ваши караваны и границы`, 4); this.sound.coin(); }
+        else { this.floater(this.cam.x, this.cam.y - 90, `Нужно ${cost} 🪙`, '#f87171', 15); }
       } else if (act === 'threat') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); this.pushBanner(`⚡ Угроза племени «${def.name}»`, `${def.title} ${def.ruler} в ярости — воины хватаются за оружие`, 4); }
       else { this.tribeRel[nid] = 'neutral'; this.pushBanner(`👋 Знакомство с «${def.name}»`, `${def.title} ${def.ruler} кивнул в ответ — пока нейтралитет`, 3.5); }
     }
@@ -799,11 +799,13 @@ export class Game {
     }
     // племена
     const rel = this.tribeRel[nid];
+    if (act === 'threat') act = 'attack';
     if (act === 'greet') { this.greetShown.delete(nid); this.greeting = { nationId: nid }; return true; }
     if (act === 'gift') {
+      const cost = def.choices.find(c => c.act === 'gift')?.gold ?? 40;
       if (rel === 'friend') { this.floater(this.cam.x, this.cam.y - 100, 'Уже дружны', '#94a3b8', 14); return false; }
-      if (this.res.gold < 40) { this.floater(this.cam.x, this.cam.y - 100, 'Нужно 40 🪙', '#f87171', 15); return false; }
-      this.res.gold -= 40; this.tribeRel[nid] = 'friend';
+      if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙`, '#f87171', 15); return false; }
+      this.res.gold -= cost; this.tribeRel[nid] = 'friend';
       // дружеское племя успокаивается
       for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; for (const e of this.units) if (e.tribe && dist2(e.x, e.y, b.x, b.y) < 400 * 400) { e.aggro = false; e.targetU = -1; e.state = 'idle'; } }
       this.sound.coin(); this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} рад союзу — племя не нападёт`, 4); this.pushHud(); return true;
@@ -4029,6 +4031,7 @@ export class Game {
         atWar: d.id === 'rival' ? this.atWar : this.tribeRel[d.id] === 'hostile',
         power: met ? Math.round(this.nationPower(d.id)) : 0,
         camps: d.kind === 'tribe' ? this.nationCampCount(d.id) : 0,
+        gift: d.choices.find(c => c.act === 'gift')?.gold ?? 40,
         canGreet: met,
       };
     });

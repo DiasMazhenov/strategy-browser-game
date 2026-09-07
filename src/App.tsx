@@ -6,6 +6,7 @@ import {
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
+import { PLAYER_NATION } from './game/nations';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
 import heroBattle from './assets/hero-battle.jpg';
 
@@ -16,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.042';
+export const GAME_VERSION = '1.0.043';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -1077,6 +1078,17 @@ function DiplomacyModal({ hud, onClose, onAct, onGreet }: {
         <p className="mb-3 text-[11.5px] text-slate-400">
           Народы не знают о существовании друг друга, пока не встретятся на карте — отправляйте разведчиков 🧭 открывать земли. Соперника видно лишь после контакта.
         </p>
+        {/* наш хан */}
+        <div className="mb-2.5 flex items-center gap-3 rounded-2xl border border-amber-300/30 bg-gradient-to-r from-amber-500/15 via-amber-400/5 to-transparent p-2.5">
+          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-amber-300/40">
+            <img src={PLAYER_NATION.portrait} alt={PLAYER_NATION.ruler} className="h-full w-full object-cover object-top" draggable={false} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-300/80">{PLAYER_NATION.name}</div>
+            <div className="truncate font-display text-[15px] font-black text-amber-100">{PLAYER_NATION.title} {PLAYER_NATION.ruler}</div>
+            <div className="text-[10.5px] text-slate-400">Вы — правитель казахского народа</div>
+          </div>
+        </div>
         <div className="grid gap-2.5">
           {hud.nations.map(n => (
             <div key={n.id} className={`rounded-2xl border p-3 transition ${n.met ? 'border-white/10 bg-white/5' : 'border-white/5 bg-black/25 opacity-70'}`}>
@@ -1112,8 +1124,8 @@ function DiplomacyModal({ hud, onClose, onAct, onGreet }: {
                         <DiplBtn danger onClick={() => onAct(n.id, 'war')} title="Начать войну">⚔️ Война</DiplBtn>
                       </>}
                   </>) : (<>
-                    <DiplBtn onClick={() => onAct(n.id, 'gift')} title="Дары (40🪙) — племя станет дружественным">🎁 Дружба (40🪙)</DiplBtn>
-                    <DiplBtn danger onClick={() => onAct(n.id, 'attack')} title="Развязать войну с племенем">⚔️ Воевать</DiplBtn>
+                    <DiplBtn onClick={() => onAct(n.id, 'gift')} title={`Дары (${n.gift}🪙) — народ станет дружественным`}>🎁 Дружба ({n.gift}🪙)</DiplBtn>
+                    <DiplBtn danger onClick={() => onAct(n.id, 'attack')} title="Развязать войну с народом">⚔️ Воевать</DiplBtn>
                   </>)}
                 </div>
               )}
