@@ -8,6 +8,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
+import { NATIONS, NATION_BY_ID, type FacRel } from './nations';
 import imgTowncenter from '../assets/sprites/towncenter.png';
 import imgHouse from '../assets/sprites/house.png';
 import imgBarracks from '../assets/sprites/barracks.png';
@@ -153,6 +154,14 @@ interface Unit {
   relicTarget?: number;   // id реликвии, за которой идёт монах
   hunt?: boolean;         // крестьянин получил явный приказ охотиться/атаковать (преследует дичь)
   xp?: number; level?: number; kills?: number; // опыт и ранг героя
+  // ── разведчик: приказы и шпионаж ──
+  mission?: 'explore' | 'bases' | 'diplomacy' | 'infiltrate'; // задание разведчика
+  mtx?: number; mty?: number;       // цель приказа (база/точка)
+  mNation?: string;                 // народ-цель приказа (diplomacy/infiltrate)
+  infT?: number;                    // прогресс внедрения у вражеской базы (сек)
+  infDone?: boolean;                // внедрение завершено (база раскрыта)
+  infBaseId?: number;               // id здания, в которое внедряется крот
+  meetCd?: number;                  // кулдаун пере-приветствия дипломатии
   // ── обход препятствий (A* по сетке): waypoints в мире ──
   path?: { x: number; y: number }[]; // маршрут вокруг стен (мировые точки)
   pathGoal?: { x: number; y: number };   // цель, под которую посчитан путь
@@ -195,6 +204,7 @@ interface Bld {
   gate: boolean;                                                // ворота (проходны для игрока)
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
+  nationId?: string;                                            // народ-племя (id из NATIONS), владеющий лагерем
 }
 interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
@@ -237,6 +247,16 @@ export interface HudSnapshot {
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   playerPow: number; enemyPow: number; wonderT: number; wonderHold: number;
   techTree: TechTreeRow[];
+  // ── дипломатия народов (Civilization-стиль) ──
+  nations: NationHud[];
+  greeting: { id: string; name: string; ruler: string; title: string; portrait: string; greet: string; choices: { id: string; label: string; desc?: string; gold?: number }[] } | null;
+  scouts: number; // число разведчиков игрока
+}
+export interface NationHud {
+  id: string; name: string; ruler: string; title: string; portrait: string; color: string;
+  kind: 'rival' | 'tribe';
+  met: boolean; rel: string; atWar: boolean; power: number; camps: number;
+  canGreet: boolean; // можно ли открыть приветствие/переговоры (встречен)
 }
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -302,6 +322,15 @@ export class Game {
   tributeGold = 0;               // размер периодической дани
   wonderT = 0;                   // таймер удержания Чуда света (0 = нет активного Чуда)
   readonly WONDER_HOLD = 180;    // сколько секунд нужно удержать Чудо до победы
+  // ── знакомства с народами (дипломатия Civilization): изначально мы никого не знаем ──
+  rivalMet = false;              // контакт со славянским княжеством установлен
+  tribeMet: Record<string, boolean> = {};   // встреченные племена (nationId → true)
+  tribeRel: Record<string, FacRel> = {};    // отношение племени: neutral/friend/hostile
+  greeting: { nationId: string } | null = null; // всплывшее приветствие правителя (для UI)
+  greetQueue: string[] = [];     // очередь народов на приветствие
+  greetShown = new Set<string>();// народы, приветствие которых уже показано
+  contactT = 0;                  // накопитель сканирования контактов
+  intelBase: number | null = null; // раскрытая кротом база (id здания) — увеличенный обзор вокруг
   raf = 0; last = 0; hudT = 0; aiT = 0; hintT = 0;
   banners: Banner[] = [];
   questsDone: Record<string, boolean> = {};
@@ -621,10 +650,17 @@ export class Game {
       if (p) this.relics.push({ id: this.nextId++, x: p[0], y: p[1], taken: false, phase: rng() * 6 });
     }
   }
-  // лагерь нейтрального племени: башня-деревня + воины (пассивны, пока не тронут)
+  // лагерь нейтрального племени: башня-деревня + воины (пассивны, пока не тронут).
+  // Народ племени детерминирован по позиции лагеря (три кочевых/оседлых народа циклично).
+  tribeNationAt(x: number, y: number): string {
+    const tribes = ['pecheneg', 'oghuz', 'khwarezm'];
+    const h = Math.abs((Math.round(x / 900) * 73856093) ^ (Math.round(y / 900) * 19349663));
+    return tribes[h % tribes.length];
+  }
   spawnTribeCamp(x: number, y: number, rng: () => number) {
     const hut = this.addBld('tower', 'neutral', x, y, 1);
     hut.tribe = true;
+    hut.nationId = this.tribeNationAt(x, y);
     const guards = 2 + ((rng() * 3) | 0);
     const kinds: UnitKey[] = ['spearman', 'swordsman', 'archer'];
     for (let i = 0; i < guards; i++) {
@@ -635,6 +671,149 @@ export class Game {
     }
     // клад золота у лагеря
     this.addNode('gold', x + 60, y - 50, 700);
+  }
+
+  // ── народ из объекта (лагерь племени → nationId; соперник → 'rival') ──
+  tribeNationOf(b: Bld): string | null {
+    if (b.tribe) return b.nationId ?? this.tribeNationAt(b.x, b.y);
+    if (b.owner === 'enemy') return 'rival';
+    return null;
+  }
+
+  // ── ДИПЛОМАТИЯ: знакомство с народами и действия ──
+  relLabel(nid: string): string {
+    if (nid === 'rival') return this.atWar ? 'Война' : (this.rivalMet ? 'Мир' : 'Неизвестно');
+    const r = this.tribeRel[nid];
+    if (!this.tribeMet[nid]) return 'Не встречали';
+    return r === 'friend' ? 'Дружба' : r === 'hostile' ? 'Вражда' : 'Нейтралитет';
+  }
+  // народ встречен?
+  metNation(nid: string): boolean { return nid === 'rival' ? this.rivalMet : !!this.tribeMet[nid]; }
+  // сила народа (игроку показывается приблизительно/после знакомства)
+  nationPower(nid: string): number {
+    if (nid === 'rival') return this.milStrength('enemy');
+    let s = 0;
+    for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; s += b.maxHp * 0.12; }
+    for (const u of this.units) {
+      if (u.owner !== 'neutral' || !u.tribe) continue;
+      const home = this.blds.find(b => b.tribe && Math.abs(b.x - u.homeX) < 120 && Math.abs(b.y - u.homeY) < 120);
+      if (home && this.tribeNationOf(home) === nid) s += u.atk * 2 + u.hp * 0.4;
+    }
+    return s;
+  }
+  nationCampCount(nid: string): number {
+    return this.blds.filter(b => b.tribe && this.tribeNationOf(b) === nid).length;
+  }
+  // ближайший лагерь/база народа к точке
+  nearestNationBase(nid: string, x: number, y: number, maxD = Infinity): Bld | null {
+    let best: Bld | null = null; let bd = maxD * maxD;
+    for (const b of this.blds) {
+      if (nid === 'rival') { if (b.owner !== 'enemy' || b.key !== 'towncenter') continue; }
+      else { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; }
+      const d = dist2(x, y, b.x, b.y);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  // периодическая проверка контактов: видим врага/лагерь → знакомство
+  updateContacts(dt: number) {
+    this.contactT -= dt;
+    if (this.contactT > 0) return;
+    this.contactT = 0.8;
+    if (!this.settings.fogOfWar) { this.rivalMet = true; for (const n of NATIONS) if (n.kind === 'tribe') this.tribeMet[n.id] = true; }
+    else {
+      for (const u of this.units) if (u.owner !== 'player' || u.hidden) continue;
+      // встреча со славянским княжеством
+      if (!this.rivalMet) {
+        for (const b of this.blds) {
+          if (b.owner !== 'enemy') continue;
+          if (this.fogAt(b.x, b.y).vis) { this.rivalMet = true; this.queueGreeting('rival'); break; }
+        }
+        if (!this.rivalMet) for (const u of this.units) {
+          if (u.owner !== 'enemy') continue;
+          if (this.fogAt(u.x, u.y).vis) { this.rivalMet = true; this.queueGreeting('rival'); break; }
+        }
+      }
+      // встречи с племенами
+      for (const b of this.blds) {
+        if (!b.tribe) continue;
+        const nid = this.tribeNationOf(b)!;
+        if (this.tribeMet[nid]) continue;
+        if (this.fogAt(b.x, b.y).vis) { this.tribeMet[nid] = true; this.tribeRel[nid] = 'neutral'; this.queueGreeting(nid); }
+      }
+    }
+    // выдать следующее приветствие из очереди (по одному за раз)
+    if (!this.greeting) {
+      while (this.greetQueue.length) {
+        const nid = this.greetQueue.shift()!;
+        if (!this.greetShown.has(nid) && this.metNation(nid)) {
+          this.greetShown.add(nid);
+          this.greeting = { nationId: nid };
+          this.sound.quest();
+          break;
+        }
+      }
+    }
+  }
+  queueGreeting(nid: string) {
+    if (!this.greetShown.has(nid) && !this.greetQueue.includes(nid)) this.greetQueue.push(nid);
+  }
+  closeGreeting() { this.greeting = null; this.pushHud(); }
+  // ответ игрока на приветствие правителя
+  greetingChoice(act: string) {
+    const g = this.greeting; if (!g) return;
+    const nid = g.nationId; this.greeting = null;
+    const def = NATION_BY_ID[nid];
+    if (nid === 'rival') {
+      if (act === 'warm') { this.grievance = Math.max(0, this.grievance - 10); this.pushBanner('🕊 Дипломатия', 'Князь Ратибор принял вас учтиво — отношения тёплые', 3.5); }
+      else if (act === 'giftBig') { if (this.res.gold >= 75) { this.res.gold -= 75; this.grievance = Math.max(0, this.grievance - 28); this.pushBanner('🎁 Дары князю', 'Ратибор доволен богатыми дарами — неприязнь отступила', 3.5); } else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 75 🪙', '#f87171', 15); } }
+      else if (act === 'cold') { this.grievance = Math.min(100, this.grievance + 14); this.casusBelli = Math.max(this.casusBelli, 0.35); this.pushBanner('⚔️ Холодный приём', 'Князь нахмурился: эту дерзость он запомнит', 3.5); }
+    } else {
+      // племя
+      if (act === 'gift') {
+        if (this.res.gold >= 40) { this.res.gold -= 40; this.tribeRel[nid] = 'friend'; this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} обещает не трогать ваши караваны и границы`, 4); this.sound.coin(); }
+        else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 40 🪙', '#f87171', 15); }
+      } else if (act === 'threat') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); this.pushBanner(`⚡ Угроза племени «${def.name}»`, `${def.title} ${def.ruler} в ярости — воины хватаются за оружие`, 4); }
+      else { this.tribeRel[nid] = 'neutral'; this.pushBanner(`👋 Знакомство с «${def.name}»`, `${def.title} ${def.ruler} кивнул в ответ — пока нейтралитет`, 3.5); }
+    }
+    this.pushHud();
+  }
+  // разозлить всё племя народа nid (для угрозы/шпионажа)
+  provokeTribeById(nid: string) {
+    for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; this.provokeTribe(b.x, b.y, this.units.find(u => u.owner === 'player') ?? this.units[0]); }
+  }
+  // ── действия из панели дипломатии ──
+  dipAction(nid: string, act: string): boolean {
+    const def = NATION_BY_ID[nid];
+    if (!def || this.over) return false;
+    if (!this.metNation(nid)) { this.floater(this.cam.x, this.cam.y - 100, 'Вы ещё не знакомы с этим народом', '#94a3b8', 15); return false; }
+    if (nid === 'rival') {
+      if (act === 'peace') return this.sueForPeace(false);
+      if (act === 'gift') return this.bribe();
+      if (act === 'trade') return this.openTradeRoute();
+      if (act === 'nap') return this.signNAP();
+      if (act === 'condemn') return this.condemnNeighbor();
+      if (act === 'tribute') return this.demandTribute();
+      if (act === 'war') { if (!this.atWar) this.onPlayerAggression(); return true; }
+      if (act === 'greet') { this.queueGreeting(nid); this.greetShown.delete(nid); this.updateContacts(1); return true; }
+      return false;
+    }
+    // племена
+    const rel = this.tribeRel[nid];
+    if (act === 'greet') { this.greetShown.delete(nid); this.greeting = { nationId: nid }; return true; }
+    if (act === 'gift') {
+      if (rel === 'friend') { this.floater(this.cam.x, this.cam.y - 100, 'Уже дружны', '#94a3b8', 14); return false; }
+      if (this.res.gold < 40) { this.floater(this.cam.x, this.cam.y - 100, 'Нужно 40 🪙', '#f87171', 15); return false; }
+      this.res.gold -= 40; this.tribeRel[nid] = 'friend';
+      // дружеское племя успокаивается
+      for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; for (const e of this.units) if (e.tribe && dist2(e.x, e.y, b.x, b.y) < 400 * 400) { e.aggro = false; e.targetU = -1; e.state = 'idle'; } }
+      this.sound.coin(); this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} рад союзу — племя не нападёт`, 4); this.pushHud(); return true;
+    }
+    if (act === 'attack') {
+      if (rel !== 'hostile') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); }
+      this.pushBanner(`⚔️ Война с «${def.name}»`, 'Воины племени поднимаются по тревоге', 3.5); this.pushHud(); return true;
+    }
+    return false;
   }
 
   relicsHeld = 0; // реликвий собрано игроком (пассивное золото)
@@ -744,7 +923,12 @@ export class Game {
         if (d <= sight) { const idx = gy * this.fogGW + gx; this.fogVis[idx] = 1; this.fogExpl[idx] = 1; }
       }
     };
-    for (const u of this.units) if (u.owner === 'player' && !u.hidden) mark(u.x, u.y, u.key === 'scout' ? 480 : 150);
+    for (const u of this.units) if (u.owner === 'player' && !u.hidden) {
+      // разведчик-крот, внедрённый у вражеской базы, раскрывает вокруг себя большую область
+      let sight = u.key === 'scout' ? 480 : 150;
+      if (u.key === 'scout' && u.infDone) sight = Math.max(sight, 720);
+      mark(u.x, u.y, sight);
+    }
     for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight);
   }
   fogAt(wx: number, wy: number): { vis: boolean; expl: boolean } {
@@ -1346,6 +1530,8 @@ export class Game {
       relicsHeld: this.relicsHeld,
       dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT },
+      nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel },
+      scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
     };
     return JSON.stringify(data);
   }
@@ -1397,6 +1583,7 @@ export class Game {
       this.tech = d.tech || {}; this.questsDone = d.questsDone || {};
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
+      if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
       return true;
@@ -1975,6 +2162,8 @@ export class Game {
 
     // diplomacy tick (мир/война, неприязнь, поводы)
     this.diplomacyUpdate(dt);
+    // знакомства с народами (Civilization-стиль): контакт открывает правителя
+    this.updateContacts(dt);
 
     // реликвии: пассивное золото каждые ~10 сек
     if (this.relicsHeld > 0 && !this.over) {
@@ -2445,11 +2634,14 @@ export class Game {
     if (u.state === 'return') {
       const tc = this.nearestDrop(u);
       if (!tc) { this.deposit(u); u.state = 'idle'; return; }
-      // сдача по РАССТОЯНИЮ ДО ЦЕНТРА здания (рабочий стоит у кромки коллизии на
-      // радиусе ~size/2+12). Раньше точка сдачи была сбоку на этом же радиусе, а arrive=70
-      // срабатывал «я прибыл» до входа в зону сдачи → рабочий вставал и не разгружался.
-      const dropR = tc.size / 2 + 14;
-      if (dist2(u.x, u.y, tc.x, tc.y) < dropR * dropR) {
+      // СДАЧА ПО КРОМКЕ ЗДАНИЯ: крестьянин толкается коллизией у угла здания и до ЦЕНТРА
+      // физически дойти не может, поэтому сдаём на дистанции до ближней грани (Chebyshev
+      // по квадрату ТЦ), а не до центра — иначе подходивший по диагонали рабочий кружил
+      // снаружи, не попадая в круг сдачи.
+      const dropR = tc.size / 2 + 22;
+      const hx = tc.size / 2;
+      const ox = Math.max(0, Math.abs(u.x - tc.x) - hx), oy = Math.max(0, Math.abs(u.y - tc.y) - hx);
+      if (ox * ox + oy * oy < dropR * dropR || dist2(u.x, u.y, tc.x, tc.y) < dropR * dropR) {
         this.deposit(u);
         // после сдачи — обратно к работе
         const fb2 = u.buildId >= 0 ? this.blds.find(b => b.id === u.buildId) : undefined;
@@ -2465,9 +2657,14 @@ export class Game {
         }
         return;
       }
-      // цель — центр ТЦ (стабильна, без покадрового rand: иначе путь/направление дрожат);
-      // arrive маленький — дойдём до коллизии здания, затем депозит сработает по радиусу.
-      this.moveTowardPath(u, tc.x, tc.y, dt, 12);
+      // Цель — ближняя точка У ГРАНИЦЫ ТЦ (на радиусе сдачи, со стороны подхода): стабильна
+      // между кадрами, arrive совпадает с радиусом сдачи — рабочий не доходит до коллизии и
+      // не топчется/толкается у угла, а разгружается сразу на входе в зону.
+      const dx = u.x - tc.x, dy = u.y - tc.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const rr = Math.max(8, dropR - 6);
+      const tx = tc.x + (dx / d) * rr, ty = tc.y + (dy / d) * rr;
+      this.moveTowardPath(u, tx, ty, dt, 8);
     }
   }
 
@@ -2508,7 +2705,23 @@ export class Game {
     u.ty = tc.y + (dy / d) * r;
   }
 
-  // враждебны ли стороны: волки (нейтралы) враждебны всегда; игрок и ИИ — только в состоянии войны
+  // народ-племя для юнита (по его домашнему лагерю); null — не племя
+  unitTribeNation(u: Unit): string | null {
+    if (!u.tribe) return null;
+    const home = this.blds.find(b => b.tribe && Math.abs(b.x - u.homeX) < 140 && Math.abs(b.y - u.homeY) < 140);
+    return home ? this.tribeNationOf(home) : null;
+  }
+  // племя народа nid враждебно игроку (война-по-отношению / угроза), и НЕ трогает при дружбе
+  tribeHostileToPlayer(nid: string): boolean {
+    const rel = this.tribeRel[nid];
+    if (rel === 'friend') return false;          // друзья не дерутся
+    if (rel === 'hostile') return true;          // объявленная вражда
+    // нейтральное племя агрит только провокацией (e.aggro) — учитывается в сканерах
+    return false;
+  }
+  // враждебны ли стороны: волки (нейтралы) враждебны всегда; игрок и ИИ — только в состоянии войны.
+  // До знакомства с соперником войны нет (его даже не видно в тумане), но явное нападение
+  // игрока по открытой цели начинает войну (см. strike/onPlayerAggression).
   hostile(a: 'player' | 'enemy' | 'neutral', b: 'player' | 'enemy' | 'neutral'): boolean {
     if (a === b) return false;
     if (a === 'neutral' || b === 'neutral') return true;
@@ -2546,6 +2759,13 @@ export class Game {
   acquireEnemy(u: Unit, radius: number): { tu: number; tb: number } {
     let bu = -1, bb = -1; let bd = radius * radius;
     for (const e of this.units) {
+      // племя дружественного народа игрок НЕ атакует (даже при случайном aggro);
+      // нейтральное нетронутое племя — тоже не цель (агр только при явной провокации)
+      if (e.tribe && u.owner === 'player') {
+        const nid = this.unitTribeNation(e);
+        if (nid && this.tribeRel[nid] === 'friend') continue;
+        if (nid && this.tribeRel[nid] === 'neutral' && !e.aggro) continue;
+      }
       if (!this.hostile(u.owner, e.owner)) continue;
       // нетронутое нейтральное племя (воины/башни) пассивно: авто-боем не трогаем
       if (e.tribe && !e.aggro) continue;
@@ -2589,11 +2809,24 @@ export class Game {
     // монах-лекарь — не воюет, лечит союзников
     if (u.key === 'monk') { this.updateMonk(u, dt); return; }
     if (u.key === 'archer') u.aiming = false; // сбрасываем; выставится при цели в зоне
+    // племя дружественного народа игрока: воины без провокации возвращаются в лагерь и не ищут боя
+    const uNation = u.tribe ? this.unitTribeNation(u) : null;
+    const tribeFriendly = u.tribe && uNation && this.tribeRel[uNation] === 'friend';
     // validate targets
     let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
     let tb = u.targetB >= 0 ? this.blds.find(b => b.id === u.targetB) : undefined;
-    if (tu && (tu.hp <= 0)) { tu = undefined; u.targetU = -1; }
+    if (tu) {
+      // дружественное племя не держит целью игрока
+      if (u.tribe && tu.owner === 'player') { const nid = this.unitTribeNation(u); if (nid && this.tribeRel[nid] === 'friend') { tu = undefined; u.targetU = -1; } }
+      if (tu && tu.hp <= 0) { tu = undefined; u.targetU = -1; }
+    }
     if (tb && tb.hp <= 0) { tb = undefined; u.targetB = -1; }
+    if (u.tribe && tb && tb.owner === 'player') { const nid = this.unitTribeNation(u); if (nid && this.tribeRel[nid] === 'friend') { tb = undefined; u.targetB = -1; } }
+    if (tribeFriendly) {
+      // дружественные воины пассивны: стоят у лагеря
+      if (dist2(u.x, u.y, u.homeX, u.homeY) > 120 * 120) this.moveTowardPath(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
+      return;
+    }
     const isCata = u.key === 'catapult';
     // auto-acquire
     if (u.retarget <= 0 && !tu && !tb) {
@@ -2695,13 +2928,13 @@ export class Game {
     }
   }
 
-  // РАЗВЕДЧИК: обороняется (бьёт нападающих/волков рядом), а в мирном режиме
-  // автоматически бродит по карте — открывает туман и находит базы племён/реликвии.
+  // РАЗВЕДЧИК: по приказу игрока ИЛИ в дефолтном «исследовать» режиме открывает карту,
+  // ищет базы племён, налаживает дипсвязь или внедряется кротом во вражеские базы.
+  // После спавна стоит у ГЦ (приказа нет) — сам в разведку не убегает.
   updateScout(u: Unit, dt: number) {
-    // 1) валидируем явную боевую цель
+    // 1) валидируем явную боевую цель (самооборона/приказ бить)
     let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
-    if (tu && (tu.hp <= 0 || !this.hostile(u.owner, tu.owner))) { tu = undefined; u.targetU = -1; }
-    // явная цель есть — преследуем и бьём (приказ игрока / защита базы племени)
+    if (tu && (tu.hp <= 0 || !this.scoutHostile(u, tu))) { tu = undefined; u.targetU = -1; }
     if (tu) {
       const d = Math.hypot(tu.x - u.x, tu.y - u.y);
       const reach = u.range + 6;
@@ -2714,55 +2947,197 @@ export class Game {
       }
       return;
     }
-    // авто-оборона: нападающий/волк в малом радиусе — дать отпор
+    // авто-оборона: нападающий/волк в малом радиусе — дать отпор (дружественные племена не трогаем)
+    u.retarget -= dt;
     if (u.retarget <= 0) {
       u.retarget = 0.4;
-      const f = this.acquireEnemy(u, 150);
-      if (f.tu >= 0) { u.targetU = f.tu; return; }
-    } else u.retarget -= dt;
-    // приказ двигаться (move / attackmove к точке) — исполняем
+      const f = this.acquireScoutEnemy(u, 150);
+      if (f >= 0) { u.targetU = f; return; }
+    }
+    // ручной приказ движения (move/attackmove/patrol) — исполняем; по достижении
+    // разведчик возвращается к своему заданию (mission), если оно есть
     if (u.state === 'attackmove' || u.state === 'move' || u.state === 'patrol') {
-      if (this.moveTowardPath(u, u.tx, u.ty, dt, 14)) { u.state = 'idle'; u.idleT = 0; }
+      // если это движение по ЗАДАНИЮ (mtx/mty заданы и совпадают) — по прибытии обработать миссию
+      const onMission = u.mission != null && u.mtx != null && Math.hypot(u.tx - u.mtx, u.ty - (u.mty ?? 0)) < 4;
+      if (this.moveTowardPath(u, u.tx, u.ty, dt, 14)) {
+        if (onMission) this.scoutMissionArrive(u);
+        else { u.state = 'idle'; u.idleT = 0; }
+      }
       return;
     }
-    // 2) АВТО-РАЗВЕДКА: выбираем точку в неисследованной области (или к базе племени)
+    // без задания — стоит у ГЦ (как и приказано: не убегает сразу)
+    if (!u.mission) { u.idleT += dt; return; }
+    // тик задания
     u.idleT += dt;
-    if (u.idleT > 0.6) {
-      u.idleT = 0;
-      const goal = this.scoutGoal(u);
-      if (goal) { u.tx = goal[0]; u.ty = goal[1]; u.state = 'move'; }
+    if (u.idleT < 0.5) return;
+    u.idleT = 0;
+    this.scoutTick(u);
+  }
+  // враг ли это для разведчика (волки/враждебные; дружественные племена — нет)
+  scoutHostile(u: Unit, e: Unit): boolean {
+    if (e.owner === 'neutral' && e.tribe) {
+      const nid = this.unitTribeNation(e);
+      if (nid) return this.tribeRel[nid] === 'hostile' || !!e.aggro;
+      return true;
+    }
+    return this.hostile(u.owner, e.owner) || (e.owner === 'neutral' && e.key === 'wolf');
+  }
+  acquireScoutEnemy(u: Unit, radius: number): number {
+    let best = -1, bd = radius * radius;
+    for (const e of this.units) {
+      if (e.hp <= 0) continue;
+      if (e.owner === 'neutral') {
+        if (e.key !== 'wolf' && !e.tribe) continue; // скот не трогаем
+        if (e.tribe) { const nid = this.unitTribeNation(e); if (nid && this.tribeRel[nid] === 'friend') continue; if (nid && this.tribeRel[nid] !== 'hostile' && !e.aggro) continue; }
+      } else if (e.owner === u.owner) continue;
+      else { if (!this.hostile(u.owner, e.owner)) continue; }
+      const d = dist2(u.x, u.y, e.x, e.y);
+      if (d < bd) { bd = d; best = e.id; }
+    }
+    return best;
+  }
+  // выдать разведчику приказ-задание
+  scoutOrder(mission: 'explore' | 'bases' | 'diplomacy' | 'infiltrate') {
+    const us = this.selUnits().filter(u => u.owner === 'player' && u.key === 'scout');
+    if (!us.length) { this.floater(this.cam.x, this.cam.y - 90, 'Выберите разведчика 🧭', '#94a3b8', 14); this.sound.error(); return; }
+    for (const u of us) {
+      u.mission = mission; u.infDone = false; u.infT = 0; u.mNation = undefined;
+      u.idleT = 0.9; // сразу тикнуть
+      if (mission === 'infiltrate') {
+        // цель — ближайшая вражеская база (соперник или враждебное/любое племя)
+        const b = this.nearestEnemyBase(u.x, u.y);
+        if (b) { u.mtx = b.x; u.mty = b.y; u.mNation = b.owner === 'enemy' ? 'rival' : this.tribeNationOf(b) ?? undefined; u.infBaseId = b.id; }
+      }
+      if (mission === 'diplomacy') {
+        // цель — ближайший ещё не встреченный народ; если все встречены — просто к ближайшей базе
+        const b = this.nearestUnmetBase(u.x, u.y);
+        if (b) { u.mtx = b.x; u.mty = b.y; u.mNation = b.owner === 'enemy' ? 'rival' : this.tribeNationOf(b) ?? undefined; }
+      }
+    }
+    const names: Record<string, string> = { explore: 'Исследовать карту', bases: 'Искать базы', diplomacy: 'Наладить связь', infiltrate: 'Внедриться кротом' };
+    this.floater(this.cam.x, this.cam.y - 90, `🧭 ${names[mission]}`, '#7dd3fc', 15);
+    this.sound.ack('soldier');
+    this.pushHud();
+  }
+  // ближайшая база соперника/племени (для шпионажа)
+  nearestEnemyBase(x: number, y: number): Bld | null {
+    let best: Bld | null = null; let bd = Infinity;
+    for (const b of this.blds) {
+      if (b.owner === 'player') continue;
+      if (!(b.owner === 'enemy' && b.key === 'towncenter') && !b.tribe) continue;
+      const d = dist2(x, y, b.x, b.y);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  // ближайшая база народа, с которым ещё НЕ знакомы (для дипломатии)
+  nearestUnmetBase(x: number, y: number): Bld | null {
+    let best: Bld | null = null; let bd = Infinity;
+    for (const b of this.blds) {
+      if (b.owner === 'player') continue;
+      if (!(b.owner === 'enemy' && b.key === 'towncenter') && !b.tribe) continue;
+      const nid = b.owner === 'enemy' ? 'rival' : this.tribeNationOf(b);
+      if (nid && this.metNation(nid)) continue; // уже знакомы — не цель
+      const d = dist2(x, y, b.x, b.y);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best ?? this.nearestEnemyBase(x, y);
+  }
+  // тик задания: выбираем/обновляем цель и идём
+  private scoutTick(u: Unit) {
+    switch (u.mission) {
+      case 'explore': {
+        const g = this.scoutExploreGoal(u);
+        if (g) { u.mtx = g[0]; u.mty = g[1]; u.tx = g[0]; u.ty = g[1]; u.state = 'move'; }
+        break;
+      }
+      case 'bases': {
+        const b = this.nearestDistantCamp(u);
+        if (b) { u.mtx = b.x; u.mty = b.y; u.tx = b.x; u.ty = b.y; u.state = 'move'; }
+        else { const g = this.scoutExploreGoal(u); if (g) { u.tx = g[0]; u.ty = g[1]; u.state = 'move'; } }
+        break;
+      }
+      case 'diplomacy': {
+        // цель зафиксирована при приказе; если народ уже встречен — ищем следующий незнакомый
+        if (!u.mNation || this.metNation(u.mNation) || !u.mtx) {
+          const b = this.nearestUnmetBase(u.x, u.y);
+          if (b) { u.mtx = b.x; u.mty = b.y; u.mNation = b.owner === 'enemy' ? 'rival' : this.tribeNationOf(b) ?? undefined; }
+        }
+        if (u.mtx != null && u.mty != null) { u.tx = u.mtx; u.ty = u.mty; u.state = 'move'; }
+        break;
+      }
+      case 'infiltrate': {
+        if (u.infDone) {
+          // внедрён: держим расширенный обзор у базы (ничего не делаем — стоит/осматривается),
+          // изредка «доносит» — небольшой доход золота
+          const it = (u.infT ?? 0) + 0.5; u.infT = it;
+          if (it > 12) { u.infT = 0; this.res.gold += 6; this.floater(u.x, u.y - 30, '📿 донесение +6🪙', '#fde047', 12, true); }
+          break;
+        }
+        if (u.mtx == null) { const b = this.nearestEnemyBase(u.x, u.y); if (b) { u.mtx = b.x; u.mty = b.y; u.infBaseId = b.id; } }
+        if (u.mtx != null && u.mty != null) {
+          // цель — точка РЯДОМ с базой (не в центр, чтобы не агрить вплотную): встаём у кромки обзора
+          const dx = u.x - u.mtx, dy = u.y - u.mty, d = Math.hypot(dx, dy) || 1;
+          const stand = 230;
+          if (d > stand) { u.tx = u.mtx + (dx / d) * stand; u.ty = u.mty + (dy / d) * stand; u.state = 'move'; }
+          else { u.state = 'idle'; u.infT = (u.infT ?? 0) + 0.5; this.scoutInfiltrateProgress(u); }
+        }
+        break;
+      }
     }
   }
-  // цель разведки: ближайшая туманная точка в кольце вокруг юнита; если тумана нет —
-  // к ближайшей ещё не исследованной базе нейтрального племени; иначе случайный бросок.
-  private scoutGoal(u: Unit): [number, number] | null {
-    const explored = (wx: number, wy: number) => this.settings.fogOfWar ? this.fogAt(wx, wy).expl : true;
-    // ищем неисследованную точку на нескольких кольцах вокруг разведчика
-    for (const rad of [260, 380, 520, 680]) {
-      let best: [number, number] | null = null; let bd = Infinity;
-      const tries = 14;
-      for (let i = 0; i < tries; i++) {
-        const a = (i / tries) * Math.PI * 2 + u.id * 1.7;
-        const wx = u.x + Math.cos(a) * rad, wy = u.y + Math.sin(a) * rad;
-        if (wx < 40 || wy < 40 || wx > WORLD.w - 40 || wy > WORLD.h - 40) continue;
-        if (this.terrain.classAt(wx, wy) === 'deep') continue; // не лезем в глубокую воду
-        if (!explored(wx, wy)) { const d = Math.abs(Math.cos(a) * rad) + Math.abs(Math.sin(a) * rad); if (d < bd) { bd = d; best = [wx, wy]; } }
+  // прогресс внедрения у вражеской базы
+  private scoutInfiltrateProgress(u: Unit) {
+    // накапливаем «внедрение» ~8 сек рядом; база в тумане считается раскрытой (большой обзор)
+    const base = u.infBaseId != null ? this.blds.find(b => b.id === u.infBaseId) : undefined;
+    if (base && dist2(u.x, u.y, base.x, base.y) < 320 * 320) {
+      if ((u.infT ?? 0) >= 8 && !u.infDone) {
+        u.infDone = true; u.infT = 0;
+        this.intelBase = base.id;
+        const nid = base.owner === 'enemy' ? 'rival' : this.tribeNationOf(base);
+        const def = nid ? NATION_BY_ID[nid] : null;
+        this.pushBanner('🕵️ Крот внедрился!', def ? `Разведчик под видом торговца проник к «${def.name}»: база раскрыта, идут донесения` : 'База раскрыта, идут донесения', 4.5);
+        this.sound.quest();
+        // внедрение во враждебную базу может спровоцировать племя
+        if (base.tribe) { const nid2 = this.tribeNationOf(base); if (nid2 && this.tribeRel[nid2] !== 'friend') { /* тихо проник — не провоцируем сразу */ } }
+        this.pushHud();
       }
-      if (best) return best;
     }
-    // всё вокруг исследовано — идём к ближайшей базе племени (если ещё не видели вблизи)
+  }
+  // прибытие к цели задания
+  private scoutMissionArrive(u: Unit) {
+    if (u.mission === 'infiltrate') { u.state = 'idle'; u.infT = 0; this.scoutInfiltrateProgress(u); return; }
+    // для explore/bases/diplomacy — просто продолжить (следующий тик выберет новую цель)
+    u.state = 'idle'; u.idleT = 0.8;
+  }
+  // ближайший ещё не «разведанный вблизи» лагерь племени
+  private nearestDistantCamp(u: Unit): Bld | null {
     let camp: Bld | null = null; let cd2 = Infinity;
     for (const b of this.blds) {
       if (!b.tribe) continue;
       const d = dist2(u.x, u.y, b.x, b.y);
-      // уже подходили к этому лагерю — не цель
-      if (d < 500 * 500) continue;
+      if (d < 520 * 520) continue; // уже рядом — не цель
       if (d < cd2) { cd2 = d; camp = b; }
     }
-    if (camp) return [camp.x, camp.y];
-    // запасной вариант — случайная разведка вокруг базы игрока
+    return camp;
+  }
+  // цель разведки: ближайшая туманная точка в кольце вокруг юнита; иначе случайный бросок.
+  private scoutExploreGoal(u: Unit): [number, number] | null {
+    const explored = (wx: number, wy: number) => this.settings.fogOfWar ? this.fogAt(wx, wy).expl : true;
+    for (const rad of [260, 380, 520, 680]) {
+      let best: [number, number] | null = null; let bd = Infinity;
+      const tries = 14;
+      for (let i = 0; i < tries; i++) {
+        const a = (i / tries) * Math.PI * 2 + u.id * 1.7 + this.time * 0.02;
+        const wx = u.x + Math.cos(a) * rad, wy = u.y + Math.sin(a) * rad;
+        if (wx < 40 || wy < 40 || wx > WORLD.w - 40 || wy > WORLD.h - 40) continue;
+        if (this.terrain.classAt(wx, wy) === 'deep') continue;
+        if (!explored(wx, wy)) { const d = Math.abs(Math.cos(a) * rad) + Math.abs(Math.sin(a) * rad); if (d < bd) { bd = d; best = [wx, wy]; } }
+      }
+      if (best) return best;
+    }
     const a = (u.id * 1.3 + this.time * 0.03) % (Math.PI * 2);
-    return [clamp(u.x + Math.cos(a) * 500, 60, WORLD.w - 60), clamp(u.y + Math.sin(a) * 500, 60, WORLD.h - 60)];
+    return [clamp(u.x + Math.cos(a) * 620, 60, WORLD.w - 60), clamp(u.y + Math.sin(a) * 620, 60, WORLD.h - 60)];
   }
 
   updateMonk(u: Unit, dt: number) {
@@ -3149,6 +3524,8 @@ export class Game {
           for (const e of this.units) {
             if (e.owner === b.owner || e.hp <= 0 || !this.hostile(b.owner, e.owner)) continue;
             if (e.owner === 'neutral' && e.key !== 'wolf' && !(e.tribe && e.aggro)) continue; // скот не трогаем
+            // башни игрока не стреляют по дружественному племени
+            if (b.owner === 'player' && e.tribe) { const nid = this.unitTribeNation(e); if (nid && this.tribeRel[nid] === 'friend') continue; }
             // башня нейтрального племени молчит, пока племя не разозлено атакой
             if (b.owner === 'neutral' && !this.tribeAggro(b.x, b.y)) continue;
             const d = dist2(b.x, b.y - 20, e.x, e.y);
@@ -3275,6 +3652,9 @@ export class Game {
 
     // ── МИР: таймеры дипломатии ──
     this.peaceT += 5;
+    // пока народы НЕ встретились — никакой неприязни/поводов/войны (Civilization-стиль):
+    // сосед вообще не знает о нашем существовании
+    if (!this.rivalMet) { this.grievance = Math.min(this.grievance, 8); this.casusBelli = 0; return; }
     // пакт о ненападении отсчитывает время
     if (this.napT > 0) this.napT = Math.max(0, this.napT - 5);
     // торговый договор: пассивный доход обеим сторонам (золото), лёгкое потепление
@@ -3329,7 +3709,9 @@ export class Game {
 
     // объявление войны: высокая неприязнь + достаточно повода + мы не сильно слабее.
     // Пакт о ненападении полностью запрещает ИИ объявлять войну, пока действует.
-    const wantsWar = this.napT <= 0 && this.grievance >= 62 && this.casusBelli >= 0.5 && em >= pm * 0.7;
+    // ВАЖНО (Civilization-стиль): пока народы НЕ встретились, войны быть не может —
+    // набеги стартуют только после контакта с княжеством.
+    const wantsWar = this.rivalMet && this.napT <= 0 && this.grievance >= 62 && this.casusBelli >= 0.5 && em >= pm * 0.7;
     if (wantsWar) {
       let reason = 'вам объявили войну';
       if (wonder) reason = 'ваше Чудо света угрожает их господству';
@@ -3466,6 +3848,8 @@ export class Game {
   // игрок сам напал в мирное время (клик по врагу) — это даёт ИИ полный повод
   onPlayerAggression() {
     if (this.over) return;
+    // нападение на соперника = насильственное знакомство: народ теперь известен (без приветствия)
+    if (!this.rivalMet) { this.rivalMet = true; this.greetShown.add('rival'); }
     if (!this.atWar) {
       this.declareWar('вы первыми нарушили мир', 1.1);
       // мы агрессоры — у ИИ ополчение обороняется решительно
@@ -3625,6 +4009,28 @@ export class Game {
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
       techTree: this.techTreeData(),
+      nations: this.nationsHud(),
+      greeting: this.greeting ? (() => {
+        const d = NATION_BY_ID[this.greeting!.nationId];
+        return d ? { id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, greet: d.greet,
+          choices: d.choices.map(c => ({ id: c.id, label: c.label, desc: c.desc, gold: c.gold })) } : null;
+      })() : null,
+      scouts: this.units.filter(u => u.owner === 'player' && u.key === 'scout').length,
+    });
+  }
+
+  nationsHud(): NationHud[] {
+    return NATIONS.map(d => {
+      const met = this.metNation(d.id);
+      return {
+        id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, color: d.color,
+        kind: d.kind, met,
+        rel: met ? this.relLabel(d.id) : 'Неизвестно',
+        atWar: d.id === 'rival' ? this.atWar : this.tribeRel[d.id] === 'hostile',
+        power: met ? Math.round(this.nationPower(d.id)) : 0,
+        camps: d.kind === 'tribe' ? this.nationCampCount(d.id) : 0,
+        canGreet: met,
+      };
     });
   }
 
@@ -4622,7 +5028,13 @@ export class Game {
     // здания
     for (const b of this.blds) {
       if (b.owner !== 'player' && !this.canSeeEnemy(b.x, b.y)) continue;
-      ctx.fillStyle = b.owner === 'player' ? '#7cb7ff' : b.tribe ? '#e0b050' : '#f87171';
+      // цвет по народу (племена — каждый своим); соперника не красим до знакомства
+      let col = '#7cb7ff';
+      if (b.owner !== 'player') {
+        if (b.tribe) { const nid = this.tribeNationOf(b); col = nid ? (NATION_BY_ID[nid]?.color ?? '#e0b050') : '#e0b050'; }
+        else col = this.rivalMet ? '#f87171' : '#5b4a4a';
+      }
+      ctx.fillStyle = col;
       const s = b.key === 'towncenter' ? 6 : b.tribe ? 5 : 3.4;
       const [mx, my] = toMap(b.x, b.y);
       ctx.fillRect(mx - s / 2, my - s / 2, s, s);

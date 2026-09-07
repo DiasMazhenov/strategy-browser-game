@@ -3,7 +3,7 @@ import {
   Axe, Coins, Drumstick, TreePine, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
-  Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video,
+  Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
@@ -16,7 +16,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.040';
+export const GAME_VERSION = '1.0.041';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -56,6 +56,7 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [showQuests, setShowQuests] = useState(true);
   const [showTech, setShowTech] = useState(false);
+  const [showDip, setShowDip] = useState(false);
   const [gameId, setGameId] = useState(0);
   const [loadSave, setLoadSave] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -174,60 +175,34 @@ export default function App() {
             </div>
           </div>
 
-          {/* score / wave center */}
-          <div className="panel-iron pointer-events-auto hidden flex-col items-center rounded-xl px-4 py-1.5 md:flex">
-            <div className="flex items-center gap-3 text-xs font-bold">
+          {/* score / wave center (компактно; дипломатия — отдельная кнопка) */}
+          <div className="flex flex-col items-center gap-1">
+            <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-xl px-4 py-1.5 text-xs font-bold">
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
               <span className="flex items-center gap-1 text-slate-300"><Timer className="h-3.5 w-3.5" />{fmtTime(hud?.timeSec ?? 0)}</span>
-              <span className={`flex items-center gap-1 ${(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}`}>
+              <span className={`hidden items-center gap-1 sm:flex ${(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}`}>
                 <Swords className="h-3.5 w-3.5" />Волна {hud?.wave ?? 0} → {hud?.nextWave ?? 0}с
               </span>
             </div>
-            <div className="mt-1 flex items-center gap-2">
-              <TcBar label="ВЫ" hp={hud?.pTc ?? 1} max={hud?.pTcMax ?? 1} color="bg-sky-400" />
-              <span className="font-display text-[10px] font-bold tracking-widest text-amber-200/80">VS</span>
-              <TcBar label="ВРАГ" hp={hud?.eTc ?? 1} max={hud?.eTcMax ?? 1} color="bg-red-400" />
-            </div>
-            {/* дипломатия */}
-            <div className="mt-1.5 flex items-center gap-2">
-              {hud?.atWar ? (
-                <>
-                  <span className="flex items-center gap-1 text-[11px] font-black text-red-400">⚔️ ВОЙНА</span>
-                  <span className="text-[10px] text-slate-300" title="Боевой дух соперника: низкий = его армия слабее">
-                    дух {(hud?.morale ?? 1) < 0.85 ? <span className="text-orange-300">↓{Math.round((hud?.morale ?? 1) * 100)}%</span> : `${Math.round((hud?.morale ?? 1) * 100)}%`}
-                  </span>
-                  <button onClick={() => g()?.sueForPeace(false)} title="Предложить мир за 120 🪙" className="rounded bg-emerald-600/40 px-1.5 py-0.5 text-[10px] font-bold text-emerald-100 hover:bg-emerald-600/70">🕊️ Мир (120🪙)</button>
-                </>
-              ) : (
-                <>
-                  <span className="flex items-center gap-1 text-[11px] font-black text-emerald-300">🕊️ МИР</span>
-                  <span className="text-[10px] text-slate-300" title="Неприязнь соперника: высокая — скоро война. Повод (casus belli) влияет на боевой дух врага">
-                    неприязнь <b className={hud && hud.grievance > 55 ? 'text-red-400' : 'text-amber-300'}>{hud?.grievance ?? 0}</b>/100
-                  </span>
-                  <button onClick={() => g()?.bribe()} title="Отправить дары (75 🪙) — снизить неприязнь" className="rounded bg-sky-600/40 px-1.5 py-0.5 text-[10px] font-bold text-sky-100 hover:bg-sky-600/70">🤝 Дары</button>
-                  <button onClick={() => g()?.openTradeRoute()} disabled={hud?.tradeRoute || !hud?.hasMarket} title="Торговый договор между городами (нужен Рынок, 60 🪙): пассивное золото и рост доверия"
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${hud?.tradeRoute ? 'bg-emerald-600/60 text-emerald-50' : hud?.hasMarket ? 'bg-teal-600/40 text-teal-100 hover:bg-teal-600/70' : 'bg-slate-700/40 text-slate-500'}`}>
-                    🐪 {hud?.tradeRoute ? 'Торговля ✓' : 'Торговля'}
-                  </button>
-                  <button onClick={() => g()?.signNAP()} disabled={(hud?.napT ?? 0) > 0} title="Пакт о ненападении (120 🪙): сосед не нападёт ~2 минуты"
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${(hud?.napT ?? 0) > 0 ? 'bg-indigo-600/60 text-indigo-50' : 'bg-indigo-600/40 text-indigo-100 hover:bg-indigo-600/70'}`}>
-                    📜 {hud?.napT ? `Пакт ${hud.napT}с` : 'Пакт'}
-                  </button>
-                  <button onClick={() => g()?.condemnNeighbor()} disabled={hud?.condemned} title="Осуждение: лишает соседа «чистого повода» — его будущая атака будет вероломной (низкий боевой дух), но слегка поднимает неприязнь"
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${hud?.condemned ? 'bg-rose-700/70 text-rose-50' : 'bg-rose-600/35 text-rose-100 hover:bg-rose-600/65'}`}>
-                    📢 {hud?.condemned ? 'Осуждён ✓' : 'Осуждать'}
-                  </button>
-                  <button onClick={() => g()?.demandTribute()} title="Потребовать дань: нужно военное превосходство (сила ≥1.25× соседа). Золото сразу и со временем, но сосед затаит обиду"
-                    className="rounded bg-amber-600/40 px-1.5 py-0.5 text-[10px] font-bold text-amber-100 hover:bg-amber-600/70">
-                    💰 Дань
-                  </button>
-                </>
+            {/* кнопка дипломатии: компактная, с индикатором войны/новых контактов */}
+            <button
+              onClick={() => setShowDip(true)}
+              className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-amber-300/30 bg-black/55 px-3 py-1 text-[11px] font-black text-amber-100 shadow hover:border-amber-300/70 hover:bg-black/70"
+              title="Дипломатия: народы и правители, которых вы встретили"
+            >
+              <Landmark className="h-4 w-4 text-amber-300" />
+              Дипломатия
+              {hud?.atWar
+                ? <span className="rounded-full bg-red-600/80 px-1.5 py-0.5 text-[9px] font-black text-white">⚔ ВОЙНА</span>
+                : <span className="rounded-full bg-emerald-600/60 px-1.5 py-0.5 text-[9px] font-black text-emerald-50">🕊 МИР</span>}
+              {!!(hud?.nations?.some(n => n.met && n.kind === 'tribe')) && (
+                <span className="rounded-full bg-sky-500/30 px-1.5 py-0.5 text-[9px] font-bold text-sky-100">
+                  знакомо: {hud.nations.filter(n => n.met).length}
+                </span>
               )}
-              <span className="hidden text-[10px] text-slate-400 lg:inline" title="Соотношение сил: вы / соперник">⚖️{hud?.playerPow ?? 0} vs {hud?.enemyPow ?? 0}</span>
-              {(hud?.relics ?? 0) > 0 && <span className="text-[11px] font-black text-amber-300" title="Реликвии дают золото каждые 10 секунд">📿 {hud?.relics}</span>}
-            </div>
+            </button>
             {(hud?.wonderT ?? 0) > 0 && (
-              <div className="mt-1 flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Чудо света до конца отсчёта — это победа">
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Чудо света до конца отсчёта — это победа">
                 ⭐ Чудо: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
               </div>
             )}
@@ -347,6 +322,18 @@ export default function App() {
                     <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.attackArmed = true; gm.pushHud(); } }}><Flag className="h-3 w-3" />Атака-мув (G)</MiniBtn>
                     <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕ Снять выбор</MiniBtn>
                   </div>
+                  {/* приказы разведчика */}
+                  {hud.sel.types?.some(t => t.key === 'scout') && (
+                    <div className="mt-1.5 rounded-xl border border-sky-400/25 bg-sky-500/10 p-1.5">
+                      <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-sky-200"><Compass className="h-3.5 w-3.5" />Приказы разведчика</div>
+                      <div className="flex flex-wrap gap-1">
+                        <MiniBtn title="Идти в туман и открывать карту" onClick={() => g()?.scoutOrder('explore')}><Compass className="h-3 w-3" />Исследовать</MiniBtn>
+                        <MiniBtn title="Найти лагеря племён на карте" onClick={() => g()?.scoutOrder('bases')}><Binoculars className="h-3 w-3" />Искать базы</MiniBtn>
+                        <MiniBtn title="Дойти до незнакомого народа и наладить связь (приветствие правителя)" onClick={() => g()?.scoutOrder('diplomacy')}><MessageCircle className="h-3 w-3" />Связь</MiniBtn>
+                        <MiniBtn title="Прокрасться кротом к вражеской базе: раскрыть её и доносить золото" onClick={() => g()?.scoutOrder('infiltrate')}><Eye className="h-3 w-3" />Внедриться</MiniBtn>
+                      </div>
+                    </div>
+                  )}
                   {!(hud.sel.types?.every(t => t.key === 'villager') || false) && (
                     <div className="mt-1 flex flex-wrap items-center gap-1">
                       <span className="text-[9px] font-black uppercase tracking-wide text-sky-300/80">Стойка:</span>
@@ -543,6 +530,18 @@ export default function App() {
         <TechTreeModal hud={hud} onClose={() => setShowTech(false)} onResearch={(id) => gameRef.current?.research(id)} />
       )}
 
+      {/* ===== ПРИВЕТСТВИЕ ПРАВИТЕЛЯ (первый контакт, Civilization-стиль) ===== */}
+      {hud?.greeting && (
+        <RulerGreeting g={hud.greeting} onChoose={(act) => gameRef.current?.greetingChoice(act)} onClose={() => gameRef.current?.closeGreeting()} />
+      )}
+
+      {/* ===== ПАНЕЛЬ ДИПЛОМАТИИ ===== */}
+      {showDip && hud && (
+        <DiplomacyModal hud={hud} onClose={() => setShowDip(false)}
+          onAct={(nid, act) => gameRef.current?.dipAction(nid, act)}
+          onGreet={(nid) => gameRef.current?.dipAction(nid, 'greet')} />
+      )}
+
       {/* ===== SETTINGS MODAL (в игре) ===== */}
       {showSettings && (
         <SettingsPanel settings={settings} updateSettings={updateSettings} onClose={() => setShowSettings(false)} inGame />
@@ -570,16 +569,6 @@ function MiniBtn({ children, onClick, active, onContextMenu, title }: { children
     <button title={title} onClick={onClick} onContextMenu={onContextMenu} className={`btn-iron flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold text-slate-200 ${active ? 'active text-amber-200' : ''}`}>
       {children}
     </button>
-  );
-}
-function TcBar({ label, hp, max, color }: { label: string; hp: number; max: number; color: string }) {
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-[9px] font-black text-slate-400">{label}</span>
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-black/50 sm:w-20">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.max(0, Math.min(100, (hp / max) * 100))}%` }} />
-      </div>
-    </div>
   );
 }
 function HpMini({ hp, max }: { hp: number; max: number }) {
@@ -843,6 +832,7 @@ function unitIcon(k: string) {
   if (k === 'cavalry') return '🏇';
   if (k === 'catapult') return '🪨';
   if (k === 'monk') return '✝️';
+  if (k === 'scout') return '🧭';
   if (k === 'sheep') return '🐑';
   if (k === 'cow') return '🐄';
   if (k === 'deer') return '🦌';
@@ -1021,6 +1011,127 @@ function HowRow({ n, t }: { n: string; t: string }) {
       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400/20 text-[11px] font-black text-amber-200">{n}</span>
       <span>{t}</span>
     </div>
+  );
+}
+
+/* ================= DIPLOMACY (Civilization-style) ================= */
+function RulerGreeting({ g, onChoose, onClose }: {
+  g: NonNullable<HudSnapshot['greeting']>;
+  onChoose: (act: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="panel-iron anim-banner relative w-full max-w-md overflow-hidden rounded-3xl">
+        {/* портрет правителя во всю шапку */}
+        <div className="relative h-44 w-full">
+          <img src={g.portrait} alt={g.ruler} className="h-full w-full object-cover object-top" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#141a14] via-[#141a14]/30 to-transparent" />
+          <button onClick={onClose} className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-slate-200 hover:bg-black/70" aria-label="Закрыть"><X className="h-4 w-4" /></button>
+          <div className="absolute bottom-2 left-3">
+            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-300/90">{g.name}</div>
+            <div className="font-display text-xl font-black text-amber-100">{g.title} {g.ruler}</div>
+          </div>
+        </div>
+        <div className="p-4">
+          <div className="rounded-2xl border border-amber-300/20 bg-black/40 p-3 text-[13px] italic leading-relaxed text-slate-200">
+            «{g.greet}»
+          </div>
+          <div className="mt-3 grid gap-2">
+            {g.choices.map(c => (
+              <button
+                key={c.id}
+                onClick={() => onChoose(c.id)}
+                className="flex items-center justify-between gap-2 rounded-xl border border-amber-300/25 bg-amber-400/10 px-3 py-2.5 text-left text-[13px] font-bold text-amber-50 transition hover:border-amber-300/60 hover:bg-amber-400/20 active:scale-[0.99]"
+              >
+                <span>{c.label}</span>
+                {c.desc && <span className="text-right text-[10px] font-medium text-slate-400">{c.desc}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DiplomacyModal({ hud, onClose, onAct, onGreet }: {
+  hud: HudSnapshot;
+  onClose: () => void;
+  onAct: (nid: string, act: string) => void;
+  onGreet: (nid: string) => void;
+}) {
+  const relColor = (n: HudSnapshot['nations'][number]) =>
+    n.atWar ? 'text-red-400' : n.rel === 'Дружба' ? 'text-emerald-300' : n.rel === 'Нейтралитет' ? 'text-slate-200' : 'text-slate-400';
+  const relIcon = (n: HudSnapshot['nations'][number]) =>
+    n.atWar ? '⚔️' : n.rel === 'Дружба' ? '🤝' : n.rel === 'Нейтралитет' ? '🕊️' : '❔';
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="panel-iron anim-banner max-h-[88dvh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl p-4 sm:p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="font-display flex items-center gap-2 text-lg font-black tracking-wide text-amber-200 sm:text-xl">
+            <Landmark className="h-5 w-5" /> Дипломатия
+          </div>
+          <button onClick={onClose} className="rounded-full bg-white/10 p-1.5 text-slate-300 hover:bg-white/20 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+        </div>
+        <p className="mb-3 text-[11.5px] text-slate-400">
+          Народы не знают о существовании друг друга, пока не встретятся на карте — отправляйте разведчиков 🧭 открывать земли. Соперника видно лишь после контакта.
+        </p>
+        <div className="grid gap-2.5">
+          {hud.nations.map(n => (
+            <div key={n.id} className={`rounded-2xl border p-3 transition ${n.met ? 'border-white/10 bg-white/5' : 'border-white/5 bg-black/25 opacity-70'}`}>
+              <div className="flex items-center gap-3">
+                <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/15">
+                  {n.met ? <img src={n.portrait} alt={n.ruler} className="h-full w-full object-cover object-top" draggable={false} />
+                    : <div className="flex h-full w-full items-center justify-center bg-black/40 text-2xl text-slate-600">?</div>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: n.color }} />
+                    <span className="truncate text-[14px] font-black text-slate-100">{n.met ? n.name : 'Неизвестный народ'}</span>
+                  </div>
+                  <div className="text-[11px] font-bold text-amber-200/90">{n.met ? `${n.title} ${n.ruler}` : 'Правитель не встречен'}</div>
+                  <div className={`mt-0.5 text-[11px] font-black ${n.met ? relColor(n) : 'text-slate-500'}`}>
+                    {relIcon(n)} {n.met ? n.rel : '???'}
+                    {n.met && <span className="ml-2 font-medium text-slate-400">⚖️ сила {n.power}{n.kind === 'tribe' ? ` · лагерей ${n.camps}` : ''}</span>}
+                  </div>
+                </div>
+              </div>
+              {n.met && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <DiplBtn onClick={() => onGreet(n.id)} title="Переговорить с правителем">💬 Переговоры</DiplBtn>
+                  {n.kind === 'rival' ? (<>
+                    {n.atWar
+                      ? <DiplBtn onClick={() => onAct(n.id, 'peace')} title="Предложить мир (120🪙)">🕊️ Мир (120🪙)</DiplBtn>
+                      : <>
+                        <DiplBtn onClick={() => onAct(n.id, 'gift')} title="Дары (75🪙) — снизить неприязнь">🤝 Дары</DiplBtn>
+                        <DiplBtn onClick={() => onAct(n.id, 'trade')} disabled={hud.tradeRoute || !hud.hasMarket} title="Торговый договор (нужен Рынок, 60🪙)">🐪 Торговля{hud.tradeRoute ? ' ✓' : ''}</DiplBtn>
+                        <DiplBtn onClick={() => onAct(n.id, 'nap')} disabled={(hud.napT ?? 0) > 0} title="Пакт о ненападении (120🪙)">📜 Пакт{hud.napT ? ` ${hud.napT}с` : ''}</DiplBtn>
+                        <DiplBtn onClick={() => onAct(n.id, 'condemn')} disabled={hud.condemned} title="Осуждение — лишить соседа чистого повода">📢 {hud.condemned ? 'Осуждён ✓' : 'Осуждать'}</DiplBtn>
+                        <DiplBtn onClick={() => onAct(n.id, 'tribute')} title="Потребовать дань (нужно превосходство)">💰 Дань</DiplBtn>
+                        <DiplBtn danger onClick={() => onAct(n.id, 'war')} title="Начать войну">⚔️ Война</DiplBtn>
+                      </>}
+                  </>) : (<>
+                    <DiplBtn onClick={() => onAct(n.id, 'gift')} title="Дары (40🪙) — племя станет дружественным">🎁 Дружба (40🪙)</DiplBtn>
+                    <DiplBtn danger onClick={() => onAct(n.id, 'attack')} title="Развязать войну с племенем">⚔️ Воевать</DiplBtn>
+                  </>)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+function DiplBtn({ children, onClick, title, disabled, danger }: { children: React.ReactNode; onClick: () => void; title?: string; disabled?: boolean; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick} title={title} disabled={disabled}
+      className={`rounded-lg px-2 py-1 text-[10.5px] font-black transition active:scale-95 disabled:opacity-40 ${
+        danger ? 'bg-red-600/40 text-red-100 hover:bg-red-600/70' : 'bg-white/10 text-slate-100 hover:bg-amber-400/25'
+      }`}
+    >{children}</button>
   );
 }
 

@@ -397,7 +397,21 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_villager_mine1":   { "ax": 46,   "ay": 149, "baseW": 92, "w": 92, "h": 150 },
   "kz_villager_mine2":   { "ax": 48,   "ay": 153, "baseW": 96, "w": 96, "h": 150 },
   "kz_villager_gather1": { "ax": 31,   "ay": 156, "baseW": 62, "w": 62, "h": 150 },
-  "kz_villager_gather2": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 }
+  "kz_villager_gather2": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 },
+  // ── казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям ──
+  "kz_scout":     { "ax": 55.7, "ay": 149, "baseW": 85,  "w": 85,  "h": 150 },
+  "kz_scout_sw1": { "ax": 50.5, "ay": 151, "baseW": 101, "w": 101, "h": 150 },
+  "kz_scout_sw2": { "ax": 45.5, "ay": 151, "baseW": 91,  "w": 91,  "h": 150 },
+  "kz_scout_sw3": { "ax": 48.5, "ay": 151, "baseW": 97,  "w": 97,  "h": 150 },
+  "kz_scout_sw4": { "ax": 50,   "ay": 151, "baseW": 100, "w": 100, "h": 150 },
+  "kz_scout_fw1": { "ax": 62.7, "ay": 149, "baseW": 93,  "w": 93,  "h": 150 },
+  "kz_scout_fw2": { "ax": 55.5, "ay": 149, "baseW": 92,  "w": 92,  "h": 150 },
+  "kz_scout_fw3": { "ax": 61.9, "ay": 149, "baseW": 92,  "w": 92,  "h": 150 },
+  "kz_scout_fw4": { "ax": 53.5, "ay": 149, "baseW": 92,  "w": 92,  "h": 150 },
+  "kz_scout_bw1": { "ax": 29.4, "ay": 148, "baseW": 72,  "w": 72,  "h": 150 },
+  "kz_scout_bw2": { "ax": 38.5, "ay": 148, "baseW": 72,  "w": 72,  "h": 150 },
+  "kz_scout_bw3": { "ax": 28.8, "ay": 148, "baseW": 72,  "w": 72,  "h": 150 },
+  "kz_scout_bw4": { "ax": 38.1, "ay": 148, "baseW": 71,  "w": 71,  "h": 150 }
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {

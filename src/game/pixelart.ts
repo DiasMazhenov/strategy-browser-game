@@ -164,6 +164,20 @@ import kzVmine1 from '../assets/sprites/units/kz/kz_villager_mine1.png';
 import kzVmine2 from '../assets/sprites/units/kz/kz_villager_mine2.png';
 import kzVgather1 from '../assets/sprites/units/kz/kz_villager_gather1.png';
 import kzVgather2 from '../assets/sprites/units/kz/kz_villager_gather2.png';
+// казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
+import kzScout from '../assets/sprites/units/kz/kz_scout.png';
+import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
+import kzScoutSW2 from '../assets/sprites/units/kz/kz_scout_sw2.png';
+import kzScoutSW3 from '../assets/sprites/units/kz/kz_scout_sw3.png';
+import kzScoutSW4 from '../assets/sprites/units/kz/kz_scout_sw4.png';
+import kzScoutFW1 from '../assets/sprites/units/kz/kz_scout_fw1.png';
+import kzScoutFW2 from '../assets/sprites/units/kz/kz_scout_fw2.png';
+import kzScoutFW3 from '../assets/sprites/units/kz/kz_scout_fw3.png';
+import kzScoutFW4 from '../assets/sprites/units/kz/kz_scout_fw4.png';
+import kzScoutBW1 from '../assets/sprites/units/kz/kz_scout_bw1.png';
+import kzScoutBW2 from '../assets/sprites/units/kz/kz_scout_bw2.png';
+import kzScoutBW3 from '../assets/sprites/units/kz/kz_scout_bw3.png';
+import kzScoutBW4 from '../assets/sprites/units/kz/kz_scout_bw4.png';
 
 const mk = (src: string): HTMLImageElement => { const im = new Image(); im.src = src; return im; };
 // кадр покоя/атаки
@@ -189,7 +203,7 @@ const ready = (im?: HTMLImageElement) => !!im && im.complete && im.naturalWidth 
 const KZ_BASE: Partial<Record<UnitKey, HTMLImageElement>> = {
   villager: mk(kzVillager), swordsman: mk(kzSwordsman), archer: mk(kzArcher), spearman: mk(kzSpearman),
   knight: mk(kzKnight), cavalry: mk(kzCavalry), catapult: mk(kzCatapult), monk: mk(kzMonk),
-  scout: mk(kzArcher), // разведчик переиспользует кадры лучника (быстрый воин)
+  scout: mk(kzScout), // свой спрайт лёгкого разведчика-бегуна (синий чапан, бурка, сабля)
 };
 const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanF), 'kz_swordsman_f'], [mk(kzSwordsmanF), 'kz_swordsman_f']],
@@ -199,7 +213,6 @@ const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   monk: [[mk(kzMonkF), 'kz_monk_f'], [mk(kzMonkF), 'kz_monk_f']],
   knight: [[mk(kzKnightF), 'kz_knight_f'], [mk(kzKnightF), 'kz_knight_f']],
   cavalry: [[mk(kzCavalryF), 'kz_cavalry_f'], [mk(kzCavalryF), 'kz_cavalry_f']],
-  scout: [[mk(kzArcherF), 'kz_archer_f'], [mk(kzArcherF), 'kz_archer_f']],
 };
 const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanB), 'kz_swordsman_b'], [mk(kzSwordsmanB), 'kz_swordsman_b']],
@@ -209,7 +222,6 @@ const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   monk: [[mk(kzMonkB), 'kz_monk_b'], [mk(kzMonkB), 'kz_monk_b']],
   knight: [[mk(kzKnightB), 'kz_knight_b'], [mk(kzKnightB), 'kz_knight_b']],
   cavalry: [[mk(kzCavalryB), 'kz_cavalry_b'], [mk(kzCavalryB), 'kz_cavalry_b']],
-  scout: [[mk(kzArcherB), 'kz_archer_b'], [mk(kzArcherB), 'kz_archer_b']],
 };
 // ── кадры ШАГА: 2 фазы на направление (чередуются по sin(anim)); импорт PNG — это URL-строка, оборачиваем в mk() ──
 const W2 = (a: string, ka: string, b: string, kb: string): [HTMLImageElement, string][] =>
@@ -223,7 +235,6 @@ const KZ_WALK_SIDE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   knight: W2(kzKnightWA, 'kz_knight_wa', kzKnightWB, 'kz_knight_wb'),
   cavalry: W2(kzCavalryWA, 'kz_cavalry_wa', kzCavalryWB, 'kz_cavalry_wb'),
   monk: W2(kzMonkWA, 'kz_monk_wa', kzMonkWB, 'kz_monk_wb'),
-  scout: W2(kzArcherWA, 'kz_archer_wa', kzArcherWB, 'kz_archer_wb'),
 };
 // перёд-шаг (на камеру) и спина-шаг (от камеры) — полноценный цикл у крестьянина
 const KZ_WALK_FRONT: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
@@ -239,6 +250,10 @@ const W4 = (a: string, ka: string, b: string, kb: string, c: string, kc: string,
 const KZ_V_WALK_SIDE: [HTMLImageElement, string][] = W4(kzVsw1, 'kz_villager_sw1', kzVsw2, 'kz_villager_sw2', kzVsw3, 'kz_villager_sw3', kzVsw4, 'kz_villager_sw4');
 const KZ_V_WALK_FRONT: [HTMLImageElement, string][] = W4(kzVfw1, 'kz_villager_fw1', kzVfw2, 'kz_villager_fw2', kzVfw3, 'kz_villager_fw3', kzVfw4, 'kz_villager_fw4');
 const KZ_V_WALK_BACK: [HTMLImageElement, string][] = W4(kzVbw1, 'kz_villager_bw1', kzVbw2, 'kz_villager_bw2', kzVbw3, 'kz_villager_bw3', kzVbw4, 'kz_villager_bw4');
+// казахский разведчик: полный 4-кадровый шаг по изо-направлениям (sw бок / fw анфас / bw тыл)
+const KZ_SCOUT_WALK_SIDE: [HTMLImageElement, string][] = W4(kzScoutSW1, 'kz_scout_sw1', kzScoutSW2, 'kz_scout_sw2', kzScoutSW3, 'kz_scout_sw3', kzScoutSW4, 'kz_scout_sw4');
+const KZ_SCOUT_WALK_FRONT: [HTMLImageElement, string][] = W4(kzScoutFW1, 'kz_scout_fw1', kzScoutFW2, 'kz_scout_fw2', kzScoutFW3, 'kz_scout_fw3', kzScoutFW4, 'kz_scout_fw4');
+const KZ_SCOUT_WALK_BACK: [HTMLImageElement, string][] = W4(kzScoutBW1, 'kz_scout_bw1', kzScoutBW2, 'kz_scout_bw2', kzScoutBW3, 'kz_scout_bw3', kzScoutBW4, 'kz_scout_bw4');
 // казахский крестьянин за работой: [замах, удар] по виду деятельности
 const KZ_VILL_WORK: Record<string, [HTMLImageElement, HTMLImageElement, string, string]> = {
   chop:   [mk(kzVchop1),   mk(kzVchop2),   'kz_villager_chop1',   'kz_villager_chop2'],
@@ -374,6 +389,9 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const hasDirWalk = !isKz && (isVill || isSword || isArch || isSpear);
   const fmode = u.fmode ?? 0;
   const kzVill = isKz && isVill; // казахский крестьянин — полный набор кадров (4-шаг/работа)
+  const kzScoutUnit = isKz && u.key === 'scout'; // казахский разведчик — свой 4-кадровый шаг
+  // казахские юниты с полным 4-кадровым циклом ходьбы по направлениям (крестьянин, разведчик)
+  const kzCycleUnit = kzVill || kzScoutUnit;
   const kzFB = isKz && move && (fmode === 1 || fmode === 2);
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
   const working = !isKz && isVill && !!u.wkind && !move &&
@@ -397,16 +415,15 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     workSwing = strike ? Math.sin(Math.min(1, ((u.wphase ?? 0) - 0.62) / 0.38) * Math.PI) : 0;
     flip = f; // боковой кадр инструментом к ресурсу (отражается по face)
     if (!ready(im)) { im = base!; anKey = kzKey; }
-  } else if (kzVill) {
-    // казахский крестьянин: полный 4-кадровый шаг по изо-направлению; в покое — статичный кадр
+  } else if (kzCycleUnit) {
+    // казахский крестьянин/разведчик: полный 4-кадровый шаг по изо-направлению; в покое — статичный кадр
     const ci = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
-    const standF = KZ_FRONT_CYCLE.villager?.[0];
-    const standB = KZ_BACK_CYCLE.villager?.[0];
-    if (move && fmode === 1 && ready(KZ_V_WALK_FRONT[ci][0])) { im = KZ_V_WALK_FRONT[ci][0]; anKey = KZ_V_WALK_FRONT[ci][1]; flip = 1; }
-    else if (move && fmode === 2 && ready(KZ_V_WALK_BACK[ci][0])) { im = KZ_V_WALK_BACK[ci][0]; anKey = KZ_V_WALK_BACK[ci][1]; flip = 1; }
-    else if (move && ready(KZ_V_WALK_SIDE[ci][0])) { im = KZ_V_WALK_SIDE[ci][0]; anKey = KZ_V_WALK_SIDE[ci][1]; flip = f; }
-    else if (!move && fmode === 1 && standF && ready(standF[0])) { im = standF[0]; anKey = standF[1]; flip = 1; }
-    else if (!move && fmode === 2 && standB && ready(standB[0])) { im = standB[0]; anKey = standB[1]; flip = 1; }
+    const SIDE = kzScoutUnit ? KZ_SCOUT_WALK_SIDE : KZ_V_WALK_SIDE;
+    const FRONT = kzScoutUnit ? KZ_SCOUT_WALK_FRONT : KZ_V_WALK_FRONT;
+    const BACK = kzScoutUnit ? KZ_SCOUT_WALK_BACK : KZ_V_WALK_BACK;
+    if (move && fmode === 1 && ready(FRONT[ci][0])) { im = FRONT[ci][0]; anKey = FRONT[ci][1]; flip = 1; }
+    else if (move && fmode === 2 && ready(BACK[ci][0])) { im = BACK[ci][0]; anKey = BACK[ci][1]; flip = 1; }
+    else if (move && ready(SIDE[ci][0])) { im = SIDE[ci][0]; anKey = SIDE[ci][1]; flip = f; }
     else { im = base!; anKey = kzKey; flip = f; }
   } else if (kzFB) {
     // «на камеру» (fmode=1) / «от камеры» (fmode=2): в движении — кадры шага, иначе статичный перёд/спина
@@ -481,7 +498,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
   // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
-  const mountFB = kzFB || (fbUnit && move && (u.fmode === 1 || u.fmode === 2));
+  const mountFB = kzFB || kzScoutUnit || (fbUnit && move && (u.fmode === 1 || u.fmode === 2));
   // на готовых кадрах работы/рубки/стрельбы/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
   const upright = working || slashing || loosing || aiming || mountFB || isKz || (hasDirWalk && move);
 
