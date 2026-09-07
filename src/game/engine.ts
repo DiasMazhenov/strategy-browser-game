@@ -2709,22 +2709,33 @@ export class Game {
       (dist2(a.x, a.y, cx, cy) < 900 * 900 || dist2(a.x, a.y, pen.x, pen.y) < 900 * 900));
 
     if (phase === 0) {
-      // ── ВЫПАС: стадо идёт по кругу ДУГОЙ (разбросано), скот впереди, пастух гонит сзади ──
+      // ── ВЫПАС: стадо идёт по кругу дугой (разбросано), скот ВПЕРЕДИ ──
       const flockAng = this.time * 0.22;                 // угол головы стада по кругу
-      const dir = 1;                                      // направление обхода
       for (const a of herd) {
         // каждая голова — со своим смещением в дуге и радиусом (не в куче)
         const spread = (((a.id * 37) % 100) / 100 - 0.5) * 1.9;   // −0.95..0.95
-        const rad = 78 + ((a.id * 53) % 78);                      // 78..156
-        const ang = flockAng * dir + spread;
+        const rad = 85 + ((a.id * 53) % 70);                      // 85..155
+        const ang = flockAng + spread;
         a.herdX = cx + Math.cos(ang) * rad;
         a.herdY = cy + Math.sin(ang) * rad;
         a.anim += dt * 8;
       }
-      // пастух ПОЗАДИ стада (по ходу обхода), чуть снаружи дуги — подгоняет
-      const behind = flockAng * dir - 1.35;
-      const sx = cx + Math.cos(behind) * 175, sy = cy + Math.sin(behind) * 175;
-      this.moveToward(u, sx, sy, dt, 24);
+      // пастух ВСЕГДА ПОЗАДИ стада: целимся в тыл фактического центра стада,
+      // чуть снаружи круга. Считаем по реальному положению голов — не обгоняет.
+      let hx = 0, hy = 0;
+      for (const a of herd) { hx += a.x; hy += a.y; }
+      const n = herd.length || 1;
+      const mx = hx / n, my = hy / n;
+      // угол стада на круге и направление его движения (по часовой: касательная)
+      const phi = Math.atan2(my - cy, mx - cx);
+      const mvx = -Math.sin(phi), mvy = Math.cos(phi);          // направление бега стада
+      // радиаль наружу от центра пастбища (чтобы гнать, а не лезть в гущу)
+      const rx = Math.cos(phi), ry = Math.sin(phi);
+      // тыл: против направления движения + чуть наружу
+      const behind = 60, outR = 26;
+      const tx = mx - mvx * behind + rx * outR;
+      const ty = my - mvy * behind + ry * outR;
+      this.moveToward(u, tx, ty, dt, 18);
     } else {
       // ── ЗАГОН: скот бежит к загону, пастух гонит с тыла (остаётся со стороны поля) ──
       let hx = 0, hy = 0, n = 0;
