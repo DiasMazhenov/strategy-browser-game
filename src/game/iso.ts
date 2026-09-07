@@ -164,12 +164,15 @@ function jitter(variant: number): number {
  * Пока AI-текстура не догрузилась — тайл собран из процедурной подложки,
  * после загрузки канвас перестраивается с текстурой (кеш по ключу сбрасывается).
  */
-export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
+// grid=false — тайл без запечённой обводки рёбер (для затемнённых/туманных участков:
+// на ступенях высоты приподнятые рёбра соседних тайлов «разъезжаются», и сетка в тумане
+// не совпадает; там рисуем бесшовную поверхность, рельеф остаётся виден по обрывам).
+export function getHexTile(kind: HexKind, variant: number, grid = true): HTMLCanvasElement {
   const v = variant & 0xffff;
   const url = TEX_URL[kind];
   const im = url ? texImg(url) : null;
   const ready = !!im && im.complete && im.naturalWidth > 0;
-  const key = kind + ':' + (v % 4) + ':' + (ready ? 1 : 0);
+  const key = kind + ':' + (v % 4) + ':' + (ready ? 1 : 0) + ':' + (grid ? 1 : 0);
   const cached = tileCache.get(key);
   if (cached) return cached;
 
@@ -194,7 +197,8 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       const him = im as HTMLImageElement & { _hexHooked?: boolean };
       if (!him._hexHooked) {
         him._hexHooked = true;
-        him.onload = () => { for (const k of [...tileCache.keys()]) if (k.endsWith(':0')) tileCache.delete(k); };
+        // ключ: kind:variant:ready:grid — вытесняем тайлы, собранные БЕЗ текстуры (ready=0)
+        him.onload = () => { for (const k of [...tileCache.keys()]) if (k.split(':')[2] === '0') tileCache.delete(k); };
       }
     }
     // 3) тинт биома поверх текстуры (тёмная трава/лес/камень)
@@ -236,14 +240,17 @@ export function getHexTile(kind: HexKind, variant: number): HTMLCanvasElement {
       g.lineTo(TCX + p1[0], TCY + p1[1]);
       g.stroke();
     };
-    // ЗАДНИЕ рёбра (дальний гребень) — светлый кант (ярче, чтобы земля читалась)
-    ridge(2, 3, 'rgba(255,255,235,0.30)', 1.2);
-    ridge(3, 4, 'rgba(255,255,235,0.30)', 1.2);
-    ridge(4, 5, 'rgba(255,255,235,0.18)', 1);
-    // ПЕРЕДНИЕ рёбра (обрыв к зрителю) — мягкая тень (ОСЛАБЛЕНА, земля стала светлее)
-    ridge(0, 1, 'rgba(30,40,20,0.16)', 1.2);
-    ridge(1, 2, 'rgba(30,40,20,0.16)', 1.2);
-    ridge(5, 0, 'rgba(30,40,20,0.10)', 1);
+    // обводка рёбер-сетки — только для видимых тайлов; в тумане (grid=false) пропускаем
+    if (grid) {
+      // ЗАДНИЕ рёбра (дальний гребень) — светлый кант (ярче, чтобы земля читалась)
+      ridge(2, 3, 'rgba(255,255,235,0.30)', 1.2);
+      ridge(3, 4, 'rgba(255,255,235,0.30)', 1.2);
+      ridge(4, 5, 'rgba(255,255,235,0.18)', 1);
+      // ПЕРЕДНИЕ рёбра (обрыв к зрителю) — мягкая тень (ОСЛАБЛЕНА, земля стала светлее)
+      ridge(0, 1, 'rgba(30,40,20,0.16)', 1.2);
+      ridge(1, 2, 'rgba(30,40,20,0.16)', 1.2);
+      ridge(5, 0, 'rgba(30,40,20,0.10)', 1);
+    }
   });
   return tile;
 }

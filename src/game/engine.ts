@@ -3574,10 +3574,15 @@ export class Game {
             default: cls = 'grass'; kind = hv % 5 === 0 ? 'dgrass' : 'grass';
           }
         }
-        const tile = getHexTile(kind, hv);
+        // сетка гексов рисуется только на ВИДИМЫХ клетках; в затемнённых/туманных —
+        // бесшовный тайл (на ступенях высоты приподнятые рёбра в тумане не совпадают)
+        const fog = this.settings.fogOfWar;
+        const lit = !fog || this.fogAt(wx, wy).vis;
+        const tile = getHexTile(kind, hv, lit);
         const up = upAtQ(q, r);
         ctx.drawImage(tile, hx - TCX, hy - TCY - up);
-        drawCliffsHex(hx, hy, up, cls, q, r);
+        // обрывы высот тоже прячем в неосвещённых областях (их грани несут «сетку» вверх)
+        if (lit) drawCliffsHex(hx, hy, up, cls, q, r);
       }
     }
     // upAt для объектов (деревья/юниты/здания/декор) — высота гекса под мировой точкой
