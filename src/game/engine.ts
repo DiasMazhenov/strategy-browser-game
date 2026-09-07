@@ -2684,11 +2684,11 @@ export class Game {
     }
 
     if (phase === 0) {
-      // ВЫПАС: скачем на пастбище и пасёмся там
-      this.moveTowardPath(u, u.herdX!, u.herdY!, dt, 26);
+      // ВЫПАС: скачем НАПРЯМИК на пастбище (степь открыта) и пасёмся там
+      this.moveToward(u, u.herdX!, u.herdY!, dt, 30);
     } else {
       // ЗАГОН: едем к воротам загона, загоняем скот
-      this.moveTowardPath(u, gateX, gateY, dt, 24);
+      this.moveToward(u, gateX, gateY, dt, 26);
       let inPen = 0;
       for (const a of this.units) {
         if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
@@ -2743,7 +2743,12 @@ export class Game {
     vill.herder = true; vill.penId = pen.id; vill.herdT = 0; vill.herding = [];
     vill.state = 'gather'; vill.wkind = undefined; vill.nodeId = -1; vill.buildId = -1; vill.targetU = -1; vill.targetB = -1;
     vill.speed = 175; // верхом на коне — быстрее обычного рабочего (118)
-    this.floater(pen.x, pen.y - 50, '🐎 Пастух назначен', '#a3e635', 14);
+    // сразу выбираем дальнее пастбище, чтобы пастух немедленно поскакал из базы в поле
+    const ang = (vill.id * 2.399) % (Math.PI * 2);
+    const [px, py] = this.landNear(pen.x + Math.cos(ang) * 340, pen.y + Math.sin(ang) * 340);
+    vill.herdX = px; vill.herdY = py;
+    this.floater(px, py - 40, '🐎 Пастбище', '#a3e635', 13);
+    this.floater(pen.x, pen.y - 50, '🐎 Пастух назначен — скачет на поле', '#a3e635', 14);
     this.sound.ack('villager'); this.pushHud();
   }
 
