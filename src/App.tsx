@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.043';
+export const GAME_VERSION = '1.0.044';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -531,16 +531,51 @@ export default function App() {
         <TechTreeModal hud={hud} onClose={() => setShowTech(false)} onResearch={(id) => gameRef.current?.research(id)} />
       )}
 
-      {/* ===== ПРИВЕТСТВИЕ ПРАВИТЕЛЯ (первый контакт, Civilization-стиль) ===== */}
+      {/* ===== ЭКРАН ПЕРЕГОВОРОВ С ПРАВИТЕЛЕМ (Civilization-стиль) ===== */}
       {hud?.greeting && (
-        <RulerGreeting g={hud.greeting} onChoose={(act) => gameRef.current?.greetingChoice(act)} onClose={() => gameRef.current?.closeGreeting()} />
+        <LeaderAudience
+          name={hud.greeting.name} ruler={hud.greeting.ruler} title={hud.greeting.title}
+          portrait={hud.greeting.portrait} quote={hud.greeting.greet} color="#e0b050" mood={'НОВЫЙ КОНТАКТ'}
+          gold={hud.gold}
+          actions={hud.greeting.choices.map(c => ({ key: c.id, label: c.label, desc: c.desc, gold: c.gold }))}
+          onAction={(act) => gameRef.current?.greetingChoice(act)}
+          onClose={() => gameRef.current?.closeGreeting()}
+        />
+      )}
+      {hud?.audience && (
+        <LeaderAudience
+          name={hud.audience.name} ruler={hud.audience.ruler} title={hud.audience.title}
+          portrait={hud.audience.portrait} color={hud.audience.color} mood={hud.audience.rel.toUpperCase()}
+          atWar={hud.audience.atWar} quote={hud.nations.find(n => n.id === hud.audience!.id)?.greet ?? ''}
+          gold={hud.gold}
+          actions={
+            hud.audience.kind === 'rival'
+              ? (hud.audience.atWar ? [
+                  { key: 'peace', label: '🕊 Предложить мир', desc: '120🪙' },
+                ] : [
+                  { key: 'gift', label: '🎁 Послать дары', desc: '75🪙 · снизить неприязнь', gold: 75 },
+                  { key: 'trade', label: `🐪 Торговый договор`, desc: hud.tradeRoute ? 'действует' : hud.hasMarket ? '60🪙 · нужен Рынок' : 'нужен Рынок', disabled: hud.tradeRoute || !hud.hasMarket },
+                  { key: 'nap', label: '📜 Пакт о ненападении', desc: hud.napT ? `действует ${hud.napT}с` : '120🪙', disabled: hud.napT > 0 },
+                  { key: 'condemn', label: '📢 Осуждение', desc: hud.condemned ? 'сосед осуждён' : 'лишить повода к войне', disabled: hud.condemned },
+                  { key: 'tribute', label: '💰 Потребовать дань', desc: 'нужно превосходство в силе' },
+                  { key: 'war', label: '⚔ Объявить войну', danger: true },
+                ])
+              : (hud.audience.atWar ? [
+                  { key: 'gift', label: '🎁 Задобрить дарами', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}🪙 · прекратить вражду`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
+                ] : [
+                  { key: 'gift', label: '🎁 Подарки и дары', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}🪙 · заключить дружбу`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
+                  { key: 'attack', label: '⚔ Потребовать ухода', desc: 'разозлить народ', danger: true },
+                ])
+          }
+          onAction={(act) => gameRef.current?.dipAction(hud.audience!.id, act)}
+          onClose={() => gameRef.current?.closeAudience()}
+        />
       )}
 
       {/* ===== ПАНЕЛЬ ДИПЛОМАТИИ ===== */}
       {showDip && hud && (
         <DiplomacyModal hud={hud} onClose={() => setShowDip(false)}
-          onAct={(nid, act) => gameRef.current?.dipAction(nid, act)}
-          onGreet={(nid) => gameRef.current?.dipAction(nid, 'greet')} />
+          onAudience={(nid) => gameRef.current?.openAudience(nid)} />
       )}
 
       {/* ===== SETTINGS MODAL (в игре) ===== */}
@@ -1016,51 +1051,95 @@ function HowRow({ n, t }: { n: string; t: string }) {
 }
 
 /* ================= DIPLOMACY (Civilization-style) ================= */
-function RulerGreeting({ g, onChoose, onClose }: {
-  g: NonNullable<HudSnapshot['greeting']>;
-  onChoose: (act: string) => void;
+// ── ЭКРАН ПЕРЕГОВОРОВ С ПРАВИТЕЛЕМ (в духе Civilization) ──
+// Слева — большой портрет правителя в золотой раме, справа — его речь,
+// настроение и список доступных действий. Снизу — попрощаться.
+interface AudienceAction { key: string; label: string; desc?: string; gold?: number; danger?: boolean; disabled?: boolean; }
+function LeaderAudience({ name, ruler, title, portrait, color, mood, atWar, quote, gold, actions, onAction, onClose }: {
+  name: string; ruler: string; title: string; portrait: string; color: string;
+  mood: string; atWar?: boolean; quote: string; gold: number;
+  actions: AudienceAction[];
+  onAction: (act: string) => void;
   onClose: () => void;
 }) {
+  const moodColor = atWar ? '#f87171' : mood === 'ДРУЖБА' ? '#4ade80' : mood === 'ВРАЖДА' || mood === 'ВОЙНА' ? '#f87171' : mood === 'НЕЙТРАЛИТЕТ' ? '#e2e8f0' : '#e0b050';
+  const afford = (a: AudienceAction) => a.gold === undefined || gold >= a.gold;
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="panel-iron anim-banner relative w-full max-w-md overflow-hidden rounded-3xl">
-        {/* портрет правителя во всю шапку */}
-        <div className="relative h-44 w-full">
-          <img src={g.portrait} alt={g.ruler} className="h-full w-full object-cover object-top" draggable={false} />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#141a14] via-[#141a14]/30 to-transparent" />
-          <button onClick={onClose} className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-slate-200 hover:bg-black/70" aria-label="Закрыть"><X className="h-4 w-4" /></button>
-          <div className="absolute bottom-2 left-3">
-            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-300/90">{g.name}</div>
-            <div className="font-display text-xl font-black text-amber-100">{g.title} {g.ruler}</div>
-          </div>
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-[3px] sm:p-6">
+      <div className="anim-banner grid max-h-[92dvh] w-full max-w-3xl grid-cols-1 overflow-hidden rounded-2xl border border-amber-300/40 bg-gradient-to-b from-[#231a12] via-[#17130e] to-[#0e0b08] shadow-[0_0_60px_rgba(0,0,0,0.9)] sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        {/* левая панель: портрет в раме (на мобильных — баннер вверху) */}
+        <div className="relative hidden sm:block">
+          <img src={portrait} alt={ruler} className="absolute inset-0 h-full w-full object-cover object-top" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#17130e]" />
+          <div className="pointer-events-none absolute inset-2 rounded-xl border-2 border-amber-300/30 shadow-[inset_0_0_40px_rgba(0,0,0,0.55)]" />
         </div>
-        <div className="p-4">
-          <div className="rounded-2xl border border-amber-300/20 bg-black/40 p-3 text-[13px] italic leading-relaxed text-slate-200">
-            «{g.greet}»
+        <div className="relative h-32 w-full sm:hidden">
+          <img src={portrait} alt={ruler} className="h-full w-full object-cover object-top" draggable={false} />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0e0b08] via-transparent to-transparent" />
+          <div className="pointer-events-none absolute inset-1.5 rounded-lg border-2 border-amber-300/30" />
+        </div>
+        {/* правая панель: речь и действия */}
+        <div className="relative flex min-h-0 flex-col p-4 sm:p-5">
+          <button onClick={onClose} className="absolute right-3 top-3 z-10 rounded-full bg-black/50 p-1.5 text-slate-300 hover:bg-black/80 hover:text-amber-200" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+
+          {/* шапка: имя и настроение */}
+          <div className="mb-3 pr-8">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-3 w-3 shrink-0 rounded-full ring-2 ring-white/20" style={{ background: color }} />
+              <span className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-300/90">{name}</span>
+            </div>
+            <div className="font-display text-2xl font-black leading-tight text-amber-100">{title} {ruler}</div>
+            <div className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-0.5 text-[10.5px] font-black tracking-wider" style={{ color: moodColor }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: moodColor }} />
+              {mood}
+            </div>
           </div>
-          <div className="mt-3 grid gap-2">
-            {g.choices.map(c => (
-              <button
-                key={c.id}
-                onClick={() => onChoose(c.id)}
-                className="flex items-center justify-between gap-2 rounded-xl border border-amber-300/25 bg-amber-400/10 px-3 py-2.5 text-left text-[13px] font-bold text-amber-50 transition hover:border-amber-300/60 hover:bg-amber-400/20 active:scale-[0.99]"
-              >
-                <span>{c.label}</span>
-                {c.desc && <span className="text-right text-[10px] font-medium text-slate-400">{c.desc}</span>}
-              </button>
-            ))}
+
+          {/* речь правителя */}
+          <div className="mb-3 min-h-0 overflow-y-auto scroll-thin rounded-xl border border-amber-300/15 bg-black/45 p-3">
+            <p className="font-serif text-[14px] italic leading-relaxed text-slate-100">«{quote}»</p>
           </div>
+
+          {/* действия */}
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pr-0.5">
+            <div className="grid gap-1.5">
+              {actions.map(a => (
+                <button
+                  key={a.key}
+                  disabled={a.disabled || !afford(a)}
+                  onClick={() => onAction(a.key)}
+                  className={`group flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 ${
+                    a.danger
+                      ? 'border-red-500/30 bg-red-900/25 hover:border-red-400/70 hover:bg-red-800/40'
+                      : 'border-amber-300/20 bg-amber-400/5 hover:border-amber-300/60 hover:bg-amber-400/15'
+                  }`}
+                >
+                  <span className={`text-[13px] font-black ${a.danger ? 'text-red-100' : 'text-amber-50'}`}>{a.label}</span>
+                  <span className="shrink-0 text-right text-[10px] font-semibold text-slate-400 group-hover:text-slate-300">
+                    {a.gold !== undefined && !afford(a) ? <span className="text-red-400">нужно {a.gold}🪙</span> : (a.desc ?? '')}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* попрощаться */}
+          <button
+            onClick={onClose}
+            className="mt-3 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[12px] font-black uppercase tracking-[0.15em] text-slate-300 transition hover:border-amber-300/50 hover:bg-amber-400/10 hover:text-amber-100 active:scale-[0.99]"
+          >
+            🤝 Попрощаться
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function DiplomacyModal({ hud, onClose, onAct, onGreet }: {
+function DiplomacyModal({ hud, onClose, onAudience }: {
   hud: HudSnapshot;
   onClose: () => void;
-  onAct: (nid: string, act: string) => void;
-  onGreet: (nid: string) => void;
+  onAudience: (nid: string) => void;
 }) {
   const relColor = (n: HudSnapshot['nations'][number]) =>
     n.atWar ? 'text-red-400' : n.rel === 'Дружба' ? 'text-emerald-300' : n.rel === 'Нейтралитет' ? 'text-slate-200' : 'text-slate-400';
@@ -1111,22 +1190,7 @@ function DiplomacyModal({ hud, onClose, onAct, onGreet }: {
               </div>
               {n.met && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  <DiplBtn onClick={() => onGreet(n.id)} title="Переговорить с правителем">💬 Переговоры</DiplBtn>
-                  {n.kind === 'rival' ? (<>
-                    {n.atWar
-                      ? <DiplBtn onClick={() => onAct(n.id, 'peace')} title="Предложить мир (120🪙)">🕊️ Мир (120🪙)</DiplBtn>
-                      : <>
-                        <DiplBtn onClick={() => onAct(n.id, 'gift')} title="Дары (75🪙) — снизить неприязнь">🤝 Дары</DiplBtn>
-                        <DiplBtn onClick={() => onAct(n.id, 'trade')} disabled={hud.tradeRoute || !hud.hasMarket} title="Торговый договор (нужен Рынок, 60🪙)">🐪 Торговля{hud.tradeRoute ? ' ✓' : ''}</DiplBtn>
-                        <DiplBtn onClick={() => onAct(n.id, 'nap')} disabled={(hud.napT ?? 0) > 0} title="Пакт о ненападении (120🪙)">📜 Пакт{hud.napT ? ` ${hud.napT}с` : ''}</DiplBtn>
-                        <DiplBtn onClick={() => onAct(n.id, 'condemn')} disabled={hud.condemned} title="Осуждение — лишить соседа чистого повода">📢 {hud.condemned ? 'Осуждён ✓' : 'Осуждать'}</DiplBtn>
-                        <DiplBtn onClick={() => onAct(n.id, 'tribute')} title="Потребовать дань (нужно превосходство)">💰 Дань</DiplBtn>
-                        <DiplBtn danger onClick={() => onAct(n.id, 'war')} title="Начать войну">⚔️ Война</DiplBtn>
-                      </>}
-                  </>) : (<>
-                    <DiplBtn onClick={() => onAct(n.id, 'gift')} title={`Дары (${n.gift}🪙) — народ станет дружественным`}>🎁 Дружба ({n.gift}🪙)</DiplBtn>
-                    <DiplBtn danger onClick={() => onAct(n.id, 'attack')} title="Развязать войну с народом">⚔️ Воевать</DiplBtn>
-                  </>)}
+                  <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем">💬 Переговоры с правителем</DiplBtn>
                 </div>
               )}
             </div>

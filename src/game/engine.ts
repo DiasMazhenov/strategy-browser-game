@@ -249,14 +249,20 @@ export interface HudSnapshot {
   techTree: TechTreeRow[];
   // ── дипломатия народов (Civilization-стиль) ──
   nations: NationHud[];
+  audience: AudienceHud | null; // открытый экран переговоров с правителем
   greeting: { id: string; name: string; ruler: string; title: string; portrait: string; greet: string; choices: { id: string; label: string; desc?: string; gold?: number }[] } | null;
   scouts: number; // число разведчиков игрока
 }
 export interface NationHud {
-  id: string; name: string; ruler: string; title: string; portrait: string; color: string;
+  id: string; name: string; ruler: string; title: string; portrait: string; color: string; greet: string;
   kind: 'rival' | 'tribe';
   met: boolean; rel: string; atWar: boolean; power: number; camps: number; gift: number;
   canGreet: boolean; // можно ли открыть приветствие/переговоры (встречен)
+}
+// экран переговоров с правителем (Civ-стиль): открыт из модалки дипломатии
+export interface AudienceHud {
+  id: string; name: string; ruler: string; title: string; portrait: string; color: string;
+  kind: 'rival' | 'tribe'; rel: string; atWar: boolean; gold: number;
 }
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -327,6 +333,7 @@ export class Game {
   tribeMet: Record<string, boolean> = {};   // встреченные племена (nationId → true)
   tribeRel: Record<string, FacRel> = {};    // отношение племени: neutral/friend/hostile
   greeting: { nationId: string } | null = null; // всплывшее приветствие правителя (для UI)
+  audienceId: string | null = null;             // id народа на экране переговоров (открыт из модалки)
   greetQueue: string[] = [];     // очередь народов на приветствие
   greetShown = new Set<string>();// народы, приветствие которых уже показано
   contactT = 0;                  // накопитель сканирования контактов
@@ -757,6 +764,15 @@ export class Game {
     if (!this.greetShown.has(nid) && !this.greetQueue.includes(nid)) this.greetQueue.push(nid);
   }
   closeGreeting() { this.greeting = null; this.pushHud(); }
+  // ── экран переговоров с правителем (открыт из списка дипломатии) ──
+  openAudience(nid: string) {
+    const def = NATION_BY_ID[nid];
+    if (!def || !this.metNation(nid)) return;
+    this.audienceId = nid;
+    this.sound.quest();
+    this.pushHud();
+  }
+  closeAudience() { this.audienceId = null; this.pushHud(); }
   // ответ игрока на приветствие правителя
   greetingChoice(act: string) {
     const g = this.greeting; if (!g) return;
@@ -4012,6 +4028,7 @@ export class Game {
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
       techTree: this.techTreeData(),
       nations: this.nationsHud(),
+      audience: this.audienceId ? this.audienceHud(this.audienceId) : null,
       greeting: this.greeting ? (() => {
         const d = NATION_BY_ID[this.greeting!.nationId];
         return d ? { id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, greet: d.greet,
@@ -4025,7 +4042,7 @@ export class Game {
     return NATIONS.map(d => {
       const met = this.metNation(d.id);
       return {
-        id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, color: d.color,
+        id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, color: d.color, greet: d.greet,
         kind: d.kind, met,
         rel: met ? this.relLabel(d.id) : 'Неизвестно',
         atWar: d.id === 'rival' ? this.atWar : this.tribeRel[d.id] === 'hostile',
@@ -4035,6 +4052,16 @@ export class Game {
         canGreet: met,
       };
     });
+  }
+
+  audienceHud(nid: string): AudienceHud | null {
+    const d = NATION_BY_ID[nid];
+    if (!d) return null;
+    return {
+      id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, color: d.color,
+      kind: d.kind, rel: this.relLabel(nid), atWar: nid === 'rival' ? this.atWar : this.tribeRel[nid] === 'hostile',
+      gold: Math.floor(this.res.gold),
+    };
   }
 
   selSnapshot(): SelSnapshot {
