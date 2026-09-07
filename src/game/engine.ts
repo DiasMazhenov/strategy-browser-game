@@ -4095,6 +4095,43 @@ export class Game {
 
   // ── детальный спрайт стены/ворот: диагональный сегмент, центр базовой
   //    линии кладётся в центр ромба клетки; соседние сегменты сходятся внахлёст ──
+
+  // Клип, обрезающий края сегмента СТЕНЫ, примыкающие к воротам: длинный спрайт стены
+  // перехлёстывает соседние клетки и мог бы закрыть проём ворот. Обрезаем стену по
+  // границе клетки с воротами (у спрайта ворот есть свои обрубки-крылья, стык слитный).
+  // Возвращает true, если клип включён (нужно вызвать ctx.restore() после отрисовки).
+  private beginWallGateClip(b: Bld, ix: number, iy: number): boolean {
+    if (b.key !== 'wall') return false;
+    const ctx = this.ctx;
+    const gates: { gx: number; gy: number }[] = [];
+    for (const o of this.blds) {
+      if (o.key !== 'gate' || o.owner !== b.owner) continue;
+      const [gx, gy] = toIso(o.x, o.y);
+      const dd = Math.hypot(gx - ix, gy - iy);
+      if (dd < 60 && dd > 1) gates.push({ gx, gy }); // сосед по линии стены
+    }
+    if (!gates.length) return false;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(-1e7, -1e7, 2e7, 2e7); ctx.clip();
+    const H = 4000;
+    for (const g of gates) {
+      const dx = g.gx - ix, dy = g.gy - iy;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;   // единичное направление к воротам
+      const px = -uy, py = ux;              // перпендикуляр вдоль границы клетки
+      const mx = ix + dx / 2, my = iy + dy / 2; // середина между центрами (граница)
+      // полуплоскость на стороне СТЕНЫ (от ворот): точка p, где dot(p-mid, u) <= 0
+      ctx.beginPath();
+      ctx.moveTo(mx + px * H, my + py * H);
+      ctx.lineTo(mx - ux * H + px * H, my - uy * H + py * H);
+      ctx.lineTo(mx - ux * H - px * H, my - uy * H - py * H);
+      ctx.lineTo(mx - px * H, my - py * H);
+      ctx.closePath();
+      ctx.clip();
+    }
+    return true;
+  }
+
   drawWallSprite(b: Bld, sp: BldSprite, scale: number, ix: number, iy: number, S: number, img: HTMLImageElement | HTMLCanvasElement, alpha: number) {
     const ctx = this.ctx;
     const w = sp.img.naturalWidth * scale, h = sp.img.naturalHeight * scale;
@@ -4142,13 +4179,15 @@ export class Game {
         if (isCorner) { ctx.save(); ctx.globalAlpha = 0.35 + b.done * 0.65; ctx.imageSmoothingEnabled = false;
           const pw = wspr.img.naturalWidth * scale;
           ctx.drawImage(img, ix - pw / 2, iy + S / 2 - h, pw, h); ctx.restore(); }
-        else this.drawWallSprite(b, wspr, scale, ix, iy, S, img, 0.35 + b.done * 0.65);
+        else { const cl = this.beginWallGateClip(b, ix, iy); this.drawWallSprite(b, wspr, scale, ix, iy, S, img, 0.35 + b.done * 0.65); if (cl) ctx.restore(); }
       } else if (isCorner) {
         ctx.save(); ctx.globalAlpha = 1; ctx.imageSmoothingEnabled = false;
         const pw = wspr.img.naturalWidth * scale;
         ctx.drawImage(img, ix - pw / 2, iy + S / 2 - h, pw, h); ctx.restore();
       } else {
+        const cl = this.beginWallGateClip(b, ix, iy);
         this.drawWallSprite(b, wspr, scale, ix, iy, S, img, 1);
+        if (cl) ctx.restore();
       }
       if (selected) diamondRingHalf(ctx, ix, iy, S * 1.05, S * 1.05 / 2, '#f6d47c', false);
       // HP/стройка (над верхом центрированного сегмента)
