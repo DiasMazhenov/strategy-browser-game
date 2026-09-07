@@ -2699,33 +2699,48 @@ export class Game {
     if (!pen.pastureStocked && phase === 0) { this.stockPasture(pen.pastureX!, pen.pastureY!); pen.pastureStocked = true; }
     u.herdX = pen.pastureX; u.herdY = pen.pastureY;
     const gateX = pen.x + 70, gateY = pen.y + 50;
+    const cx = pen.pastureX!, cy = pen.pastureY!;
 
-    // цель притяжения скота: фаза выпаса → пастбище, фаза загона → центр загона
-    const lureX = phase === 0 ? u.herdX! : pen.x;
-    const lureY = phase === 0 ? u.herdY! : pen.y;
-    // радиус притяжения: на пастбище собираем скот вокруг точки, в загон — гоним всех рядом с загоном
-    const lureR = phase === 0 ? 600 : 2600;
-
-    // скот в радиусе метим точкой притяжения (своя логика updateAnimal ведёт его к ней)
-    for (const a of this.units) {
-      if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
-      if (phase === 0 && dist2(a.x, a.y, pen.x, pen.y) < 120 * 120) continue; // уже в загоне — не трогаем
-      // на выпасе подтягиваем скот рядом с пастбищем; в фазе загона — скот рядом с загоном/пастухом
-      const near = phase === 0 ? dist2(a.x, a.y, lureX, lureY) : Math.min(dist2(a.x, a.y, pen.x, pen.y), dist2(a.x, a.y, u.x, u.y));
-      if (near < lureR * lureR) {
-        a.herdX = lureX + rand(-24, 24); a.herdY = lureY + rand(-24, 24);
-        a.anim += dt * 8;
-      } else if (phase === 0 && a.herdX != null && dist2(a.herdX, a.herdY!, lureX, lureY) > 460 * 460) {
-        a.herdX = undefined; a.herdY = undefined; // ушёл от этого пастбища — отпускаем
-      }
-    }
+    // сбор скота, относящегося к этому пастбищу/загону (овцы/коровы неподалёку)
+    const herd = this.units.filter(a =>
+      a.hp > 0 && (a.key === 'sheep' || a.key === 'cow') &&
+      (dist2(a.x, a.y, cx, cy) < 900 * 900 || dist2(a.x, a.y, pen.x, pen.y) < 900 * 900));
 
     if (phase === 0) {
-      // ВЫПАС: скачем НАПРЯМИК на пастбище (степь открыта) и пасёмся там
-      this.moveToward(u, u.herdX!, u.herdY!, dt, 30);
+      // ── ВЫПАС: стадо идёт по кругу ДУГОЙ (разбросано), скот впереди, пастух гонит сзади ──
+      const flockAng = this.time * 0.22;                 // угол головы стада по кругу
+      const dir = 1;                                      // направление обхода
+      for (const a of herd) {
+        // каждая голова — со своим смещением в дуге и радиусом (не в куче)
+        const spread = (((a.id * 37) % 100) / 100 - 0.5) * 1.9;   // −0.95..0.95
+        const rad = 78 + ((a.id * 53) % 78);                      // 78..156
+        const ang = flockAng * dir + spread;
+        a.herdX = cx + Math.cos(ang) * rad;
+        a.herdY = cy + Math.sin(ang) * rad;
+        a.anim += dt * 8;
+      }
+      // пастух ПОЗАДИ стада (по ходу обхода), чуть снаружи дуги — подгоняет
+      const behind = flockAng * dir - 1.35;
+      const sx = cx + Math.cos(behind) * 175, sy = cy + Math.sin(behind) * 175;
+      this.moveToward(u, sx, sy, dt, 24);
     } else {
-      // ЗАГОН: едем к воротам загона, загоняем скот
-      this.moveToward(u, gateX, gateY, dt, 26);
+      // ── ЗАГОН: скот бежит к загону, пастух гонит с тыла (остаётся со стороны поля) ──
+      let hx = 0, hy = 0, n = 0;
+      for (const a of herd) {
+        if (dist2(a.x, a.y, pen.x, pen.y) < 110 * 110) continue; // в загоне
+        a.herdX = pen.x + rand(-26, 26); a.herdY = pen.y + rand(-26, 26); // вперёд, к загону
+        a.anim += dt * 9;
+        hx += a.x; hy += a.y; n++;
+      }
+      if (n > 0) {
+        // центр стада; пастух заходит со стороны, ПРОТИВОПОЛОЖНОЙ загону, и толкает к нему
+        const mx = hx / n, my = hy / n;
+        const ddx = pen.x - mx, ddy = pen.y - my, dd = Math.max(1, Math.hypot(ddx, ddy));
+        const tx = mx - (ddx / dd) * 80, ty = my - (ddy / dd) * 80;
+        this.moveToward(u, tx, ty, dt, 24);
+      } else {
+        this.moveToward(u, gateX, gateY, dt, 26);
+      }
       let inPen = 0;
       for (const a of this.units) {
         if (a.hp <= 0 || (a.key !== 'sheep' && a.key !== 'cow')) continue;
