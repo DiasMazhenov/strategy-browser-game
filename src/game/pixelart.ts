@@ -369,6 +369,9 @@ const WF_WALK_BACK: [HTMLImageElement, string][] = [
 ];
 
 function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean): boolean {
+  // скот (овцы/коровы/олени) рисуем процедурным пиксель-артом: плотные непрозрачные
+  // кадры со всех сторон (бок/перёд/спина) и анимацией шага — AI-спрайт коровы был полупрозрачным
+  if (u.key === 'sheep' || u.key === 'cow' || u.key === 'deer') return false;
   // казахская раса (игрок) рисуется отдельным набором спрайтов; враги/нейтралы — штатными
   const isKz = u.owner === 'player' && !!KZ_BASE[u.key];
   const kzKey = 'kz_' + u.key;
@@ -1288,39 +1291,118 @@ function drawRider(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _s
   px(ctx, rx - f * 10, ry - 6, 5, 9, t.tunicD);
 }
 
-// ── скот: овца / корова / олень ──
+// ── скот: овца / корова / олень. Плотный непрозрачный пиксель-арт, три вида (бок/перёд/спина) + шаг ──
 function drawLivestock(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw: number, bob: number) {
   const f = u.face;
-  const lp = sw * 4;
-  const deer = u.key === 'deer', cow = u.key === 'cow';
+  const fmode = u.fmode ?? 0;
+  const deer = u.key === 'deer', cow = u.key === 'cow', sheep = u.key === 'sheep';
   y += bob * 0.5; // лёгкое покачивание при ходьбе/дыхании
-  const bodyCol = deer ? '#b07d4f' : cow ? '#e8e2d5' : '#f4f1e8';
-  const darkCol = deer ? '#8a5a34' : cow ? '#6b4a36' : '#d8d2c6';
-  const legCol = deer ? '#8a5a34' : cow ? '#5b3d2c' : '#3f3a36';
-  // ноги
-  px(ctx, x - 9, y - 6, 3, 8 + lp, legCol);
-  px(ctx, x - 2, y - 6, 3, 8 - lp, legCol);
-  px(ctx, x + 4, y - 6, 3, 8 + lp, legCol);
-  px(ctx, x + 9, y - 6, 3, 8 - lp, legCol);
-  // корпус
-  cx(ctx, x, y - 11, deer ? 8 : cow ? 11 : 9, bodyCol);
-  // пятна у коровы
-  if (cow) { px(ctx, x - 4, y - 13, 4, 4, darkCol); px(ctx, x + 3, y - 10, 4, 4, darkCol); px(ctx, x - 1, y - 15, 3, 3, darkCol); }
-  // шерсть-комочки у овцы
-  if (!deer && !cow) { cx(ctx, x - 5, y - 13, 4, '#fbf9f4'); cx(ctx, x + 5, y - 13, 4, '#fbf9f4'); }
-  // голова
-  cx(ctx, x + f * 14, y - (deer ? 14 : 12), deer ? 5 : 6, bodyCol);
-  px(ctx, x + f * 19, y - (deer ? 12 : 10), 2, 2, '#2a2a2a');
-  // уши
-  px(ctx, x + f * 12, y - (deer ? 19 : 17), 3, 4, darkCol);
-  px(ctx, x + f * 17, y - (deer ? 19 : 17), 3, 4, darkCol);
-  // рога у оленя
-  if (deer) {
-    ln(ctx, x + f * 13, y - 18, x + f * 10, y - 26, 3, '#7a5230');
-    ln(ctx, x + f * 17, y - 18, x + f * 20, y - 26, 3, '#7a5230');
+
+  // палитра
+  const bodyCol = deer ? '#b07d4f' : cow ? '#e7dcc3' : '#efeadd';   // корпус
+  const bodyHi  = deer ? '#c99863' : cow ? '#f7efdd' : '#faf8f2';   // свет
+  const darkCol = deer ? '#8a5a34' : cow ? '#6b4a36' : '#cfc7b8';   // тень/пятна/уши
+  const legCol  = deer ? '#8a5a34' : cow ? '#6b4a36' : '#3f3a36';
+  const spot    = cow ? '#5b3d2b' : darkCol;
+
+  // фазы ног: lp — амплитуда шага (вбок), передние/задние в противофазе
+  const lp = sw;
+  const stepUp = Math.max(0, lp), stepDn = Math.max(0, -lp);
+
+  if (fmode === 0) {
+    // ── БОКОВОЙ ВИД (морда в сторону face) ──
+    const F = f;
+    // ноги (4): задние и передние, диагональные пары в противофазе
+    px(ctx, x - 9, y - 6, 3, 8 + lp * 4, legCol);
+    px(ctx, x - 2, y - 6, 3, 8 - lp * 4, legCol);
+    px(ctx, x + 4, y - 6, 3, 8 + lp * 4, legCol);
+    px(ctx, x + 9, y - 6, 3, 8 - lp * 4, legCol);
+    // копытца
+    px(ctx, x - 9, y + 1 + lp * 4, 3, 2, '#241c17');
+    px(ctx, x + 9, y + 1 - lp * 4, 3, 2, '#241c17');
+    // корпус + брюхо-тень
+    cx(ctx, x, y - 11, deer ? 8 : cow ? 11 : 9, bodyCol);
+    px(ctx, x - 6, y - 7, 14, 4, darkCol);
+    if (cow) {
+      // пятна коровы
+      px(ctx, x - 6, y - 14, 5, 5, spot);
+      px(ctx, x + 2, y - 11, 5, 5, spot);
+      px(ctx, x - 1, y - 17, 3, 3, spot);
+      // вымя
+      px(ctx, x - 4, y - 6, 5, 4, '#e89aa6');
+    }
+    if (sheep) { cx(ctx, x - 5, y - 15, 4, bodyHi); cx(ctx, x + 5, y - 15, 4, bodyHi); cx(ctx, x, y - 18, 4, bodyHi); }
+    // голова
+    const hy = y - (deer ? 14 : 12);
+    cx(ctx, x + F * 14, hy, deer ? 5 : 6, bodyCol);
+    px(ctx, x + F * 19, hy + 2, 2, 2, '#2a2a2a');   // нос/глаз
+    if (cow) px(ctx, x + F * 19, hy + 3, 3, 2, '#e89aa6'); // розовый нос
+    // уши
+    px(ctx, x + F * 11, hy - 5, 3, 4, darkCol);
+    px(ctx, x + F * 16, hy - 5, 3, 4, darkCol);
+    if (cow) { // рожки
+      px(ctx, x + F * 12, hy - 8, 2, 3, '#d8cfae');
+      px(ctx, x + F * 16, hy - 8, 2, 3, '#d8cfae');
+    }
+    // рога оленя
+    if (deer) {
+      ln(ctx, x + F * 13, hy - 4, x + F * 10, hy - 13, 3, '#7a5230');
+      ln(ctx, x + F * 17, hy - 4, x + F * 20, hy - 13, 3, '#7a5230');
+    }
+    // хвост
+    cx(ctx, x - F * 12, y - 13, 2.5, darkCol);
+    if (cow) cx(ctx, x - F * 13, y - 10, 2, spot);
+    void stepUp; void stepDn;
+  } else {
+    // ── ВИД СПЕРЕДИ (fmode 1, морда к камере) / СЗАДИ (fmode 2, круп к камере) ──
+    const front = fmode === 1;
+    // ноги: две ближние (левая/правая), шагают в противофазе по вертикали
+    const legA = 5 + lp * 3, legB = 5 - lp * 3;
+    px(ctx, x - 7, y - 4 - Math.max(0, legA - 5), 4, Math.max(4, legA + 3), legCol);
+    px(ctx, x + 3, y - 4 - Math.max(0, legB - 5), 4, Math.max(4, legB + 3), legCol);
+    // копытца
+    px(ctx, x - 7, y + 2 - Math.max(0, legA - 5), 4, 2, '#241c17');
+    px(ctx, x + 3, y + 2 - Math.max(0, legB - 5), 4, 2, '#241c17');
+    // тело (широкий овал)
+    cx(ctx, x, y - 11, deer ? 8 : cow ? 11 : 9, bodyCol);
+    px(ctx, x - 8, y - 8, 16, 4, darkCol); // нижняя тень
+    if (sheep) { // комки шерсти по силуэту
+      cx(ctx, x - 7, y - 12, 5, bodyHi); cx(ctx, x + 7, y - 12, 5, bodyHi);
+      cx(ctx, x - 4, y - 18, 5, bodyHi); cx(ctx, x + 4, y - 18, 5, bodyHi);
+      cx(ctx, x, y - 20, 5, bodyHi);
+    }
+    if (cow && !front) {
+      // вид сзади: пятно на крупе + хвост
+      px(ctx, x - 3, y - 13, 6, 6, spot);
+      ln(ctx, x, y - 16, x, y - 5, 2, darkCol);
+      cx(ctx, x, y - 4, 2.5, spot);
+      // вымя сзади
+      px(ctx, x - 3, y - 6, 6, 4, '#e89aa6');
+    }
+    // голова/круп сверху
+    const hw = deer ? 5 : 6;
+    cx(ctx, x, y - (deer ? 20 : 18), hw, front ? bodyCol : bodyCol);
+    if (front) {
+      // морда к камере: глаза, нос
+      px(ctx, x - 4, y - (deer ? 21 : 19), 2, 2, '#241c17');
+      px(ctx, x + 2, y - (deer ? 21 : 19), 2, 2, '#241c17');
+      px(ctx, x - 1, y - (deer ? 17 : 15), 3, cow ? 3 : 2, cow ? '#e89aa6' : darkCol);
+      // уши по бокам
+      px(ctx, x - 8, y - (deer ? 24 : 22), 3, 4, darkCol);
+      px(ctx, x + 5, y - (deer ? 24 : 22), 3, 4, darkCol);
+      if (cow) { px(ctx, x - 5, y - 26, 2, 3, '#d8cfae'); px(ctx, x + 3, y - 26, 2, 3, '#d8cfae'); }
+      if (deer) { // рога вверх
+        ln(ctx, x - 3, y - 24, x - 5, y - 32, 3, '#7a5230');
+        ln(ctx, x + 3, y - 24, x + 5, y - 32, 3, '#7a5230');
+      }
+    } else {
+      // вид сзади: уши/рога чуть торчат, морды не видно
+      px(ctx, x - 6, y - (deer ? 24 : 21), 3, 3, darkCol);
+      px(ctx, x + 3, y - (deer ? 24 : 21), 3, 3, darkCol);
+      if (deer) { ln(ctx, x - 2, y - 24, x - 4, y - 31, 3, '#7a5230'); ln(ctx, x + 2, y - 24, x + 4, y - 31, 3, '#7a5230'); }
+      if (cow) { px(ctx, x - 4, y - 24, 2, 3, '#d8cfae'); px(ctx, x + 2, y - 24, 2, 3, '#d8cfae'); }
+    }
   }
-  // хвостик
-  cx(ctx, x - f * 12, y - 13, 2.5, darkCol);
 }
 
 // ── волк ──
