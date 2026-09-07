@@ -1342,11 +1342,19 @@ export class Game {
       this.sound.move(); this.spawnRing(x, y, '#a3e635'); return;
     }
     // own pen → назначить пастуха (рабочий верхом пасёт скот и загоняет в загон)
-    if (tb && tb.owner === 'player' && tb.key === 'pen' && tb.done >= 1 && hasVill) {
-      const vills = us.filter(u => u.key === 'villager');
-      // один пастух на загон: берём первого рабочего
-      this.assignShepherd(vills[0], tb);
-      this.spawnRing(tb.x, tb.y, '#a3e635');
+    if (tb && tb.owner === 'player' && tb.key === 'pen' && hasVill) {
+      // если загон ещё строится — сначала отправляем достраивать, и назначение пастуха
+      // произойдёт после завершения; если готов — назначаем сразу
+      if (tb.done < 1) {
+        for (const v of us.filter(u => u.key === 'villager')) { v.state = 'build'; v.buildId = tb.id; v.herder = false; v.penId = undefined; v.tx = tb.x + rand(-60, 60); v.ty = tb.y + rand(-50, 50); }
+        this.sound.move(); this.sound.playPhrase('за работу'); this.spawnRing(x, y, '#f6d47c');
+      } else {
+        const vills = us.filter(u => u.key === 'villager');
+        // один пастух на загон: первый свободный рабочий становится пастухом
+        const free = vills.find(v => !v.herder) ?? vills[0];
+        this.assignShepherd(free, tb);
+        this.spawnRing(tb.x, tb.y, '#a3e635');
+      }
       if (hasMil) this.orderAttackMove(us.filter(u => u.key !== 'villager'), x, y);
       return;
     }
@@ -2695,8 +2703,11 @@ export class Game {
   }
 
   updateVillager(u: Unit, dt: number) {
-    // пастух: цикл выпаса — выходит на поле, собирает скот, загоняет в загон
-    if (u.herder && u.penId != null && u.state !== 'move' && u.state !== 'attackmove') { this.updateShepherd(u, dt); return; }
+    // пастух: цикл выпаса. В ручном перемещении (move/attackmove/build) слушается приказа,
+    // а по прибытии (idle) и в фазе gather — пасёт скот и НЕ уходит на авто-добычу.
+    if (u.herder && u.penId != null && (u.state === 'gather' || u.state === 'idle' || u.state === 'return')) {
+      u.state = 'gather'; this.updateShepherd(u, dt); return;
+    }
     // боевой приоритет: есть боевая цель/приказ — самооборона от нападающих/волков или охота
     const wantFight = u.state === 'attackmove' || u.targetU >= 0 || u.hunt;
     if (wantFight) {
