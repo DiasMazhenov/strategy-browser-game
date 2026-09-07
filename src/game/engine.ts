@@ -722,7 +722,6 @@ export class Game {
     this.contactT = 0.8;
     if (!this.settings.fogOfWar) { this.rivalMet = true; for (const n of NATIONS) if (n.kind === 'tribe') this.tribeMet[n.id] = true; }
     else {
-      for (const u of this.units) if (u.owner !== 'player' || u.hidden) continue;
       // встреча со славянским княжеством
       if (!this.rivalMet) {
         for (const b of this.blds) {
@@ -3019,12 +3018,13 @@ export class Game {
     this.sound.ack('soldier');
     this.pushHud();
   }
-  // ближайшая база соперника/племени (для шпионажа)
+  // ближайшая база соперника/враждебного племени (для шпионажа); друзей не выслеживаем
   nearestEnemyBase(x: number, y: number): Bld | null {
     let best: Bld | null = null; let bd = Infinity;
     for (const b of this.blds) {
       if (b.owner === 'player') continue;
       if (!(b.owner === 'enemy' && b.key === 'towncenter') && !b.tribe) continue;
+      if (b.tribe) { const nid = this.tribeNationOf(b); if (nid && this.tribeRel[nid] === 'friend') continue; }
       const d = dist2(x, y, b.x, b.y);
       if (d < bd) { bd = d; best = b; }
     }
