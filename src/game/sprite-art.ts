@@ -377,7 +377,27 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_villager_fwa": { "ax": 39.8, "ay": 149, "baseW": 74, "w": 74, "h": 150 },
   "kz_villager_fwb": { "ax": 39.9, "ay": 149, "baseW": 74, "w": 74, "h": 150 },
   "kz_villager_wba": { "ax": 41.7, "ay": 149, "baseW": 91, "w": 91, "h": 150 },
-  "kz_villager_wbb": { "ax": 44.1, "ay": 149, "baseW": 91, "w": 91, "h": 150 }
+  "kz_villager_wbb": { "ax": 44.1, "ay": 149, "baseW": 91, "w": 91, "h": 150 },
+  // ── казахский крестьянин: 4-кадровая ходьба по изо-направлениям (бок/анфас/тыл) ──
+  "kz_villager_sw1": { "ax": 31,   "ay": 150, "baseW": 62, "w": 62, "h": 150 },
+  "kz_villager_sw2": { "ax": 32.5, "ay": 150, "baseW": 65, "w": 65, "h": 150 },
+  "kz_villager_sw3": { "ax": 30,   "ay": 150, "baseW": 60, "w": 60, "h": 150 },
+  "kz_villager_sw4": { "ax": 29,   "ay": 150, "baseW": 58, "w": 58, "h": 150 },
+  "kz_villager_fw1": { "ax": 26.5, "ay": 151, "baseW": 53, "w": 53, "h": 150 },
+  "kz_villager_fw2": { "ax": 26.5, "ay": 151, "baseW": 53, "w": 53, "h": 150 },
+  "kz_villager_fw3": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 },
+  "kz_villager_fw4": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 },
+  "kz_villager_bw1": { "ax": 38.5, "ay": 150, "baseW": 77, "w": 77, "h": 150 },
+  "kz_villager_bw2": { "ax": 33,   "ay": 150, "baseW": 66, "w": 66, "h": 150 },
+  "kz_villager_bw3": { "ax": 38,   "ay": 150, "baseW": 76, "w": 76, "h": 150 },
+  "kz_villager_bw4": { "ax": 32.5, "ay": 150, "baseW": 65, "w": 65, "h": 150 },
+  // ── казахский крестьянин за работой: [замах, удар] — топор / кирка / сбор урожая ──
+  "kz_villager_chop1":   { "ax": 41.5, "ay": 151, "baseW": 83, "w": 83, "h": 150 },
+  "kz_villager_chop2":   { "ax": 44.5, "ay": 150, "baseW": 89, "w": 89, "h": 150 },
+  "kz_villager_mine1":   { "ax": 46,   "ay": 149, "baseW": 92, "w": 92, "h": 150 },
+  "kz_villager_mine2":   { "ax": 48,   "ay": 153, "baseW": 96, "w": 96, "h": 150 },
+  "kz_villager_gather1": { "ax": 31,   "ay": 156, "baseW": 62, "w": 62, "h": 150 },
+  "kz_villager_gather2": { "ax": 26,   "ay": 150, "baseW": 52, "w": 52, "h": 150 }
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {

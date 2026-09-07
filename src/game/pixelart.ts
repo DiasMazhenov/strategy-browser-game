@@ -144,6 +144,26 @@ import kzVillagerFWA from '../assets/sprites/units/kz/kz_villager_fwa.png';
 import kzVillagerFWB from '../assets/sprites/units/kz/kz_villager_fwb.png';
 import kzVillagerWBA from '../assets/sprites/units/kz/kz_villager_wba.png';
 import kzVillagerWBB from '../assets/sprites/units/kz/kz_villager_wbb.png';
+// казахский крестьянин: 4-кадровая ходьба по направлениям (sw бок / fw анфас / bw тыл)
+import kzVsw1 from '../assets/sprites/units/kz/kz_villager_sw1.png';
+import kzVsw2 from '../assets/sprites/units/kz/kz_villager_sw2.png';
+import kzVsw3 from '../assets/sprites/units/kz/kz_villager_sw3.png';
+import kzVsw4 from '../assets/sprites/units/kz/kz_villager_sw4.png';
+import kzVfw1 from '../assets/sprites/units/kz/kz_villager_fw1.png';
+import kzVfw2 from '../assets/sprites/units/kz/kz_villager_fw2.png';
+import kzVfw3 from '../assets/sprites/units/kz/kz_villager_fw3.png';
+import kzVfw4 from '../assets/sprites/units/kz/kz_villager_fw4.png';
+import kzVbw1 from '../assets/sprites/units/kz/kz_villager_bw1.png';
+import kzVbw2 from '../assets/sprites/units/kz/kz_villager_bw2.png';
+import kzVbw3 from '../assets/sprites/units/kz/kz_villager_bw3.png';
+import kzVbw4 from '../assets/sprites/units/kz/kz_villager_bw4.png';
+// казахский крестьянин: работа [замах, удар]
+import kzVchop1 from '../assets/sprites/units/kz/kz_villager_chop1.png';
+import kzVchop2 from '../assets/sprites/units/kz/kz_villager_chop2.png';
+import kzVmine1 from '../assets/sprites/units/kz/kz_villager_mine1.png';
+import kzVmine2 from '../assets/sprites/units/kz/kz_villager_mine2.png';
+import kzVgather1 from '../assets/sprites/units/kz/kz_villager_gather1.png';
+import kzVgather2 from '../assets/sprites/units/kz/kz_villager_gather2.png';
 
 const mk = (src: string): HTMLImageElement => { const im = new Image(); im.src = src; return im; };
 // кадр покоя/атаки
@@ -207,6 +227,19 @@ const KZ_WALK_FRONT: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
 };
 const KZ_WALK_BACK: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   villager: W2(kzVillagerWBA, 'kz_villager_wba', kzVillagerWBB, 'kz_villager_wbb'),
+};
+// казахский крестьянин: полный 4-кадровый цикл ходьбы по изо-направлениям
+// sw — сбоку (отражается по face), fw — анфас (к камере, идёт вниз), bw — тыл (от камеры, идёт вверх)
+const W4 = (a: string, ka: string, b: string, kb: string, c: string, kc: string, d: string, kd: string): [HTMLImageElement, string][] =>
+  [[mk(a), ka], [mk(b), kb], [mk(c), kc], [mk(d), kd]];
+const KZ_V_WALK_SIDE: [HTMLImageElement, string][] = W4(kzVsw1, 'kz_villager_sw1', kzVsw2, 'kz_villager_sw2', kzVsw3, 'kz_villager_sw3', kzVsw4, 'kz_villager_sw4');
+const KZ_V_WALK_FRONT: [HTMLImageElement, string][] = W4(kzVfw1, 'kz_villager_fw1', kzVfw2, 'kz_villager_fw2', kzVfw3, 'kz_villager_fw3', kzVfw4, 'kz_villager_fw4');
+const KZ_V_WALK_BACK: [HTMLImageElement, string][] = W4(kzVbw1, 'kz_villager_bw1', kzVbw2, 'kz_villager_bw2', kzVbw3, 'kz_villager_bw3', kzVbw4, 'kz_villager_bw4');
+// казахский крестьянин за работой: [замах, удар] по виду деятельности
+const KZ_VILL_WORK: Record<string, [HTMLImageElement, HTMLImageElement, string, string]> = {
+  chop:   [mk(kzVchop1),   mk(kzVchop2),   'kz_villager_chop1',   'kz_villager_chop2'],
+  mine:   [mk(kzVmine1),   mk(kzVmine2),   'kz_villager_mine1',   'kz_villager_mine2'],
+  gather: [mk(kzVgather1), mk(kzVgather2), 'kz_villager_gather1', 'kz_villager_gather2'],
 };
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
@@ -336,19 +369,42 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // рисуются базовым боковым кадром (у расы один боковой кадр), 4-кадровые циклы штатной расы не трогаем
   const hasDirWalk = !isKz && (isVill || isSword || isArch || isSpear);
   const fmode = u.fmode ?? 0;
+  const kzVill = isKz && isVill; // казахский крестьянин — полный набор кадров (4-шаг/работа)
   const kzFB = isKz && move && (fmode === 1 || fmode === 2);
   // крестьянин за работой на месте (рубка/кирка/сбор/стройка)?
   const working = !isKz && isVill && !!u.wkind && !move &&
     (u.state === 'gather' || u.state === 'build');
+  // казахский крестьянин за работой на месте — свои кадры [замах, удар]
+  const kzWorking = kzVill && !!u.wkind && !move && (u.state === 'gather' || u.state === 'build');
   // ополченец рубит мечом на месте (базовый кадр = замах/готовность, sslash = удар сверху-вниз)
   const slashing = !isKz && isSword && !move && u.atkAnim > 0.45 && ready(SW_SLASH[0]);
   // лучник стреляет: arelease — в момент выстрела (atkAnim высокий), aaim — натягивает/держит лук в зоне
   const loosing = !isKz && isArch && !move && u.atkAnim > 0.5 && ready(AR_RELEASE[0]);
   const aiming = !isKz && isArch && !move && !loosing && !!u.aiming && ready(AR_AIM[0]);
 
-  // фаза 2-кадрового шага расы: чередуем _wa/_wb (или _fwa/_fwb) по sin(anim)
+  // фаза 2-кадрового шага расы (для юнитов без полного цикла): чередуем _wa/_wb по sin(anim)
   const kzStep = Math.sin(u.anim) < 0 ? 1 : 0;
-  if (kzFB) {
+  if (kzWorking) {
+    // казахский крестьянин рубит/копает/собирает на месте: кадр [замах/удар] по фазе цикла
+    const pair = KZ_VILL_WORK[u.wkind!] ?? KZ_VILL_WORK.chop;
+    const strike = (u.wphase ?? 0) > 0.62;
+    im = strike ? pair[1] : pair[0];
+    anKey = strike ? pair[3] : pair[2];
+    workSwing = strike ? Math.sin(Math.min(1, ((u.wphase ?? 0) - 0.62) / 0.38) * Math.PI) : 0;
+    flip = f; // боковой кадр инструментом к ресурсу (отражается по face)
+    if (!ready(im)) { im = base!; anKey = kzKey; }
+  } else if (kzVill) {
+    // казахский крестьянин: полный 4-кадровый шаг по изо-направлению; в покое — статичный кадр
+    const ci = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
+    const standF = KZ_FRONT_CYCLE.villager?.[0];
+    const standB = KZ_BACK_CYCLE.villager?.[0];
+    if (move && fmode === 1 && ready(KZ_V_WALK_FRONT[ci][0])) { im = KZ_V_WALK_FRONT[ci][0]; anKey = KZ_V_WALK_FRONT[ci][1]; flip = 1; }
+    else if (move && fmode === 2 && ready(KZ_V_WALK_BACK[ci][0])) { im = KZ_V_WALK_BACK[ci][0]; anKey = KZ_V_WALK_BACK[ci][1]; flip = 1; }
+    else if (move && ready(KZ_V_WALK_SIDE[ci][0])) { im = KZ_V_WALK_SIDE[ci][0]; anKey = KZ_V_WALK_SIDE[ci][1]; flip = f; }
+    else if (!move && fmode === 1 && standF && ready(standF[0])) { im = standF[0]; anKey = standF[1]; flip = 1; }
+    else if (!move && fmode === 2 && standB && ready(standB[0])) { im = standB[0]; anKey = standB[1]; flip = 1; }
+    else { im = base!; anKey = kzKey; flip = f; }
+  } else if (kzFB) {
     // «на камеру» (fmode=1) / «от камеры» (fmode=2): в движении — кадры шага, иначе статичный перёд/спина
     const walkCyc = fmode === 1 ? KZ_WALK_FRONT[u.key] : KZ_WALK_BACK[u.key];
     const standCyc = fmode === 1 ? KZ_FRONT_CYCLE[u.key] : KZ_BACK_CYCLE[u.key];
@@ -433,8 +489,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
   const gait = mounted || beast ? Math.sin(u.anim * 1.0) : step; // у галопа фаза та же, но выше амплитуда
   let bob: number, rock: number, lean: number, sway: number;
-  if (working) {
-    // работа на месте: лёгкий присед в такт удару, без шага
+  if (working || kzWorking) {
+    // работа на месте: лёгкий присед/наклон в такт удару, без шага
     bob = workSwing * 2.2; rock = 0; lean = workSwing * 0.06; sway = 0;
   } else if (mountFB) {
     // разворот на/от камеры на готовых кадрах: галоп (конь/волк) — выше подскок, монах — мягкий шаг
@@ -451,7 +507,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     bob = Math.sin(time * 2 + u.anim) * 0.9; rock = 0; lean = 0; sway = 0;
   }
   // выпад: бой/удар инструментом — в сторону, куда смотрит (face); для анфас/спины — без сдвига
-  const lunge = working ? workSwing * 6 * f : (u.atkAnim > 0 ? u.atkAnim * 7 * f : 0);
+  const lunge = (working || kzWorking) ? workSwing * 6 * f : (u.atkAnim > 0 ? u.atkAnim * 7 * f : 0);
   const fx = ix + lunge + sway * 0.3, fy = iy + 8 + bob; // точка опоры (ноги/копыта)
   ctx.save();
   ctx.imageSmoothingEnabled = false;
