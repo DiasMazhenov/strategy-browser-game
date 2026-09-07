@@ -3,7 +3,7 @@ import {
   Axe, Coins, Drumstick, TreePine, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
-  Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock,
+  Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video,
 } from 'lucide-react';
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
@@ -16,7 +16,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.039';
+export const GAME_VERSION = '1.0.040';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -307,6 +307,7 @@ export default function App() {
           <div className="grid grid-cols-2 gap-1">
             <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />Центр</MiniBtn>
             <MiniBtn onClick={() => g()?.focusSelection()} title="Камера к выделенному юниту/группе"><Crosshair className="h-3.5 w-3.5" />К юниту</MiniBtn>
+            <MiniBtn active={hud?.camFollow} onClick={() => g()?.toggleFollow()} title="Авто-следование камеры за выделением (повторно — выкл)"><Video className="h-3.5 w-3.5" />{hud?.camFollow ? 'Следит' : 'Следить'}</MiniBtn>
             <MiniBtn active={hud?.attackArmed} onClick={() => { const gm = g(); if (gm) { gm.attackArmed = !gm.attackArmed; gm.pushHud(); } }}><Flag className="h-3.5 w-3.5" />Атака</MiniBtn>
             <MiniBtn active={hud?.panMode} onClick={() => { const gm = g(); if (gm) { gm.panMode = !gm.panMode; gm.pushHud(); } }}><Hand className="h-3.5 w-3.5" />{hud?.panMode ? 'Кам.' : 'Рамка'}</MiniBtn>
           </div>
@@ -490,6 +491,7 @@ export default function App() {
                   <TrainBtn label="Всадник" icon="🏇" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
                   <TrainBtn label="Катапульта" icon="🪨" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
                   <TrainBtn label="Монах" icon="✝️" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk')} onClick={() => g()?.train('monk')} />
+                  <TrainBtn label="Разведчик" icon="🧭" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
                 </>
               ) : (
                 <>

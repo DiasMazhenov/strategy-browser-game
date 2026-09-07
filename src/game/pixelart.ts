@@ -189,6 +189,7 @@ const ready = (im?: HTMLImageElement) => !!im && im.complete && im.naturalWidth 
 const KZ_BASE: Partial<Record<UnitKey, HTMLImageElement>> = {
   villager: mk(kzVillager), swordsman: mk(kzSwordsman), archer: mk(kzArcher), spearman: mk(kzSpearman),
   knight: mk(kzKnight), cavalry: mk(kzCavalry), catapult: mk(kzCatapult), monk: mk(kzMonk),
+  scout: mk(kzArcher), // разведчик переиспользует кадры лучника (быстрый воин)
 };
 const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanF), 'kz_swordsman_f'], [mk(kzSwordsmanF), 'kz_swordsman_f']],
@@ -198,6 +199,7 @@ const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   monk: [[mk(kzMonkF), 'kz_monk_f'], [mk(kzMonkF), 'kz_monk_f']],
   knight: [[mk(kzKnightF), 'kz_knight_f'], [mk(kzKnightF), 'kz_knight_f']],
   cavalry: [[mk(kzCavalryF), 'kz_cavalry_f'], [mk(kzCavalryF), 'kz_cavalry_f']],
+  scout: [[mk(kzArcherF), 'kz_archer_f'], [mk(kzArcherF), 'kz_archer_f']],
 };
 const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanB), 'kz_swordsman_b'], [mk(kzSwordsmanB), 'kz_swordsman_b']],
@@ -207,6 +209,7 @@ const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   monk: [[mk(kzMonkB), 'kz_monk_b'], [mk(kzMonkB), 'kz_monk_b']],
   knight: [[mk(kzKnightB), 'kz_knight_b'], [mk(kzKnightB), 'kz_knight_b']],
   cavalry: [[mk(kzCavalryB), 'kz_cavalry_b'], [mk(kzCavalryB), 'kz_cavalry_b']],
+  scout: [[mk(kzArcherB), 'kz_archer_b'], [mk(kzArcherB), 'kz_archer_b']],
 };
 // ── кадры ШАГА: 2 фазы на направление (чередуются по sin(anim)); импорт PNG — это URL-строка, оборачиваем в mk() ──
 const W2 = (a: string, ka: string, b: string, kb: string): [HTMLImageElement, string][] =>
@@ -220,6 +223,7 @@ const KZ_WALK_SIDE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   knight: W2(kzKnightWA, 'kz_knight_wa', kzKnightWB, 'kz_knight_wb'),
   cavalry: W2(kzCavalryWA, 'kz_cavalry_wa', kzCavalryWB, 'kz_cavalry_wb'),
   monk: W2(kzMonkWA, 'kz_monk_wa', kzMonkWB, 'kz_monk_wb'),
+  scout: W2(kzArcherWA, 'kz_archer_wa', kzArcherWB, 'kz_archer_wb'),
 };
 // перёд-шаг (на камеру) и спина-шаг (от камеры) — полноценный цикл у крестьянина
 const KZ_WALK_FRONT: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {

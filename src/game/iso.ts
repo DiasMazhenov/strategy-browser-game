@@ -75,6 +75,33 @@ export function hexRound(q: number, r: number): [number, number] {
   return [rx, rz];
 }
 
+/** привязать МИРОВУЮ точку к центру ближайшего гекса (постройки садятся на соты) */
+export function snapToHexWorld(wx: number, wy: number): [number, number] {
+  const qf = (2 / 3 * wx) / HS;
+  const rf = (-1 / 3 * wx + (Math.sqrt(3) / 3) * wy) / HS;
+  const [q, r] = hexRound(qf, rf);
+  return hexCenterWorld(q, r);
+}
+
+/** аксиальные соседи гекса (6 направлений flat-top) — для мультисот-фундамента */
+export function hexNeighbors(q: number, r: number, ring: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (let dq = -ring; dq <= ring; dq++)
+    for (let dr = -ring; dr <= ring; dr++) {
+      if (dq === 0 && dr === 0) continue;
+      const ds = -dq - dr;
+      if (Math.max(Math.abs(dq), Math.abs(dr), Math.abs(ds)) <= ring) out.push([q + dq, r + dr]);
+    }
+  return out;
+}
+
+/** мировая точка → аксиальные (q,r) дробные → округлённый гекс (для фундамента) */
+export function worldToHex(wx: number, wy: number): [number, number] {
+  const qf = (2 / 3 * wx) / HS;
+  const rf = (-1 / 3 * wx + (Math.sqrt(3) / 3) * wy) / HS;
+  return hexRound(qf, rf);
+}
+
 /** контур шестиугольника с центром (cx,cy), масштаб s */
 export function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, s = 1) {
   ctx.beginPath();

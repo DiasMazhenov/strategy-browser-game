@@ -2,7 +2,7 @@ import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, W
 import { SoundBank } from './audio';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
   getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
-  HEX_PTS, TCX, TCY,
+  HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex,
   type HexKind,
   TILE_STEP } from './iso';
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
@@ -226,7 +226,7 @@ export interface HudSnapshot {
   wood: number; food: number; gold: number; pop: number; popCap: number;
   age: number; ageName: string; score: number; kills: number; razed: number;
   timeSec: number; wave: number; nextWave: number; enemyAge: number;
-  sel: SelSnapshot; placement: BuildingKey | null; attackArmed: boolean; rallyArmed: boolean; patrolArmed: boolean; panMode: boolean;
+  sel: SelSnapshot; placement: BuildingKey | null; attackArmed: boolean; rallyArmed: boolean; patrolArmed: boolean; panMode: boolean; camFollow: boolean;
   banner: { title: string; sub: string } | null;
   quests: { id: string; label: string; done: boolean; progress: string }[];
   muted: boolean; idleVills: number; relics: number;
@@ -272,6 +272,7 @@ export class Game {
   history: { t: number; army: number; pop: number }[] = []; histT = 0;
   time = 0; wave = 0; waveT: number;
   cam = { x: HOME.x, y: HOME.y, zoom: 1 };
+  camFollow = false;   // авто-следование камеры за выделением
   keys = new Set<string>();
   selected = new Set<number>(); selBld = -1;
   groups: number[][] = [[], [], [], [], []]; // группы контроля Ctrl/Alt+1..5 (id юнитов игрока)
@@ -669,6 +670,7 @@ export class Game {
     else if (k === '6') this.train('cavalry');
     else if (k === '7') this.train('catapult');
     else if (k === '8') this.train('monk');
+    else if (k === '9') this.train('scout');
     else if (k === 'q') this.enterPlacement('house');
     else if (k === 'e') this.enterPlacement('barracks');
     else if (k === 'r') this.enterPlacement('tower');
@@ -742,7 +744,7 @@ export class Game {
         if (d <= sight) { const idx = gy * this.fogGW + gx; this.fogVis[idx] = 1; this.fogExpl[idx] = 1; }
       }
     };
-    for (const u of this.units) if (u.owner === 'player' && !u.hidden) mark(u.x, u.y, 150);
+    for (const u of this.units) if (u.owner === 'player' && !u.hidden) mark(u.x, u.y, u.key === 'scout' ? 480 : 150);
     for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight);
   }
   fogAt(wx: number, wy: number): { vis: boolean; expl: boolean } {
@@ -777,6 +779,12 @@ export class Game {
     const qB = Math.ceil(Math.max(...cs.map(c => c.q))) + 1;
     const rA = Math.floor(Math.min(...cs.map(c => c.r))) - 1;
     const rB = Math.ceil(Math.max(...cs.map(c => c.r))) + 1;
+    // высота рельефа по гексу — туман кладём на ВЕРХ приподнятого тайла (как землю),
+    // иначе на ступенях рельефа тёмный гекс остаётся в базовой плоскости и над ним
+    // торчит верхушка тайла с сеткой (та самая «несовпадающая сетка на возвышениях»).
+    const relief = this.terrain.reliefGridHex(
+      this.cam.x - margin, this.cam.y - margin, this.cam.x + margin, this.cam.y + margin);
+    const upAtQ = (qq: number, rr: number) => relief.at(qq, rr) * RELIEF_STEP;
     for (let r = rA; r <= rB; r++) for (let q = qA; q <= qB; q++) {
       const [wx, wy] = hexCenterWorld(q, r);
       if (wx < 0 || wy < 0 || wx > WORLD.w || wy > WORLD.h) continue;
@@ -786,7 +794,8 @@ export class Game {
       if (this.fogVis[idx]) continue; // видно — без тумана
       // АБСОЛЮТНЫЕ изо-координаты центра (трансформ уже сдвинут на камеру)
       const [hx, hy] = hexCenter(q, r);
-      hexPath(ctx, hx, hy, 1.06);
+      const up = upAtQ(q, r);
+      hexPath(ctx, hx, hy - up, 1.06);
       ctx.fillStyle = this.fogExpl[idx] ? 'rgba(10,16,12,0.42)' : 'rgba(6,10,8,0.82)';
       ctx.fill();
     }
@@ -1626,8 +1635,9 @@ export class Game {
 
   placementValid(x: number, y: number, key: BuildingKey): boolean {
     const isWallLike = key === 'wall' || key === 'gate';
-    // стены/ворота выравниваем к шагу клеток, чтобы сегменты ложились ровно
+    // привязка к сетке: стены — к шагу кладки, здания — к центру гекса
     if (isWallLike) { x = Math.round(x / TILE_STEP) * TILE_STEP; y = Math.round(y / TILE_STEP) * TILE_STEP; }
+    else { const sx = snapToHexWorld(x, y); x = sx[0]; y = sx[1]; }
     const s = BUILDING_DEFS[key].size / 2 + (isWallLike ? 2 : 8);
     if (x < s + 10 || y < s + 10 || x > WORLD.w - s - 10 || y > WORLD.h - s - 10) return false;
     for (const b of this.blds) {
@@ -1651,9 +1661,22 @@ export class Game {
     return [Math.round(x / TILE_STEP) * TILE_STEP, Math.round(y / TILE_STEP) * TILE_STEP];
   }
 
+  // привязка точки постройки: стены — к шагу TILE_STEP (кладка вдоль оси), здания —
+  // к ЦЕНТРУ ближайшего гекса (мультисоты; всё садится на гексагональную сетку).
+  snapBuild(key: BuildingKey, x: number, y: number): [number, number] {
+    if (key === 'wall' || key === 'gate') return this.snapWall(x, y);
+    return snapToHexWorld(x, y);
+  }
+  // сколько колец гексов (радиус в сотах) занимает фундамент здания по его размеру
+  buildingHexRing(size: number): number {
+    // дистанция между центрами соседних гексов ~30 (wx-шаг); крупные здания — несколько сот
+    if (size >= 110) return 2;  // ГЦ/чудо — заметный фундамент
+    if (size >= 86) return 1;   // казармы/конюшня/башня
+    return 1;                   // дома/фермы/рынок — одна сота (с запасом по краю)
+  }
   tryPlace(x: number, y: number) {
     const key = this.placement; if (!key) return;
-    if (key === 'wall' || key === 'gate') [x, y] = this.snapWall(x, y);
+    [x, y] = this.snapBuild(key, x, y);
     if (!this.placementValid(x, y, key)) { this.sound.error(); this.trauma = Math.min(1, this.trauma + 0.08); return; }
     const c = BUILDING_DEFS[key].cost;
     if (!this.afford(c)) { this.sound.error(); return; }
@@ -1740,6 +1763,24 @@ export class Game {
     return best;
   }
   centerTC() { const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter'); if (tc) this.centerOn(tc.x, tc.y); }
+  // авто-следование камеры за центром группы выделенных юнитов
+  toggleFollow() {
+    const us = this.selUnits().filter(u => u.owner === 'player' && !u.hidden);
+    if (!us.length) { this.camFollow = false; this.floater(this.cam.x, this.cam.y - 80, 'Нет выделенных юнитов', '#94a3b8', 13); this.pushHud(); return; }
+    this.camFollow = !this.camFollow;
+    if (this.camFollow) { const x = us.reduce((s, u) => s + u.x, 0) / us.length, y = us.reduce((s, u) => s + u.y, 0) / us.length; this.centerOn(x, y); }
+    this.pushHud();
+  }
+  followTick() {
+    if (!this.camFollow) return;
+    const us = this.selUnits().filter(u => u.owner === 'player' && !u.hidden);
+    if (!us.length) { this.camFollow = false; return; }
+    const x = us.reduce((s, u) => s + u.x, 0) / us.length, y = us.reduce((s, u) => s + u.y, 0) / us.length;
+    // плавное следование (без жёсткого снапа), ручное движение камеры отключает режим
+    this.cam.x += (x - this.cam.x) * 0.12;
+    this.cam.y += (y - this.cam.y) * 0.12;
+    this.clampCam();
+  }
   // камера к центру группы выделенных юнитов (кнопка «к выделению»)
   focusSelection() {
     const us = this.selUnits();
@@ -1870,14 +1911,18 @@ export class Game {
     if (this.keys.has('s') || this.keys.has('arrowdown')) my += 1;
     if (this.keys.has('a') || this.keys.has('arrowleft')) mx -= 1;
     if (this.keys.has('d') || this.keys.has('arrowright')) mx += 1;
-    if (mx || my) { const l = Math.hypot(mx, my); this.cam.x += (mx / l) * spd * dt; this.cam.y += (my / l) * spd * dt; this.clampCam(); }
+    let edge = false;
+    if (mx || my) { const l = Math.hypot(mx, my); this.cam.x += (mx / l) * spd * dt; this.cam.y += (my / l) * spd * dt; this.clampCam(); this.camFollow = false; }
     else if (this.mouse.in && !this.mouse.isTouch && !this.box && !this.panning) {
       const m = 16;
-      if (this.mouse.x < m) { this.cam.x -= spd * dt; this.clampCam(); }
-      if (this.mouse.x > this.vw - m) { this.cam.x += spd * dt; this.clampCam(); }
-      if (this.mouse.y < m) { this.cam.y -= spd * dt; this.clampCam(); }
-      if (this.mouse.y > this.vh - m) { this.cam.y += spd * dt; this.clampCam(); }
+      if (this.mouse.x < m) { this.cam.x -= spd * dt; edge = true; }
+      if (this.mouse.x > this.vw - m) { this.cam.x += spd * dt; edge = true; }
+      if (this.mouse.y < m) { this.cam.y -= spd * dt; edge = true; }
+      if (this.mouse.y > this.vh - m) { this.cam.y += spd * dt; edge = true; }
+      if (edge) { this.clampCam(); this.camFollow = false; }
     }
+    // авто-следование за выделением (плавно); ручное движение/скролл его отключают
+    this.followTick();
 
     this.updateUnits(dt);
     this.updateBuildings(dt);
@@ -2054,6 +2099,7 @@ export class Game {
       }
       if (u.owner === 'neutral' && u.tribe) this.updateSoldier(u, dt);
       else if (u.key === 'villager') this.updateVillager(u, dt);
+      else if (u.key === 'scout') this.updateScout(u, dt);
       else this.updateSoldier(u, dt);
       // building collision push (стены блокируют; ворота пропускают своих)
       for (const b of this.blds) {
@@ -2365,11 +2411,19 @@ export class Game {
         }
         return;
       }
-      const reach = n.r + 14;
-      if (dist2(u.x, u.y, n.x, n.y) > reach * reach) { u.wkind = undefined; this.moveTowardPath(u, n.x, n.y, dt, reach * 0.7); return; }
-      // chopping
+      // рыбалка в стиле AoE: косяк стоит на воде, рабочий остаётся на суше (берегу) и
+      // удит — радиус подхода больше, цель доводим не в воду, а до дистанции заброса.
+      const isFish = n.kind === 'fish';
+      const reach = isFish ? n.r + 46 : n.r + 14;
+      const arrive = isFish ? reach : reach * 0.7;
+      if (dist2(u.x, u.y, n.x, n.y) > reach * reach) {
+        u.wkind = undefined;
+        this.moveTowardPath(u, n.x, n.y, dt, arrive);
+        return;
+      }
+      // рабочий на берегу: разворот к воде/косяку
       if (Math.abs(n.x - u.x) > 4) u.face = n.x > u.x ? 1 : -1;
-      // вид работы по типу ресурса: лес — топор, золото/руда — кирка, фрукты/ягоды — сбор
+      // вид работы: лес — топор, золото/руда — кирка, рыба/фрукты/ягоды — сбор (удочка)
       u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : 'gather';
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
       const cycN = 0.55 / this.gatherMult();
@@ -2391,9 +2445,13 @@ export class Game {
     if (u.state === 'return') {
       const tc = this.nearestDrop(u);
       if (!tc) { this.deposit(u); u.state = 'idle'; return; }
-      if (dist2(u.x, u.y, tc.x, tc.y) < 95 * 95) {
+      // сдача по РАССТОЯНИЮ ДО ЦЕНТРА здания (рабочий стоит у кромки коллизии на
+      // радиусе ~size/2+12). Раньше точка сдачи была сбоку на этом же радиусе, а arrive=70
+      // срабатывал «я прибыл» до входа в зону сдачи → рабочий вставал и не разгружался.
+      const dropR = tc.size / 2 + 14;
+      if (dist2(u.x, u.y, tc.x, tc.y) < dropR * dropR) {
         this.deposit(u);
-        // go back
+        // после сдачи — обратно к работе
         const fb2 = u.buildId >= 0 ? this.blds.find(b => b.id === u.buildId) : undefined;
         if (fb2 && fb2.key === 'farm') { u.state = 'gather'; }
         else {
@@ -2407,9 +2465,9 @@ export class Game {
         }
         return;
       }
-      // стабильная цель сдачи (без покадрового rand — иначе A*/направление «дрожат»
-      // и рабочий едет медленно/топчется у центра); идём к точке, заданной sendToDrop
-      this.moveTowardPath(u, u.tx || tc.x, u.ty || tc.y, dt, 70);
+      // цель — центр ТЦ (стабильна, без покадрового rand: иначе путь/направление дрожат);
+      // arrive маленький — дойдём до коллизии здания, затем депозит сработает по радиусу.
+      this.moveTowardPath(u, tc.x, tc.y, dt, 12);
     }
   }
 
@@ -2635,6 +2693,76 @@ export class Game {
       }
       else if (isCata && f.tb >= 0) { u.targetB = f.tb; u.state = 'attackmove'; }
     }
+  }
+
+  // РАЗВЕДЧИК: обороняется (бьёт нападающих/волков рядом), а в мирном режиме
+  // автоматически бродит по карте — открывает туман и находит базы племён/реликвии.
+  updateScout(u: Unit, dt: number) {
+    // 1) валидируем явную боевую цель
+    let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
+    if (tu && (tu.hp <= 0 || !this.hostile(u.owner, tu.owner))) { tu = undefined; u.targetU = -1; }
+    // явная цель есть — преследуем и бьём (приказ игрока / защита базы племени)
+    if (tu) {
+      const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+      const reach = u.range + 6;
+      if (d <= reach) {
+        if (Math.abs(tu.x - u.x) > 3) u.face = tu.x > u.x ? 1 : -1;
+        if (u.cd <= 0) this.strike(u, tu, undefined);
+        u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
+      } else {
+        this.moveTowardPath(u, tu.x, tu.y, dt, reach * 0.7);
+      }
+      return;
+    }
+    // авто-оборона: нападающий/волк в малом радиусе — дать отпор
+    if (u.retarget <= 0) {
+      u.retarget = 0.4;
+      const f = this.acquireEnemy(u, 150);
+      if (f.tu >= 0) { u.targetU = f.tu; return; }
+    } else u.retarget -= dt;
+    // приказ двигаться (move / attackmove к точке) — исполняем
+    if (u.state === 'attackmove' || u.state === 'move' || u.state === 'patrol') {
+      if (this.moveTowardPath(u, u.tx, u.ty, dt, 14)) { u.state = 'idle'; u.idleT = 0; }
+      return;
+    }
+    // 2) АВТО-РАЗВЕДКА: выбираем точку в неисследованной области (или к базе племени)
+    u.idleT += dt;
+    if (u.idleT > 0.6) {
+      u.idleT = 0;
+      const goal = this.scoutGoal(u);
+      if (goal) { u.tx = goal[0]; u.ty = goal[1]; u.state = 'move'; }
+    }
+  }
+  // цель разведки: ближайшая туманная точка в кольце вокруг юнита; если тумана нет —
+  // к ближайшей ещё не исследованной базе нейтрального племени; иначе случайный бросок.
+  private scoutGoal(u: Unit): [number, number] | null {
+    const explored = (wx: number, wy: number) => this.settings.fogOfWar ? this.fogAt(wx, wy).expl : true;
+    // ищем неисследованную точку на нескольких кольцах вокруг разведчика
+    for (const rad of [260, 380, 520, 680]) {
+      let best: [number, number] | null = null; let bd = Infinity;
+      const tries = 14;
+      for (let i = 0; i < tries; i++) {
+        const a = (i / tries) * Math.PI * 2 + u.id * 1.7;
+        const wx = u.x + Math.cos(a) * rad, wy = u.y + Math.sin(a) * rad;
+        if (wx < 40 || wy < 40 || wx > WORLD.w - 40 || wy > WORLD.h - 40) continue;
+        if (this.terrain.classAt(wx, wy) === 'deep') continue; // не лезем в глубокую воду
+        if (!explored(wx, wy)) { const d = Math.abs(Math.cos(a) * rad) + Math.abs(Math.sin(a) * rad); if (d < bd) { bd = d; best = [wx, wy]; } }
+      }
+      if (best) return best;
+    }
+    // всё вокруг исследовано — идём к ближайшей базе племени (если ещё не видели вблизи)
+    let camp: Bld | null = null; let cd2 = Infinity;
+    for (const b of this.blds) {
+      if (!b.tribe) continue;
+      const d = dist2(u.x, u.y, b.x, b.y);
+      // уже подходили к этому лагерю — не цель
+      if (d < 500 * 500) continue;
+      if (d < cd2) { cd2 = d; camp = b; }
+    }
+    if (camp) return [camp.x, camp.y];
+    // запасной вариант — случайная разведка вокруг базы игрока
+    const a = (u.id * 1.3 + this.time * 0.03) % (Math.PI * 2);
+    return [clamp(u.x + Math.cos(a) * 500, 60, WORLD.w - 60), clamp(u.y + Math.sin(a) * 500, 60, WORLD.h - 60)];
   }
 
   updateMonk(u: Unit, dt: number) {
@@ -3475,7 +3603,7 @@ export class Game {
       pop: this.popUsed('player'), popCap: this.popCap('player'),
       age: this.age, ageName: AGES[this.age].name, score: Math.round(this.score), kills: this.kills, razed: this.razed,
       timeSec: Math.floor(this.time), wave: this.wave, nextWave: Math.max(0, Math.ceil(this.waveT)), enemyAge: this.eage,
-      sel, placement: this.placement, attackArmed: this.attackArmed, rallyArmed: this.rallyArmed, patrolArmed: this.patrolArmed, panMode: this.panMode,
+      sel, placement: this.placement, attackArmed: this.attackArmed, rallyArmed: this.rallyArmed, patrolArmed: this.patrolArmed, panMode: this.panMode, camFollow: this.camFollow,
       banner,
       quests: [
         { id: 'wood', label: 'Нарубить 60 🪵', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
@@ -3890,20 +4018,28 @@ export class Game {
         ctx.textAlign = 'left';
         ctx.globalAlpha = 1;
       } else {
-        const ok = this.placementValid(mw.x, mw.y, this.placement);
-        const [gx, gy] = toIso(mw.x, mw.y);
-        ctx.globalAlpha = 0.55;
-        const sz = BUILDING_DEFS[this.placement].size;
-        // изометрический шестиугольник-фундамент (пропорционально размеру здания)
-        const hsc = sz / 52;
-        hexPath(ctx, gx, gy, hsc);
-        ctx.fillStyle = ok ? 'rgba(163,230,53,0.4)' : 'rgba(239,68,68,0.4)';
-        ctx.fill();
-        ctx.strokeStyle = ok ? '#a3e635' : '#ef4444'; ctx.lineWidth = 2; ctx.stroke();
+        // здания привязаны к центру гекса; крупные занимают несколько сот — рисуем их
+        const [bx, by] = snapToHexWorld(mw.x, mw.y);
+        const ok = this.placementValid(bx, by, this.placement);
+        const [gx, gy] = toIso(bx, by);
+        const [hq, hr] = worldToHex(bx, by);
+        const ring = this.buildingHexRing(BUILDING_DEFS[this.placement].size);
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = ok ? 'rgba(163,230,53,0.32)' : 'rgba(239,68,68,0.32)';
+        ctx.strokeStyle = ok ? '#a3e635' : '#ef4444'; ctx.lineWidth = 1.6;
+        // центральная сота + соседи (мультисот-фундамент по размеру спрайта)
+        const cells: [number, number][] = [[hq, hr], ...hexNeighbors(hq, hr, ring)];
+        for (const [cq, cr] of cells) {
+          const [cwx, cwy] = hexCenterWorld(cq, cr);
+          const [cx2, cy2] = toIso(cwx, cwy);
+          hexPath(ctx, cx2, cy2, 1.0);
+          ctx.fill(); ctx.stroke();
+        }
         ctx.globalAlpha = 1;
-        ctx.fillStyle = '#fff'; ctx.font = '800 13px Inter';
-        const tip = this.placement === 'wall' || this.placement === 'gate' ? 'Клик — поставить, зажмите и тяните' : 'Клик — поставить';
-        ctx.fillText(ok ? tip : 'Занято!', gx, gy - 20 * hsc - 10);
+        ctx.fillStyle = '#fff'; ctx.font = '800 13px Inter'; ctx.textAlign = 'center';
+        const tip = 'Клик — поставить';
+        ctx.fillText(ok ? tip : 'Занято!', gx, gy - 26);
+        ctx.textAlign = 'left';
         if (this.placement === 'tower') {
           ctx.strokeStyle = ok ? 'rgba(246,212,124,0.4)' : 'rgba(248,113,113,0.4)'; ctx.lineWidth = 1.5;
           isoEllipse(ctx, gx, gy, BUILDING_DEFS.tower.attack!.range * 0.7, BUILDING_DEFS.tower.attack!.range * 0.7);
