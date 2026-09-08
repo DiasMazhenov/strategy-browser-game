@@ -219,6 +219,35 @@ const UNIT_WALK_B: Partial<Record<UnitKey, HTMLImageElement>> = {
 };
 const ready = (im?: HTMLImageElement) => !!im && im.complete && im.naturalWidth > 0;
 
+// ── КЭШ ПЕРЕКРАШЕННЫХ КАДРОВ (ступени линий апгрейда) ──
+// Улучшенный воин носит доспех иного отлива: ступень 1 — вороненая сталь,
+// ступень 2 — золочёная. Перекраска идёт ОДИН раз на кадр и кладётся в кэш,
+// иначе тонирование каждого юнита в каждом тике убило бы фреймрейт.
+const TINT_CACHE = new Map<string, HTMLCanvasElement>();
+function tintedFrame(im: HTMLImageElement, key: string, color: string, alpha: number): CanvasImageSource {
+  if (!ready(im)) return im;
+  const ck = `${key}|${color}|${alpha}`;
+  const hit = TINT_CACHE.get(ck);
+  if (hit) return hit;
+  const w = im.naturalWidth, h = im.naturalHeight;
+  if (!w || !h) return im;
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const c = cv.getContext('2d');
+  if (!c) return im;
+  c.imageSmoothingEnabled = false;
+  c.drawImage(im, 0, 0);
+  // подмешиваем оттенок только к непрозрачным пикселям (source-atop бережёт альфу)
+  c.globalCompositeOperation = 'source-atop';
+  c.globalAlpha = alpha;
+  c.fillStyle = color;
+  c.fillRect(0, 0, w, h);
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = 'source-over';
+  TINT_CACHE.set(ck, cv);
+  return cv;
+}
+
 // ── казахская раса (игрок): базовые боковые кадры и направленные «перёд/спина» ──
 const KZ_BASE: Partial<Record<UnitKey, HTMLImageElement>> = {
   villager: mk(kzVillager), swordsman: mk(kzSwordsman), archer: mk(kzArcher), spearman: mk(kzSpearman),
@@ -621,8 +650,14 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   ctx.scale(flip, 1);                      // разворот влево — отражение (анфас/спина/работа — без)
   ctx.rotate(upright ? lean : (lean + rock) * f); // наклон вперёд + галопный крен
   ctx.translate(-sway, 0);
-  // якорь кадра: центр по X, ноги по Y
-  ctx.drawImage(im, -an.ax * scale, -an.ay * scale, w, H);
+  // якорь кадра: центр по X, ноги по Y.
+  // ступень апгрейда показываем ПЕРЕКРАСКОЙ БРОНИ: султан пришлось бы сажать на макушку,
+  // а верхний непрозрачный пиксель кадра — это наконечник пики/лук/пика всадника, не голова.
+  const tier = u.upg ?? 0;
+  const drawIm: CanvasImageSource = tier > 0
+    ? tintedFrame(im, anKey, tier >= 2 ? '#fbbf24' : '#e2e8f0', tier >= 2 ? 0.30 : 0.20)
+    : im;
+  ctx.drawImage(drawIm, -an.ax * scale, -an.ay * scale, w, H);
   ctx.restore();
   void selected;
   return true;
@@ -1033,6 +1068,7 @@ interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number;
   wphase?: number;                      // фаза рабочего цикла 0..1 (замах→удар)
   aiming?: boolean;                     // лучник в зоне выстрела (натягивает/держит лук)
   herder?: boolean;                     // рабочий-пастух (верхом на коне с кнутом)
+  upg?: number;                         // ступень линии апгрейда (1/2) — султан на шлеме
 }
 
 const TEAM = {

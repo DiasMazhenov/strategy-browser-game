@@ -48,6 +48,36 @@ export const TECHS: Record<string, TechDef> = {
   coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: '🪙' },
 };
 
+// ── ЛИНИИ АПГРЕЙДА ЮНИТОВ (AoE) ────────────────────────────────────────────
+// Каждый шаг необратимо улучшает ВСЕХ юнитов типа (и уже готовых, и будущих),
+// меняет имя и добавляет султан на шлем. Структура совместима с TechDef —
+// апгрейды исследуются тем же механизмом research()/applyTech().
+export interface UpgradeDef extends TechDef {
+  unit: UnitKey;          // какой род войск улучшаем
+  tier: 1 | 2;            // ступень линии (2 требует изученной 1)
+  newName: string;        // как юнит зовётся после апгрейда
+  hpMult: number; atkMult: number; speedMult?: number; rangeMult?: number;
+  plume: string;          // цвет султана на шлеме (визуальная метка ступени)
+}
+export const UPGRADES: Record<string, UpgradeDef> = {
+  // Сарбаз: пехота ханского ополчения
+  swordHeavy: { id: 'swordHeavy', unit: 'swordsman', tier: 1, newName: 'Ауыр сарбаз', name: 'Ауыр сарбаз (тяжёлый)', desc: 'Сарбазы получают кольчугу и щит: +25% HP, +20% к атаке', bld: 'barracks', ageReq: 1, cost: { wood: 0, food: 160, gold: 100 }, time: 25, icon: '🗡️', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
+  swordGuard: { id: 'swordGuard', unit: 'swordsman', tier: 2, newName: 'Хан сарбазы', name: 'Хан сарбазы (гвардия)', desc: 'Гвардия хана: ещё +30% HP, +30% к атаке', bld: 'barracks', ageReq: 2, cost: { wood: 0, food: 280, gold: 220 }, time: 32, icon: '🛡️', hpMult: 1.30, atkMult: 1.30, plume: '#fbbf24' },
+  // Найзагер: копейщики против конницы
+  spearHeavy: { id: 'spearHeavy', unit: 'spearman', tier: 1, newName: 'Ауыр найзагер', name: 'Ауыр найзагер (тяжёлый)', desc: 'Длинная пика и панцирь: +25% HP, +20% к атаке', bld: 'barracks', ageReq: 1, cost: { wood: 60, food: 150, gold: 80 }, time: 25, icon: '🔱', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
+  spearWall: { id: 'spearWall', unit: 'spearman', tier: 2, newName: 'Қалқан найзагер', name: 'Қалқан найзагер (щитоносец)', desc: 'Стена щитов: ещё +35% HP, +25% к атаке', bld: 'barracks', ageReq: 2, cost: { wood: 120, food: 260, gold: 180 }, time: 32, icon: '🛡️', hpMult: 1.35, atkMult: 1.25, plume: '#fbbf24' },
+  // Мерген: степные лучники
+  archEagle: { id: 'archEagle', unit: 'archer', tier: 1, newName: 'Қыран мерген', name: 'Қыран мерген (беркут)', desc: 'Тугой лук: +20% HP, +25% к атаке, +8% дальности', bld: 'barracks', ageReq: 1, cost: { wood: 120, food: 0, gold: 110 }, time: 25, icon: '🏹', hpMult: 1.20, atkMult: 1.25, rangeMult: 1.08, plume: '#cbd5e1' },
+  archFalcon: { id: 'archFalcon', unit: 'archer', tier: 2, newName: 'Сұңқар мерген', name: 'Сұңқар мерген (сокол)', desc: 'Бронебойные стрелы: ещё +25% HP, +30% к атаке, +10% дальности', bld: 'barracks', ageReq: 2, cost: { wood: 220, food: 0, gold: 230 }, time: 32, icon: '🎯', hpMult: 1.25, atkMult: 1.30, rangeMult: 1.10, plume: '#fbbf24' },
+  // Жасауыл: тяжёлая конница
+  cavHeavy: { id: 'cavHeavy', unit: 'cavalry', tier: 1, newName: 'Ауыр жасауыл', name: 'Ауыр жасауыл (тяжёлый)', desc: 'Конский доспех: +25% HP, +20% к атаке', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 200, gold: 140 }, time: 28, icon: '🐎', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
+  cavTulpar: { id: 'cavTulpar', unit: 'cavalry', tier: 2, newName: 'Тұлпар жасауыл', name: 'Тұлпар жасауыл (аргамак)', desc: 'Тулпары — кони-легенды: ещё +30% HP, +30% к атаке, +8% скорости', bld: 'stable', ageReq: 2, cost: { wood: 0, food: 320, gold: 260 }, time: 34, icon: '🏇', hpMult: 1.30, atkMult: 1.30, speedMult: 1.08, plume: '#fbbf24' },
+};
+// линия апгрейдов конкретного рода войск, по порядку ступеней
+export function upgradeLine(unit: UnitKey): UpgradeDef[] {
+  return Object.values(UPGRADES).filter(u => u.unit === unit).sort((a, b) => a.tier - b.tier);
+}
+
 export const BUILDING_DEFS = {
   towncenter: { name: 'Ханская ставка', hp: 1600, size: 120, cost: { wood: 0, food: 0, gold: 0 }, buildTime: 0, sight: 320, attack: { dmg: 8, range: 190, cd: 1.4 }, desc: 'Орда — сердце вашего ханства' },
   house:      { name: 'Юрта',          hp: 350,  size: 56,  cost: { wood: 50, food: 0, gold: 0 }, buildTime: 9,  sight: 160, attack: null, desc: '+8 к населению' },

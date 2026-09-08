@@ -1,4 +1,4 @@
-import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
+import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
   getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
@@ -185,6 +185,7 @@ interface Unit {
   trScanT?: number;          // таймер редкого поиска нового партнёра
   hunt?: boolean;         // крестьянин получил явный приказ охотиться/атаковать (преследует дичь)
   xp?: number; level?: number; kills?: number; // опыт и ранг героя
+  upg?: number;           // ступень линии апгрейда (0/1/2) — задаёт султан на шлеме
   // ── разведчик: приказы и шпионаж ──
   mission?: 'explore' | 'bases' | 'diplomacy' | 'infiltrate'; // задание разведчика
   mtx?: number; mty?: number;       // цель приказа (база/точка)
@@ -258,6 +259,7 @@ export interface SelSnapshot {
   queue?: { key: UnitKey; label: string; t: number; total: number }[];
   bid?: number;
   techs?: { id: string; name: string; desc: string; icon: string; cost: string; done: boolean; available: boolean; busy: boolean }[];
+  upgrades?: { id: string; name: string; desc: string; icon: string; cost: string; done: boolean; available: boolean; locked: boolean }[];
   research?: { id: string; name: string; t: number; total: number } | null;
   garrison?: number; garrisonCap?: number;
   towerUpg?: { range: number; dmg: number; archers: number; maxRange: number; maxDmg: number; maxArchers: number };
@@ -294,6 +296,8 @@ export interface HudSnapshot {
   drought: number; plague: number;
   // тревога «нас атакуют»: маркер жив ~20 с, клик по плашке прыгает к месту
   alertHud: { sub: string; t: number } | null;
+  // имена родов войск с учётом взятых ступеней апгрейда (для кнопок обучения)
+  unitNames: Record<string, string>;
 }
 export interface NationHud {
   id: string; name: string; ruler: string; title: string; portrait: string; color: string; greet: string;
@@ -485,6 +489,14 @@ export class Game {
       atkAnim: 0, retarget: rand(0, 0.4), idleT: 0, flash: 0, wx: x, wy: y,
       stance: 'aggressive', homeX: x, homeY: y, patrolX: x, patrolY: y, waitT: 0,
     };
+    // ЛИНИИ АПГРЕЙДА: новобранец сразу выходит в достигнутой ступени, иначе воины,
+    // обученные ПОСЛЕ исследования, были бы слабее старых (классический баг)
+    const um = this.upgMult(key, owner);
+    if (um.hp !== 1 || um.atk !== 1 || um.speed !== 1 || um.range !== 1) {
+      u.maxHp *= um.hp; u.hp = u.maxHp;
+      u.atk *= um.atk; u.speed *= um.speed; u.range *= um.range;
+      u.upg = this.upgTier(key, owner);
+    }
     // рабочие игрока (казахи) спавнятся по очереди: мужчина-крестьянин / женщина-работница
     if (key === 'villager' && owner === 'player') {
       this.villagerSexToggle = !this.villagerSexToggle;
@@ -1990,6 +2002,11 @@ export class Game {
     if (!raw) return false;
     try {
       const d = JSON.parse(raw);
+      // ВАЖНО: эпоху и технологии восстанавливаем ДО создания юнитов — addUnit
+      // масштабирует статы по возрасту и взятым ступеням апгрейда, иначе
+      // загруженная армия выходит слабее сохранённой.
+      this.age = d.age || 0; this.eage = d.eage || 0;
+      this.tech = d.tech || {};
       // карта соответствия старых id → новые
       const uMap = new Map<number, number>(); const bMap = new Map<number, number>();
       this.units = []; this.blds = []; this.nodes = [];
@@ -2013,7 +2030,7 @@ export class Game {
       (d.nodes || []).forEach((nd: { kind: 'wood'|'gold'|'food'|'fish'; x: number; y: number; amount: number; r: number }) => this.addNode(nd.kind, nd.x, nd.y, nd.amount));
       // цели не сохраняем — юниты перенацелятся сами; декор оставляем от genWorld
       void uMap; void bMap;
-      this.time = d.time || 0; this.age = d.age || 0; this.eage = d.eage || 0;
+      this.time = d.time || 0;   // age/eage/tech уже восстановлены выше, до addUnit
       this.wave = d.wave || 0; this.waveT = d.waveT ?? DIFF[this.difficulty].waveInterval;
       this.res = { ...this.res, ...d.res }; this.eres = { ...this.eres, ...d.eres };
       this.score = d.score || 0; this.kills = d.kills || 0; this.razed = d.razed || 0;
@@ -2022,7 +2039,7 @@ export class Game {
       this.relicsHeld = d.relicsHeld || 0;
       // восстановить взятые реликвии как убранные с карты
       if (this.relicsHeld > 0) for (let i = 0; i < Math.min(this.relics.length, this.relicsHeld); i++) this.relics[i].taken = true;
-      this.tech = d.tech || {}; this.questsDone = d.questsDone || {};
+      this.questsDone = d.questsDone || {};
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
@@ -2058,6 +2075,79 @@ export class Game {
   techsFor(bldKey: BuildingKey): string[] {
     return Object.values(TECHS).filter(t => t.bld === bldKey).map(t => t.id);
   }
+
+  // ── ЛИНИИ АПГРЕЙДА ЮНИТОВ ──
+  // Апгрейды владельца (у игрока — по изученным, у врага — по эпохе: ИИ не «исследует»,
+  // но его армия должна расти вместе с нашей, иначе поздняя игра становится тиром).
+  upgTier(unit: UnitKey, owner: string): number {
+    const line = upgradeLine(unit);
+    if (!line.length) return 0;
+    if (owner === 'player') return line.filter(u => this.tech[u.id]).length;
+    if (owner === 'enemy') {
+      // враг получает ступень 1 в Веке батыров и ступень 2 в Веке Абылай хана
+      return this.eage >= 3 ? 2 : this.eage >= 2 ? 1 : 0;
+    }
+    return 0;
+  }
+  // накопленные множители статов от всех взятых ступеней
+  upgMult(unit: UnitKey, owner: string): { hp: number; atk: number; speed: number; range: number } {
+    const n = this.upgTier(unit, owner);
+    const m = { hp: 1, atk: 1, speed: 1, range: 1 };
+    if (!n) return m;
+    for (const u of upgradeLine(unit).slice(0, n)) {
+      m.hp *= u.hpMult; m.atk *= u.atkMult;
+      m.speed *= u.speedMult ?? 1; m.range *= u.rangeMult ?? 1;
+    }
+    return m;
+  }
+  // отображаемое имя рода войск с учётом ступени («Сарбаз» → «Хан сарбазы»)
+  unitName(unit: UnitKey, owner: string): string {
+    const n = this.upgTier(unit, owner);
+    const line = upgradeLine(unit);
+    return n > 0 ? line[n - 1].newName : UNIT_DEFS[unit].name;
+  }
+  // применить ступень ко ВСЕМ живым юнитам этого рода (апгрейд ретроактивен, как в AoE)
+  applyUpgrade(id: string) {
+    const up = UPGRADES[id]; if (!up) return;
+    this.tech[id] = true;
+    let n = 0;
+    for (const u of this.units) {
+      if (u.owner !== 'player' || u.key !== up.unit) continue;
+      const frac = u.maxHp > 0 ? u.hp / u.maxHp : 1;   // раненый остаётся раненым в той же доле
+      u.maxHp *= up.hpMult; u.hp = u.maxHp * frac;
+      u.atk *= up.atkMult;
+      u.speed *= up.speedMult ?? 1;
+      u.range *= up.rangeMult ?? 1;
+      u.upg = up.tier;
+      this.spark(u.x, u.y - 20, up.plume);
+      n++;
+    }
+    this.sound.research();
+    this.burst(this.cam.x, this.cam.y - 60, 20, [up.plume, '#f6d47c', '#fff'], 120, 0.9);
+    this.pushBanner(`${up.icon} ${up.newName}!`, n > 0 ? `Улучшено воинов: ${n}` : up.desc, 3.2);
+    this.score += 200;
+    this.pushHud();
+  }
+  // строки для панели здания/досье: доступна ли следующая ступень линии
+  upgradeRows(bldKey: BuildingKey): { id: string; name: string; desc: string; icon: string; cost: string; done: boolean; available: boolean; locked: boolean }[] {
+    const costTxt = (c: { wood: number; food: number; gold: number }) => {
+      const p: string[] = [];
+      if (c.wood) p.push(`${c.wood}🪵`);
+      if (c.food) p.push(`${c.food}🍖`);
+      if (c.gold) p.push(`${c.gold}🪙`);
+      return p.join(' ');
+    };
+    return Object.values(UPGRADES).filter(u => u.bld === bldKey).map(u => {
+      const done = !!this.tech[u.id];
+      const prev = upgradeLine(u.unit).find(x => x.tier === u.tier - 1);
+      const prevOk = !prev || !!this.tech[prev.id];
+      return {
+        id: u.id, name: u.name, desc: u.desc, icon: u.icon, cost: costTxt(u.cost),
+        done, locked: !prevOk || this.age < u.ageReq,
+        available: !done && prevOk && this.age >= u.ageReq && this.afford(u.cost),
+      };
+    });
+  }
   // данные для экрана-досье «дерево технологий»
   techTreeData(): TechTreeRow[] {
     const costTxt = (c: { wood: number; food: number; gold: number }) => {
@@ -2068,15 +2158,20 @@ export class Game {
       return p.join(' ');
     };
     const busyId = this.blds.find(b => b.owner === 'player' && b.research)?.research?.id ?? null;
-    return Object.values(TECHS).map(t => {
+    // в досье показываем и обычные техи, и ступени линий апгрейда
+    return [...Object.values(TECHS), ...Object.values(UPGRADES)].map(t => {
       const done = !!this.tech[t.id];
       const researching = busyId === t.id;
       const hasBld = this.blds.some(b => b.owner === 'player' && b.key === t.bld && b.done >= 1);
       const ageOk = this.age >= t.ageReq;
+      // ступень 2 линии заблокирована, пока не взята ступень 1
+      const up = UPGRADES[t.id];
+      const prev = up ? upgradeLine(up.unit).find(x => x.tier === up.tier - 1) : undefined;
+      const prevOk = !prev || !!this.tech[prev.id];
       let state: TechTreeRow['state'];
       if (done) state = 'done';
       else if (researching) state = 'researching';
-      else if (!ageOk) state = 'age';
+      else if (!ageOk || !prevOk) state = 'age';
       else if (!hasBld) state = 'nobuild';
       else state = 'ready';
       return {
@@ -2088,9 +2183,18 @@ export class Game {
     }).sort((a, b) => a.ageReq - b.ageReq || a.id.localeCompare(b.id));
   }
   research(id: string) {
-    const t = TECHS[id];
+    const t = TECHS[id] ?? UPGRADES[id];   // линии апгрейда идут тем же путём, что и техи
     if (!t || this.paused || this.over) return;
     if (this.tech[id]) { this.sound.error(); return; }
+    // ступень 2 недоступна, пока не взята ступень 1
+    const up = UPGRADES[id];
+    if (up) {
+      const prev = upgradeLine(up.unit).find(x => x.tier === up.tier - 1);
+      if (prev && !this.tech[prev.id]) {
+        this.floater(this.cam.x, this.cam.y - 110, `Сначала: ${prev.newName}!`, '#f87171', 16);
+        this.sound.error(); return;
+      }
+    }
     if (this.age < t.ageReq) { this.floater(this.cam.x, this.cam.y - 110, `Нужен: ${AGES[t.ageReq].name}!`, '#f87171', 17); this.sound.error(); return; }
     const b = this.blds.find(bl => bl.owner === 'player' && bl.key === t.bld && bl.done >= 1 && !bl.research);
     if (!b) { this.floater(this.cam.x, this.cam.y - 110, `Нужна свободная: ${BUILDING_DEFS[t.bld].name}`, '#f87171', 16); this.sound.error(); return; }
@@ -2102,6 +2206,7 @@ export class Game {
     this.pushHud();
   }
   applyTech(id: string) {
+    if (UPGRADES[id]) { this.applyUpgrade(id); return; }   // линия апгрейда — свой обработчик
     const t = TECHS[id]; if (!t) return;
     this.tech[id] = true;
     const us = () => this.units;
@@ -4709,7 +4814,8 @@ export class Game {
     const cnt: Record<string, number> = {};
     for (const k of comp) cnt[k] = (cnt[k] || 0) + 1;
     const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'catapult'];
-    return order.filter(k => cnt[k]).map(k => `${cnt[k]}×${UNIT_DEFS[k].name}`).join(', ');
+    // имена с учётом ступени врага — игрок сразу видит, что идёт тяжёлая пехота
+    return order.filter(k => cnt[k]).map(k => `${cnt[k]}×${this.unitName(k, 'enemy')}`).join(', ');
   }
   // ── ДИПЛОМАТИЯ ──
   milStrength(owner: 'player' | 'enemy'): number {
@@ -5128,6 +5234,8 @@ export class Game {
       })() : null,
       drought: Math.ceil(this.droughtT), plague: Math.ceil(this.plagueT),
       alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
+      unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
+        archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
     });
   }
 
@@ -5187,11 +5295,12 @@ export class Game {
         towerUpg: b.key === 'tower' && b.owner === 'player' ? {
           range: b.upg?.range ?? 0, dmg: b.upg?.dmg ?? 0, archers: b.upg?.archers ?? 0, maxRange: 3, maxDmg: 3, maxArchers: 2,
         } : undefined,
-        research: b.research ? { id: b.research.id, name: TECHS[b.research.id]?.name ?? '', t: b.research.t, total: b.research.total } : null,
+        research: b.research ? { id: b.research.id, name: (TECHS[b.research.id] ?? UPGRADES[b.research.id])?.name ?? '', t: b.research.t, total: b.research.total } : null,
         techs: b.owner === 'player' ? this.techsFor(b.key).map(id => {
           const t = TECHS[id];
           return { id, name: t.name, desc: t.desc, icon: t.icon, cost: costTxt(t.cost), done: !!this.tech[id], available: this.age >= t.ageReq && this.afford(t.cost), busy: !!b.research };
         }) : [],
+        upgrades: b.owner === 'player' ? this.upgradeRows(b.key) : [],
       };
     }
     const us = this.selUnits();
@@ -5207,7 +5316,7 @@ export class Game {
     }
     return {
       kind: 'units', count: us.length,
-      types: [...map.entries()].map(([key, e]) => ({ key, label: UNIT_DEFS[key as UnitKey].name, count: e.count, level: e.level, kills: e.kills })),
+      types: [...map.entries()].map(([key, e]) => ({ key, label: this.unitName(key as UnitKey, 'player'), count: e.count, level: e.level, kills: e.kills })),
       avgHp: hp, maxHp: max, maxLevel, totalKills, stance: this.selStance,
       canGather: us.some(u => u.key === 'villager'),
     };

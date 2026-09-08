@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.066';
+export const GAME_VERSION = '1.0.067';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -426,6 +426,22 @@ export default function App() {
                       ))}
                     </div>
                   )}
+                  {/* линии апгрейда рода войск (казармы/конюшня) */}
+                  {(hud.sel.upgrades?.length ?? 0) > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {hud.sel.upgrades!.map(u => (
+                        <button
+                          key={u.id}
+                          title={`${u.name}\n${u.desc}\n${u.cost}${u.locked ? '\n(нужна предыдущая ступень или эпоха)' : ''}`}
+                          disabled={u.done || !u.available}
+                          onClick={() => g()?.research(u.id)}
+                          className={`flex items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[10px] font-black transition ${u.done ? 'border-amber-400/50 bg-amber-500/20 text-amber-200' : u.available ? 'border-violet-400/50 bg-violet-500/20 text-violet-100 hover:bg-violet-500/40' : 'border-white/10 bg-black/30 text-slate-500'}`}
+                        >
+                          <span>{u.done ? '★' : u.locked ? '🔒' : u.icon}</span>{u.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {hud.sel.bkey === 'market' && (
                     <div className="mt-1 flex gap-1">
                       <MiniBtn onClick={() => g()?.trade('wood')} title="Обмен дерева на золото">🪵→🪙 Торговля</MiniBtn>
@@ -529,11 +545,11 @@ export default function App() {
               {dockTab === 'units' ? (
                 <>
                   <TrainBtn label="Шаруа" icon="🧑‍🌾" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
-                  <TrainBtn label="Сарбаз" icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
-                  <TrainBtn label="Мерген" icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
+                  <TrainBtn label={hud?.unitNames?.swordsman ?? 'Сарбаз'} icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
+                  <TrainBtn label={hud?.unitNames?.archer ?? 'Мерген'} icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
                   <TrainBtn label="Батыр" icon="🐎" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
-                  <TrainBtn label="Найзагер" icon="🔱" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
-                  <TrainBtn label="Жасауыл" icon="🏇" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
+                  <TrainBtn label={hud?.unitNames?.spearman ?? 'Найзагер'} icon="🔱" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
+                  <TrainBtn label={hud?.unitNames?.cavalry ?? 'Жасауыл'} icon="🏇" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
                   <TrainBtn label="Катапульта" icon="🪨" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
                   <TrainBtn label="Имам" icon="🕌" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
                   <TrainBtn label="Барлаушы" icon="🧭" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
