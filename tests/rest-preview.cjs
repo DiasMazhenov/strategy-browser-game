@@ -38,8 +38,9 @@ const items=[
   ['kz_villager',VILL,150,'шаруа (эталон)'],
   ['kz_swing_c',Math.round(VILL*1.9),150,'алтыбакан'],
   ['kz_kazan_b',VILL,150,'казан'],
-  ['kz_asyk_a',Math.round(VILL*0.65),150,'асыки'],
-  ['kz_asyk_c',Math.round(VILL*0.65),150,'асыки (радость)'],
+  ['kz_asyk_a',Math.round(VILL*1.06),157,'асыки: замах'],
+  ['kz_asyk_b',Math.round(VILL*1.06),157,'асыки: бросок'],
+  ['kz_asyk_c',Math.round(VILL*1.06),157,'асыки: кость летит'],
   ['kz_fem_side',VILL,150,'работница'],
 ];
 const SCALE=4;                    // увеличим всё для разглядывания

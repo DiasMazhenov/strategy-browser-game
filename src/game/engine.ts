@@ -194,6 +194,10 @@ interface Unit {
   restX?: number; restY?: number;         // точка отдыха у юрты
   freshT?: number;        // «после выходных»: бодрость, пока тикает — работа быстрее
   shiftBack?: { nodeId: number; kind?: string } | null; // куда вернуться после смены
+  // ── намаз: житель идёт к мечети и молится ──
+  praying?: boolean;      // идёт к мечети / молится
+  prayT?: number;         // сколько ещё молиться (0 — ещё в пути)
+  prayBack?: { nodeId: number } | null;  // куда вернуться после намаза
   // ── разведчик: приказы и шпионаж ──
   mission?: 'explore' | 'bases' | 'diplomacy' | 'infiltrate'; // задание разведчика
   mtx?: number; mty?: number;       // цель приказа (база/точка)
@@ -309,6 +313,8 @@ export interface HudSnapshot {
   // сутки и посменная работа
   day: { num: number; name: string; icon: string; phase: number; night: boolean;
     resting: number; fresh: number; tired: number };
+  // намаз: идёт ли молитва и остаток благодати
+  pray: { active: boolean; t: number; praying: number; bereke: number; berekePct: number; count: number };
 }
 export interface NationHud {
   id: string; name: string; ruler: string; title: string; portrait: string; color: string; greet: string;
@@ -418,6 +424,19 @@ export class Game {
   // ── СУТКИ И ПОСМЕННАЯ РАБОТА ──
   // Условные сутки — 240 с. Шаруа устают за смену, уходят к юртам отдыхать
   // (алтыбакан / казан / асыки), возвращаются отдохнувшими и работают быстрее.
+  // ── АЗАН И НАМАЗ ──
+  // Мирные жители по призыву с минарета идут к мечети, молятся и расходятся,
+  // получая «Береке» — благодать общины. Воины не отвлекаются: азан во время
+  // штурма не должен оголять оборону.
+  readonly AZAN_LEN = 47;        // длительность записи азана, сек (public/voices/azan.mp3)
+  readonly PRAYER_LEN = 20;      // сколько длится сам намаз у мечети
+  readonly BEREKE_LEN = 90;      // сколько держится благодать после намаза
+  prayT = 0;                     // сколько ещё идёт намаз (0 — не идёт)
+  berekeT = 0;                   // остаток благодати
+  berekePower = 0;               // сила благодати 0..1 (зависит от явки)
+  azanPhase: number[] = [];      // фазы суток, на которых звучит азан
+  azanDone: number[] = [];       // какие намазы уже прозвучали в этих сутках
+  prayerCount = 0;               // сколько намазов совершено за партию
   readonly DAY_LEN = 240;        // длительность условных суток, сек
   dayT = 0;                      // фаза суток 0..DAY_LEN (0 = полдень, стартуем днём)
   dayNum = 1;                    // номер дня (для «после выходных»)
@@ -1712,7 +1731,10 @@ export class Game {
     if (!us.length) return;
     // ПРЯМОЙ ПРИКАЗ ОТМЕНЯЕТ ОТДЫХ: игрок главнее расписания смен.
     // Работник встаёт с алтыбакана недоотдохнувшим — усталость остаётся как есть.
-    for (const u of us) if (u.resting) { u.resting = false; u.restT = 0; u.restKind = undefined; u.shiftBack = null; }
+    for (const u of us) {
+      if (u.resting) { u.resting = false; u.restT = 0; u.restKind = undefined; u.shiftBack = null; }
+      if (u.praying) { u.praying = false; u.prayT = 0; u.prayBack = null; }
+    }
     // find explicit target
     const tu = this.pickUnit(x, y);
     const tb = this.pickBld(x, y);
@@ -2007,6 +2029,7 @@ export class Game {
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
       day: { dayT: this.dayT, dayNum: this.dayNum, restedTotal: this.restedTotal },
+      pray: { azanDone: this.azanDone, berekeT: this.berekeT, berekePower: this.berekePower, prayerCount: this.prayerCount },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
     };
     return JSON.stringify(data);
@@ -2067,6 +2090,7 @@ export class Game {
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
       if (d.day) { this.dayT = d.day.dayT ?? 0; this.dayNum = d.day.dayNum ?? 1; this.restedTotal = d.day.restedTotal ?? 0; }
+      if (d.pray) { this.azanDone = d.pray.azanDone || []; this.berekeT = d.pray.berekeT ?? 0; this.berekePower = d.pray.berekePower ?? 0; this.prayerCount = d.pray.prayerCount ?? 0; }
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
@@ -2269,6 +2293,7 @@ export class Game {
     if (u.owner !== 'player') return m;
     if ((u.freshT ?? 0) > 0) m *= this.FRESH_BONUS;              // вернулся с отдыха — бодр
     else if ((u.fatigue ?? 0) > 0.7) m *= 1 - ((u.fatigue ?? 0) - 0.7) * 0.8; // вымотан — вяло
+    m *= this.berekeMult();                                      // благодать после намаза
     return m;
   }
   readonly FRESH_BONUS = 1.35;   // насколько быстрее работает отдохнувший
@@ -2369,6 +2394,142 @@ export class Game {
       }
       u.state = 'idle'; u.idleT = 0;
     }
+    return true;
+  }
+
+  // ── АЗАН И НАМАЗ ──
+  // Азан звучит с минарета Мешіт-медресе три раза в сутки (таң, бесін, ақшам).
+  // Пять намазов при 240-секундных сутках означали бы призыв каждые 48 с —
+  // город не успевал бы работать, поэтому взяты три ключевых времени.
+  mosqueOf(): Bld | null {
+    return this.blds.find(b => b.owner === 'player' && b.key === 'mosque' && b.done >= 1) ?? null;
+  }
+  // может ли житель отвлечься на намаз (воины и пастухи — нет)
+  canPray(u: Unit): boolean {
+    if (u.owner !== 'player') return false;
+    if (u.key !== 'villager' && u.key !== 'trader' && u.key !== 'monk') return false;
+    if (u.herder) return false;               // пастух не бросит стадо в степи
+    if (u.targetU >= 0 || u.hunt) return false; // отбивается — не до молитвы
+    return true;
+  }
+  updatePrayer(dt: number) {
+    // благодать тает
+    if (this.berekeT > 0) {
+      this.berekeT = Math.max(0, this.berekeT - dt);
+      if (this.berekeT === 0) this.berekePower = 0;
+    }
+    const mosque = this.mosqueOf();
+    // новые сутки — расписание намазов сбрасывается
+    if (!this.azanPhase.length) this.azanPhase = [0.78, 0.02, 0.40]; // таң, бесін, ақшам
+    const ph = this.dayPhase();
+    if (mosque && !this.prayT) {
+      for (let i = 0; i < this.azanPhase.length; i++) {
+        const target = this.azanPhase[i];
+        // окно срабатывания — узкая полоса вокруг фазы
+        const near = Math.abs(ph - target) < 0.012 || Math.abs(ph - target) > 0.988;
+        if (!near || this.azanDone.includes(i)) continue;
+        // враг у ворот — намаз откладывается: оборона важнее
+        if (this.enemyNearHome()) { this.azanDone.push(i); continue; }
+        this.callToPrayer(mosque, i);
+        break;
+      }
+    }
+    // намаз идёт
+    if (this.prayT > 0) {
+      this.prayT = Math.max(0, this.prayT - dt);
+      if (this.prayT === 0) this.finishPrayer();
+    }
+  }
+  // есть ли враг вблизи ставки (тогда азан пропускаем)
+  enemyNearHome(): boolean {
+    const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
+    if (!tc) return false;
+    return this.units.some(u => u.owner === 'enemy' && dist2(u.x, u.y, tc.x, tc.y) < 900 * 900);
+  }
+  callToPrayer(mosque: Bld, idx: number) {
+    this.azanDone.push(idx);
+    const played = this.sound.azan();
+    this.prayT = this.PRAYER_LEN;
+    // сзываем мирных жителей к мечети
+    let called = 0;
+    for (const u of this.units) {
+      if (!this.canPray(u)) continue;
+      if (u.resting) { u.resting = false; u.restKind = undefined; }  // с алтыбакана — на намаз
+      // доярка уходит на намаз — освобождаем загон, иначе он навсегда
+      // останется «занят» ушедшей работницей и к нему никто не подойдёт
+      if (u.penId != null) {
+        const pen = this.blds.find(b => b.id === u.penId);
+        if (pen && pen.milkWid === u.id) pen.milkWid = undefined;
+        u.penId = undefined;
+      }
+      u.prayBack = u.nodeId >= 0 ? { nodeId: u.nodeId } : null;
+      u.praying = true; u.prayT = 0;
+      // рассаживаем рядами перед мечетью (лицом к кибле)
+      const row = Math.floor(called / 5), col = called % 5;
+      u.tx = mosque.x - 60 + col * 30 + rand(-4, 4);
+      u.ty = mosque.y + mosque.size * 0.5 + 28 + row * 26 + rand(-3, 3);
+      u.state = 'move'; u.nodeId = -1; u.buildId = -1; u.wkind = undefined;
+      called++;
+    }
+    const names = ['Таң намазы', 'Бесін намазы', 'Ақшам намазы'];
+    this.pushBanner(`🕌 Азан — ${names[idx] ?? 'намаз'}`,
+      called ? `Жители идут на молитву: ${called}` : 'Мечеть зовёт, но идти некому', 4);
+    this.spawnRing(mosque.x, mosque.y, '#5eead4');
+    if (!played) this.floater(mosque.x, mosque.y - 60, '🕌 Азан', '#5eead4', 16);
+  }
+  finishPrayer() {
+    const mosque = this.mosqueOf();
+    // считаем явку: сколько мирных дошло и молилось
+    const flock = this.units.filter(u => u.owner === 'player' && u.praying);
+    const total = this.units.filter(u => this.canPray(u)).length + flock.length;
+    const arrived = flock.filter(u => (u.prayT ?? 0) > 0).length;
+    // сила благодати зависит от доли пришедших: полная явка — полный бонус
+    this.berekePower = total > 0 ? clamp(arrived / Math.max(1, total * 0.6), 0.25, 1) : 0;
+    this.berekeT = this.BEREKE_LEN;
+    this.prayerCount++;
+    for (const u of flock) {
+      u.praying = false; u.prayT = 0;
+      const back = u.prayBack; u.prayBack = null;
+      if (back && back.nodeId >= 0) {
+        const n = this.nodes.find(nn => nn.id === back.nodeId && nn.amount > 0);
+        if (n) { this.orderGather(u, n.id); continue; }
+      }
+      u.state = 'idle'; u.idleT = 0;
+    }
+    if (arrived > 0) {
+      this.score += 60;
+      this.morale = Math.min(1.5, this.morale + 0.1 * this.berekePower);
+      // Соблюдение намаза замечают единоверцы: каждый пятый намаз при полной
+      // явке приносит по посланнику к знакомым мусульманским народам.
+      if (this.berekePower >= 0.9 && this.prayerCount % 5 === 0) {
+        const friends = ['khwarezm', 'kokand', 'bukhara'].filter(nid => this.tribeMet[nid] && this.tribeRel[nid] !== 'hostile');
+        for (const nid of friends) this.envoys[nid] = (this.envoys[nid] ?? 0) + 1;
+        if (friends.length) this.pushBanner('🕌 Слава благочестия', `Единоверцы шлют посланников: ${friends.length}`, 3.5);
+      }
+      if (mosque) this.burst(mosque.x, mosque.y - 20, 18, ['#5eead4', '#a7f3d0', '#fff'], 110, 0.9);
+      this.pushBanner('🤲 Береке!', `Намаз совершён (${arrived} чел.) — благодать общины`, 3.2);
+    }
+    this.pushHud();
+  }
+  // множитель благодати для добычи (1.0 — нет благодати)
+  berekeMult(): number { return this.berekeT > 0 ? 1 + 0.15 * this.berekePower : 1; }
+
+  // тик молящегося: дойти до мечети, отстоять намаз
+  updatePraying(u: Unit, dt: number): boolean {
+    if (!u.praying) return false;
+    if (this.prayT <= 0) { u.praying = false; u.prayT = 0; return false; }
+    if (dist2(u.x, u.y, u.tx, u.ty) > 26 * 26) {
+      u.wkind = undefined;
+      this.moveTowardPath(u, u.tx, u.ty, dt);
+      return true;
+    }
+    // на месте: молимся лицом к мечети
+    u.state = 'idle';
+    u.prayT = (u.prayT ?? 0) + dt;
+    const m = this.mosqueOf();
+    if (m) u.face = m.x >= u.x ? 1 : -1;
+    u.anim += dt * 1.1;
+    if (Math.random() < dt * 0.35) this.spark(u.x + rand(-8, 8), u.y - rand(16, 26), '#5eead4');
     return true;
   }
 
@@ -2696,6 +2857,7 @@ export class Game {
     for (const u of this.units) {
       if (u.owner !== 'player' || u.key !== 'villager') continue;
       if (u.resting) continue;                 // отдыхающих не трогаем: они в смене
+      if (u.praying) continue;                 // с намаза кнопкой «Простой» не срываем
       if (u.state !== 'idle' && u.state !== 'move') continue;
       const nd = this.nearestNode(u.x, u.y, n % 3 === 0 ? 'wood' : n % 3 === 1 ? 'food' : 'gold');
       if (nd) { this.orderGather(u, nd.id); n++; }
@@ -2883,8 +3045,10 @@ export class Game {
     this.dayT += dt;
     if (this.dayT >= this.DAY_LEN) {
       this.dayT -= this.DAY_LEN; this.dayNum++;
+      this.azanDone = [];          // новые сутки — намазы звучат заново
       this.pushBanner(`🌅 День ${this.dayNum}`, 'Новый день над степью', 2.4);
     }
+    this.updatePrayer(dt);         // азан с минарета и намаз
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
     this.updateEvents(dt);         // случайные события степи
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
@@ -3064,6 +3228,8 @@ export class Game {
         continue;
       }
       if (u.owner === 'neutral' && u.tribe) this.updateSoldier(u, dt);
+      // көпес и имам тоже идут на намаз (шаруа обрабатывается внутри updateVillager)
+      else if (u.praying && u.key !== 'villager' && this.updatePraying(u, dt)) { u.anim += dt * 2; }
       else if (u.key === 'villager') this.updateVillager(u, dt);
       else if (u.key === 'trader') this.updateTrader(u, dt);
       else if (u.key === 'scout') this.updateScout(u, dt);
@@ -3556,7 +3722,8 @@ export class Game {
   }
 
   updateVillager(u: Unit, dt: number) {
-    // ОТДЫХ (посменная работа) — выше всех дел, кроме прямого приказа игрока
+    // НАМАЗ важнее работы и отдыха; затем отдых по смене
+    if (u.praying && this.updatePraying(u, dt)) return;
     if (u.resting && this.updateResting(u, dt)) return;
     // пастух: цикл выпаса. В ручном перемещении (move/attackmove/build) слушается приказа,
     // а по прибытии (idle) и в фазе gather — пасёт скот и НЕ уходит на авто-добычу.
@@ -5417,6 +5584,10 @@ export class Game {
         resting: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && u.resting).length,
         fresh: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.freshT ?? 0) > 0).length,
         tired: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.fatigue ?? 0) > 0.7 && !u.resting).length },
+      pray: { active: this.prayT > 0, t: Math.ceil(this.prayT),
+        praying: this.units.filter(u => u.owner === 'player' && u.praying).length,
+        bereke: Math.ceil(this.berekeT), berekePct: Math.round(this.berekePower * 15),
+        count: this.prayerCount },
     });
   }
 

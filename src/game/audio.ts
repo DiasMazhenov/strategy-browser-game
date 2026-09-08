@@ -156,6 +156,7 @@ export class SoundBank {
   stopVoice() {
     for (const a of this.activeClips) { try { a.pause(); } catch { /* noop */ } }
     this.activeClips.length = 0;
+    this.stopAzan();     // азан длинный — при выключении звука обязан замолчать сразу
   }
 
   private gate(key: string, ms: number) {
@@ -352,6 +353,32 @@ export class SoundBank {
     setTimeout(stop, clipLen);
     a.addEventListener('ended', stop, { once: true });
     a.addEventListener('error', stop, { once: true });
+  }
+  // ── АЗАН: призыв на намаз с минарета мечети ──
+  // Запись длинная (~47с) и звучит целиком, поэтому играем строго один экземпляр:
+  // повторный вызов во время звучания игнорируется, иначе азаны наложатся друг на друга.
+  private azanEl: HTMLAudioElement | null = null;
+  private readonly AZAN_URL = 'voices/azan.mp3';
+  azanPlaying(): boolean { return !!this.azanEl; }
+  azan(): boolean {
+    this.ensure();
+    if (this.muted || !this.voiceOn) return false;
+    if (this.azanEl) return false;                 // уже звучит — не накладываем
+    let a: HTMLAudioElement;
+    try { a = new Audio(this.AZAN_URL); } catch { return false; }
+    a.volume = Math.max(0.35, this.voiceVolume);   // азан слышен поверх шума боя
+    a.preload = 'auto';
+    const done = () => { if (this.azanEl === a) this.azanEl = null; };
+    a.addEventListener('ended', done, { once: true });
+    a.addEventListener('error', done, { once: true });
+    this.azanEl = a;
+    a.play().catch(done);                          // автоплей заблокирован — тихо выходим
+    return true;
+  }
+  stopAzan() {
+    if (!this.azanEl) return;
+    try { this.azanEl.pause(); } catch { /* noop */ }
+    this.azanEl = null;
   }
   death() { this.ensure(); if (!this.gate('death', 120)) return; this.tone(300, 0.28, 'sine', 0.16, -180); this.noise(0.18, 0.12, 'lowpass', 500); }
   // взрыв: саб-бас + низкий гул

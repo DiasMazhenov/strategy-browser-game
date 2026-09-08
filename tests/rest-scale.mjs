@@ -7,19 +7,20 @@ const ok=(n,c,x='')=>{c?(pass++,console.log('PASS',n)):(fail++,console.log('FAIL
 const VILL=46;                       // UNIT_TARGET_H.villager
 const restH=key=>key.startsWith('kz_swing')?Math.round(VILL*1.9)
   :key.startsWith('kz_kazan')?VILL
-  :key.startsWith('kz_asyk')?Math.round(VILL*0.65):0;
+  :key.startsWith('kz_asyk')?Math.round(VILL*1.06):0;
 
 // формулы масштаба
 ok('казан = рост шаруа (эталон — женщина стоя)', restH('kz_kazan_a')===46);
 ok('алтыбакан ×1.9 (эталон — вся рама ~3.2м)', restH('kz_swing_c')===87);
-ok('асыки ×0.65 (эталон — мужчина на корточках)', restH('kz_asyk_a')===30);
+ok('асыки ×1.06 (групповая сценка, эталон — стоящий зритель)', restH('kz_asyk_a')===49);
 ok('обычный кадр сценкой не считается', restH('kz_villager')===0);
 ok('качели выше человека', restH('kz_swing_c')>restH('kz_kazan_a'));
-ok('сидящий ниже стоящего', restH('kz_asyk_a')<restH('kz_kazan_a'));
+ok('сценка асыков шире одиночной фигуры', restH('kz_asyk_a')>restH('kz_kazan_a'));
 
 // человек в сценке соразмерен шаруа (по логике эталонов)
+// у асыков нормировка идёт по всему холсту (157px), а стоящий зритель занимает 148px
 const humanOnScreen=k=>k.startsWith('kz_swing')?restH(k)/1.9
-  :k.startsWith('kz_asyk')?restH(k)/0.65:restH(k);
+  :k.startsWith('kz_asyk')?restH(k)*148/157:restH(k);
 for(const k of ['kz_swing_c','kz_kazan_a','kz_asyk_a']){
   const h=humanOnScreen(k);
   ok(`${k}: человек ≈ рост шаруа (${h.toFixed(0)}px)`, Math.abs(h-VILL)<=1.5, h);
@@ -40,14 +41,15 @@ for(const [g,keys] of Object.entries(groups)){
   if(!sizes.every(Boolean)) continue;
   const hs=sizes.map(s=>s.h);
   if (g==='asyk') {
-    // у асыков поза МЕНЯЕТСЯ: два кадра на корточках + кадр «встал и радуется».
-    // Сверяем не равенство, а что присед ниже стойки и стойка = росту шаруа.
-    const crouch=(hs[0]+hs[1])/2, stand=hs[2];
-    const H=restH('kz_asyk_a'), sc=H/150;
-    ok('асыки: присед ниже стойки', crouch<stand, `${crouch} vs ${stand}`);
-    ok('асыки: вставший мужчина ростом с шаруа',
-      Math.abs(stand*sc-VILL)<=2, (stand*sc).toFixed(1));
-    ok('асыки: оба кадра приседа одной высоты', Math.abs(hs[0]-hs[1])<=3);
+    // Асыки — ГРУППОВАЯ сценка на ОБЩЕМ холсте: метальщик закреплён по якорю,
+    // меняются только рука и кости. Холсты обязаны совпадать пиксель в пиксель,
+    // иначе движок впишет их в одну высоту и фигуры будут «дышать».
+    const ws=sizes.map(s=>s.w);
+    ok('асыки: все кадры на общем холсте (ширина)', Math.max(...ws)-Math.min(...ws)===0, ws.join('/'));
+    ok('асыки: все кадры на общем холсте (высота)', Math.max(...hs)-Math.min(...hs)===0, hs.join('/'));
+    const H=restH('kz_asyk_a'), sc=H/hs[0];
+    ok('асыки: зритель ростом с шаруа', Math.abs(148*sc-VILL)<=2, (148*sc).toFixed(1));
+    ok('асыки: сценка шире одиночной фигуры (есть зрители)', ws[0]>hs[0]*1.4, ws[0]);
   } else {
     const spread=Math.max(...hs)-Math.min(...hs);
     // поза не меняется — кадры обязаны совпадать, иначе фигура «прыгает»

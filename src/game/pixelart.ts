@@ -346,9 +346,12 @@ const KZ_KAZAN: [HTMLImageElement, string][] = [
   [mk(kzKazanA), 'kz_kazan_a'], [mk(kzKazanB), 'kz_kazan_b'],
   [mk(kzKazanC), 'kz_kazan_c'], [mk(kzKazanB), 'kz_kazan_b'],
 ];
+// Асыки идут ТОЛЬКО вперёд: замах (двойной, прицеливание дольше) → бросок →
+// кость летит, зрители вскинули руки. Обратный ход (c→b) выглядел бы как
+// «кость вернулась в руку», поэтому среднего кадра в конце нет.
 const KZ_ASYK: [HTMLImageElement, string][] = [
-  [mk(kzAsykA), 'kz_asyk_a'], [mk(kzAsykB), 'kz_asyk_b'],
-  [mk(kzAsykC), 'kz_asyk_c'], [mk(kzAsykB), 'kz_asyk_b'],
+  [mk(kzAsykA), 'kz_asyk_a'], [mk(kzAsykA), 'kz_asyk_a'],
+  [mk(kzAsykB), 'kz_asyk_b'], [mk(kzAsykC), 'kz_asyk_c'],
 ];
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
@@ -647,13 +650,15 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // логических px, поэтому эталон у каждой сценки свой:
   //   swing — эталоном стала вся РАМА алтыбакана (~3.2 м против роста 1.7 м) → ×1.9;
   //   kazan — эталон женщина стоя → ровно рост шаруа;
-  //   asyk  — эталон мужчина НА КОРТОЧКАХ → 0.65 роста.
+  //   asyk  — сценка ГРУППОВАЯ (метальщик + 2 зрителя) на общем холсте 283x157.
+  //           Стоящий зритель занимает 148 из 157px холста, значит рост шаруа
+  //           достигается при H = 46*157/148 ≈ 49 → ×1.06.
   // Без этой поправки девушка на качелях выходила вдвое мельче шаруа, а женщина
   // у казана — вдвое крупнее.
   const VILL_H = UNIT_TARGET_H.villager ?? 46;
   const restH = anKey.startsWith('kz_swing') ? Math.round(VILL_H * 1.9)
     : anKey.startsWith('kz_kazan') ? VILL_H
-    : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 0.65) : 0;
+    : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 1.06) : 0;
   const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46));
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
