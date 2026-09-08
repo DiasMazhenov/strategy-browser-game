@@ -345,6 +345,15 @@ export interface AudienceHud {
 // разъезжаются (так и было, пока сутки были 240 с).
 export const DAY_LEN_SEC = 1800;   // 30 минут
 
+// Из этих 30 минут ночь занимает ровно столько, сколько задано здесь, — не
+// «сколько получится» из формулы освещения. Раньше темнота считалась косинусом
+// и «ночью» (порог 0.62) оказывались 12.7 минуты из 30, причём подпись в HUD
+// («Түн» — ровно четверть суток) с этим не совпадала: игрок видел «вечер», а
+// рабочие уже уставали по ночной ставке.
+export const NIGHT_LEN_SEC = 240;    // 4 минуты глухой ночи
+export const TWILIGHT_SEC = 240;     // закат и рассвет, по 4 минуты каждый
+// день = 1800 − 240 − 2·240 = 18 минут светлого времени
+
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => v < a ? a : v > b ? b : v;
 const dist2 = (ax: number, ay: number, bx: number, by: number) => { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
@@ -2333,24 +2342,37 @@ export class Game {
   readonly TIRE_RATE = 1 / (DAY_LEN_SEC * 0.625); // полная усталость за 5/8 суток работы
 
   // Фаза суток 0..1. Договорённость наследуется от старого визуала освещения:
-  // фаза 0 — ПОЛДЕНЬ (светло), 0.5 — ПОЛНОЧЬ. Темнота = 0.5*(1-cos(2πφ)).
+  // фаза 0 — ПОЛДЕНЬ (светло), 0.5 — ПОЛНОЧЬ.
   dayPhase(): number { return this.dayT / this.DAY_LEN; }
-  darkness(): number { return 0.5 * (1 - Math.cos(this.dayPhase() * Math.PI * 2)); }
+  // Полуширина глухой ночи и внешняя граница сумерек — в долях суток.
+  get nightHalf(): number { return NIGHT_LEN_SEC / 2 / this.DAY_LEN; }
+  get duskEdge(): number { return (NIGHT_LEN_SEC / 2 + TWILIGHT_SEC) / this.DAY_LEN; }
+  // Темнота 0..1 по ЯВНОМУ расписанию, а не по косинусу: посреди ночи ровно 1,
+  // днём ровно 0, между ними плавная ступень (smoothstep) длиной в сумерки.
+  // Косинус растягивал полутьму на 80% суток и делал «ночь» вопросом порога.
+  darkness(): number {
+    const d = Math.abs(this.dayPhase() - 0.5);      // 0 в полночь, 0.5 в полдень
+    if (d <= this.nightHalf) return 1;              // глухая ночь
+    if (d >= this.duskEdge) return 0;               // светлый день
+    const t = (d - this.nightHalf) / (this.duskEdge - this.nightHalf);
+    return 1 - t * t * (3 - 2 * t);                 // сумерки: плавно
+  }
+  // Подписи совпадают с реальным освещением: «Түн» показывается ровно тогда,
+  // когда действуют ночные правила (усталость ×1.6, ранний уход на отдых).
   dayName(): string {
-    const p = this.dayPhase();
-    if (p < 0.125 || p >= 0.875) return 'Күндіз (полдень)';
-    if (p < 0.375) return 'Кеш (вечер)';
-    if (p < 0.625) return 'Түн (ночь)';
-    return 'Таң (утро)';
+    const p = this.dayPhase(), d = Math.abs(p - 0.5);
+    if (d <= this.nightHalf) return 'Түн (ночь)';
+    if (d >= this.duskEdge) return 'Күндіз (день)';
+    return p < 0.5 ? 'Кеш (закат)' : 'Таң (рассвет)';
   }
   dayIcon(): string {
-    const p = this.dayPhase();
-    if (p < 0.125 || p >= 0.875) return '☀️';
-    if (p < 0.375) return '🌇';
-    if (p < 0.625) return '🌙';
-    return '🌅';
+    const p = this.dayPhase(), d = Math.abs(p - 0.5);
+    if (d <= this.nightHalf) return '🌙';
+    if (d >= this.duskEdge) return '☀️';
+    return p < 0.5 ? '🌇' : '🌅';
   }
-  isNight(): boolean { return this.darkness() > 0.62; }
+  // Ночные правила действуют ровно в те 4 минуты, что отведены ночи.
+  isNight(): boolean { return Math.abs(this.dayPhase() - 0.5) <= this.nightHalf; }
 
   // точка отдыха у ближайшей юрты (или ставки, если юрт ещё нет)
   restSpotFor(u: Unit): { x: number; y: number; b: Bld } | null {
@@ -2453,10 +2475,14 @@ export class Game {
     }
     const mosque = this.mosqueOf();
     // новые сутки — расписание намазов сбрасывается
-    // Фаза: 0 = полдень, 0.5 = полночь, значит закат ≈ 0.25, рассвет ≈ 0.75.
-    // Прежнее значение ақшам (0.40) приходилось на темноту 0.90 — «закатный»
-    // намаз звучал глухой ночью; при получасовых сутках это стало очевидно.
-    if (!this.azanPhase.length) this.azanPhase = [0.75, 0.02, 0.25]; // таң, бесін, ақшам
+    // Расписание СЛЕДУЕТ за освещением, а не задано числами «на глаз»: ақшам и
+    // таң приходятся на середину сумерек (там темнота ровно 0.5 — закат и
+    // рассвет), бесін — на полдень. Иначе при смене длины ночи «закатный» намаз
+    // снова уехал бы в яркий день, как это было с фазой 0.40 в глухой ночи.
+    if (!this.azanPhase.length) {
+      const mid = (this.nightHalf + this.duskEdge) / 2;
+      this.azanPhase = [0.5 + mid, 0.02, 0.5 - mid];   // таң (рассвет), бесін (полдень), ақшам (закат)
+    }
     const ph = this.dayPhase();
     if (mosque && !this.prayT) {
       for (let i = 0; i < this.azanPhase.length; i++) {
@@ -6112,13 +6138,16 @@ export class Game {
     // (раньше здесь был отдельный счётчик от this.time, и картинка расходилась с логикой).
     if (this.settings.dayNight) {
       const ph = this.dayPhase();                      // 0..1
-      const darkness = 0.5 * (1 - Math.cos(ph * Math.PI * 2)); // 0 днём, ~1 ночью
-      if (darkness > 0.08) {
+      // ТА ЖЕ darkness(), что и у механик: картинка обязана совпадать с тем,
+      // когда реально действуют ночные правила (здесь была своя копия формулы).
+      const darkness = this.darkness();
+      if (darkness > 0.02) {
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-        // Ночь синеватая, а закат и рассвет — тёплые. Закат при фазе 0.25,
-        // рассвет при 0.75 (0 — полдень, 0.5 — полночь). Прежняя формула брала
-        // |ph − 0.5| и подсвечивала тёплым саму ПОЛНОЧЬ.
-        const sunset = Math.max(0, 1 - Math.min(Math.abs(ph - 0.25), Math.abs(ph - 0.75)) * 8);
+        // Ночь синеватая, а закат и рассвет — тёплые. Тёплый максимум приходится
+        // на середину сумерек по обе стороны от полуночи.
+        const mid = (this.nightHalf + this.duskEdge) / 2;
+        const near = Math.min(Math.abs(ph - (0.5 - mid)), Math.abs(ph - (0.5 + mid)));
+        const sunset = Math.max(0, 1 - near / (this.duskEdge - this.nightHalf) * 2);
         ctx.fillStyle = `rgba(${20 + sunset * 60},${26 + sunset * 10},${60 - sunset * 30},${(darkness * 0.42).toFixed(3)})`;
         ctx.fillRect(0, 0, this.vw, this.vh);
       }

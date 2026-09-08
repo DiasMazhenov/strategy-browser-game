@@ -28,21 +28,55 @@ const restsPerDay=DAY_LEN/cycle;
 ok(`работник отдыхает ~1.6 раза за сутки (${restsPerDay.toFixed(1)})`,
   restsPerDay>1.2 && restsPerDay<2.2, restsPerDay.toFixed(2));
 
-// ── сутки: фаза 0 = полдень, 0.5 = полночь (унаследовано от старого освещения) ──
+// ── сутки: фаза 0 = полдень, 0.5 = полночь ──
+// Ночь — ЯВНЫЙ бюджет времени, а не следствие порога на косинусе.
+const NIGHT_LEN=parseFloat(cfg(/NIGHT_LEN_SEC = ([\d.]+)/,'NIGHT_LEN_SEC')[1]);
+const TWILIGHT=parseFloat(cfg(/TWILIGHT_SEC = ([\d.]+)/,'TWILIGHT_SEC')[1]);
+const nightHalf=NIGHT_LEN/2/DAY_LEN, duskEdge=(NIGHT_LEN/2+TWILIGHT)/DAY_LEN;
 const phase=t=>(t%DAY_LEN)/DAY_LEN;
-const darkness=t=>0.5*(1-Math.cos(phase(t)*Math.PI*2));
-const isNight=t=>darkness(t)>0.62;
+const darkAt=p=>{const d=Math.abs(p-0.5);
+  if(d<=nightHalf)return 1; if(d>=duskEdge)return 0;
+  const x=(d-nightHalf)/(duskEdge-nightHalf); return 1-x*x*(3-2*x);};
+const darkness=t=>darkAt(phase(t));
+const isNightAt=p=>Math.abs(p-0.5)<=nightHalf;
+const isNight=t=>isNightAt(phase(t));
+
+ok(`ночь длится ровно ${NIGHT_LEN/60} мин`, NIGHT_LEN===240, NIGHT_LEN);
+ok('день+сумерки+ночь складываются в сутки',
+  near((DAY_LEN-NIGHT_LEN-2*TWILIGHT)+2*TWILIGHT+NIGHT_LEN, DAY_LEN));
+ok(`светлого дня ${(DAY_LEN-NIGHT_LEN-2*TWILIGHT)/60} мин`,
+  DAY_LEN-NIGHT_LEN-2*TWILIGHT===1080);
+// доля ночи, посчитанная перебором — так же, как её увидит игрок
+let nightTicks=0; const N=DAY_LEN*2;
+for(let i=0;i<N;i++) if(isNightAt((i/2%DAY_LEN)/DAY_LEN)) nightTicks++;
+ok(`ночь занимает ${(nightTicks/N*100).toFixed(1)}% суток (${(nightTicks/N*DAY_LEN/60).toFixed(1)} мин)`,
+  Math.abs(nightTicks/N*DAY_LEN-NIGHT_LEN)<2, (nightTicks/N*DAY_LEN).toFixed(0));
+
 ok('в полдень светло', near(darkness(0),0));
 ok('в полночь темно', near(darkness(DAY_LEN/2),1));
 ok('полдень — не ночь', !isNight(0));
 ok('полночь — ночь', isNight(DAY_LEN/2));
-ok('вечер темнее полудня', darkness(DAY_LEN*0.35)>darkness(DAY_LEN*0.1));
-ok('утро светлеет к полудню', darkness(DAY_LEN*0.9)<darkness(DAY_LEN*0.7));
+ok('всю глухую ночь темнота максимальна',
+  near(darkAt(0.5-nightHalf),1) && near(darkAt(0.5+nightHalf),1));
+ok('за границей сумерек уже светло',
+  darkAt(0.5-duskEdge)===0 && darkAt(0.5+duskEdge)===0);
+ok('в сумерках полутьма', darkAt(0.5-(nightHalf+duskEdge)/2)>0.3 && darkAt(0.5-(nightHalf+duskEdge)/2)<0.7);
+ok('вечер темнее полудня', darkness(DAY_LEN*0.40)>darkness(DAY_LEN*0.1));
+ok('утро светлеет к полудню', darkness(DAY_LEN*0.95)<darkness(DAY_LEN*0.65));
 ok('цикл замкнут', near(darkness(0),darkness(DAY_LEN)));
-// тёплая подсветка обязана приходиться на закат/рассвет, а не на полночь
-const sunset=p=>Math.max(0,1-Math.min(Math.abs(p-0.25),Math.abs(p-0.75))*8);
-ok('тёплый свет на закате', sunset(0.25)===1);
-ok('тёплый свет на рассвете', sunset(0.75)===1);
+// подпись фазы обязана совпадать с ночными правилами: игрок не должен видеть
+// «вечер», пока рабочие уже устают по ночной ставке
+const nameAt=p=>{const d=Math.abs(p-0.5);
+  if(d<=nightHalf)return'Түн'; if(d>=duskEdge)return'Күндіз'; return p<0.5?'Кеш':'Таң';};
+let mismatch=0;
+for(let i=0;i<1000;i++){const p=i/1000;
+  if((nameAt(p)==='Түн')!==isNightAt(p)) mismatch++;}
+ok('подпись «Түн» совпадает с ночными правилами', mismatch===0, mismatch);
+// тёплая подсветка — на середине сумерек, не в полночь и не в полдень
+const midTw=(nightHalf+duskEdge)/2;
+const sunset=p=>Math.max(0,1-Math.min(Math.abs(p-(0.5-midTw)),Math.abs(p-(0.5+midTw)))/(duskEdge-nightHalf)*2);
+ok('тёплый свет на закате', near(sunset(0.5-midTw),1));
+ok('тёплый свет на рассвете', near(sunset(0.5+midTw),1));
 ok('в полночь тёплого света нет', sunset(0.5)===0);
 ok('в полдень тёплого света нет', sunset(0)===0);
 

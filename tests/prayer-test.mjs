@@ -75,10 +75,23 @@ ok('azan(): блокировка автоплея не роняет игру', /
 ok('движок зовёт sound.azan()', /this\.sound\.azan\s*\(/.test(eng));
 
 // ── 3. Расписание: три намаза в сутки, окна не пересекаются ─────────────────
+// Расписание больше не набор чисел: ақшам и таң вычисляются от середины
+// сумерек, поэтому и тест считает их так же, как движок.
+const NIGHT_LEN = num(/NIGHT_LEN_SEC = ([\d.]+)/, 'NIGHT_LEN_SEC');
+const TWILIGHT = num(/TWILIGHT_SEC = ([\d.]+)/, 'TWILIGHT_SEC');
+const nightHalf = NIGHT_LEN / 2 / DAY_LEN, duskEdge = (NIGHT_LEN / 2 + TWILIGHT) / DAY_LEN;
 const phM = eng.match(/azanPhase = \[([^\]]+)\]/);
 ok('расписание азана задано', !!phM);
+ok('ақшам и таң привязаны к сумеркам, а не к числам',
+  !!phM && /0\.5 \+ mid/.test(phM[1]) && /0\.5 - mid/.test(phM[1]), phM && phM[1]);
 if (phM) {
-  const ph = phM[1].split(',').map(x => parseFloat(x));
+  const mid = (nightHalf + duskEdge) / 2;
+  const ph = phM[1].split(',').map(x => {
+    const t = x.trim();
+    if (/0\.5 \+ mid/.test(t)) return 0.5 + mid;
+    if (/0\.5 - mid/.test(t)) return 0.5 - mid;
+    return parseFloat(t);
+  });
   ok(`три намаза в сутки (${ph.join(', ')})`, ph.length === 3, ph.length);
   ok('все фазы в пределах суток 0..1', ph.every(p => p >= 0 && p < 1));
   // окно задано в секундах реального времени: win = <сек> / DAY_LEN
@@ -96,16 +109,32 @@ if (phM) {
   ok('намазы не накладываются друг на друга', !overlap);
   // Фаза: 0 = полдень, 0.5 = полночь. Азан не должен звучать в глухую ночь —
   // «закатный» ақшам когда-то стоял на 0.40, где темнота уже 0.90.
-  const darkAt = p => 0.5 * (1 - Math.cos(p * Math.PI * 2));
-  const phName = p => (p < 0.125 || p >= 0.875) ? 'Күндіз' : p < 0.375 ? 'Кеш' : p < 0.625 ? 'Түн' : 'Таң';
+  const darkAt = p => {
+    const d = Math.abs(p - 0.5);
+    if (d <= nightHalf) return 1;
+    if (d >= duskEdge) return 0;
+    const t = (d - nightHalf) / (duskEdge - nightHalf);
+    return 1 - t * t * (3 - 2 * t);
+  };
+  const phName = p => {
+    const d = Math.abs(p - 0.5);
+    if (d <= nightHalf) return 'Түн';
+    if (d >= duskEdge) return 'Күндіз';
+    return p < 0.5 ? 'Кеш' : 'Таң';
+  };
   ph.forEach((p, i) => {
     const nm = ['таң', 'бесін', 'ақшам'][i] ?? `намаз ${i}`;
-    ok(`${nm} (фаза ${p}) не приходится на глухую ночь — ${phName(p)}, темнота ${darkAt(p).toFixed(2)}`,
-      darkAt(p) <= 0.62, darkAt(p).toFixed(2));
+    ok(`${nm} (фаза ${p.toFixed(3)}) не в глухой ночи — ${phName(p)}, темнота ${darkAt(p).toFixed(2)}`,
+      darkAt(p) < 1, darkAt(p).toFixed(2));
   });
   ok('бесін — полуденный намаз', Math.min(ph[1], 1 - ph[1]) < 0.1, ph[1]);
   ok('ақшам — закатный, таң — рассветный (по разные стороны полуночи)',
-    ph[2] > 0 && ph[2] < 0.5 && ph[0] > 0.5 && ph[0] < 1, `${ph[2]} / ${ph[0]}`);
+    ph[2] > 0 && ph[2] < 0.5 && ph[0] > 0.5 && ph[0] < 1, `${ph[2].toFixed(3)} / ${ph[0].toFixed(3)}`);
+  ok('ақшам и таң попадают ровно в сумерки',
+    phName(ph[2]) === 'Кеш' && phName(ph[0]) === 'Таң', `${phName(ph[2])} / ${phName(ph[0])}`);
+  ok('в сумеречные намазы полутьма (~0.5)',
+    Math.abs(darkAt(ph[2]) - 0.5) < 0.1 && Math.abs(darkAt(ph[0]) - 0.5) < 0.1,
+    `${darkAt(ph[2]).toFixed(2)} / ${darkAt(ph[0]).toFixed(2)}`);
   // окно должно быть шире одного тика на максимальной скорости игры
   const winSec = win * 2 * DAY_LEN;
   // на 2x ускорении кадр съедает вдвое больше игровых секунд — окно обязано пережить это

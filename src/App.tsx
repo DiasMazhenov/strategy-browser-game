@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.071';
+export const GAME_VERSION = '1.0.072';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -213,7 +213,7 @@ export default function App() {
             {hud?.day && (
               <div
                 className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.day.night ? 'bg-indigo-500/25 text-indigo-100' : 'bg-amber-400/20 text-amber-100'}`}
-                title={`${hud.day.name} · День ${hud.day.num}\nСутки длятся 30 минут при скорости 1x\nОтдыхает: ${hud.day.resting} · Бодрых: ${hud.day.fresh} · Устали: ${hud.day.tired}\nШаруа сменяют друг друга у юрт и возвращаются отдохнувшими (+35% к добыче)`}
+                title={`${hud.day.name} · День ${hud.day.num}\nСутки 30 минут: 18 мин день, по 4 мин закат и рассвет, 4 мин ночь\nНочью шаруа устают быстрее и уходят отдыхать раньше\nОтдыхает: ${hud.day.resting} · Бодрых: ${hud.day.fresh} · Устали: ${hud.day.tired}\nШаруа сменяют друг друга у юрт и возвращаются отдохнувшими (+35% к добыче)`}
               >
                 {hud.day.icon} День {hud.day.num}
                 {/* при получасовых сутках время дня важнее номера дня: показываем фазу */}
