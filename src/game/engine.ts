@@ -6,7 +6,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
   type HexKind,
   TILE_STEP } from './iso';
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
-import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
+import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { NATIONS, NATION_BY_ID, TRIBE_IDS, TRIBE_KIND_BY_ID, TRIBE_TYPES, ENVOY_TIERS, envoyCost,
   type FacRel, type TribeKind } from './nations';
@@ -6148,12 +6148,118 @@ export class Game {
         const mid = (this.nightHalf + this.duskEdge) / 2;
         const near = Math.min(Math.abs(ph - (0.5 - mid)), Math.abs(ph - (0.5 + mid)));
         const sunset = Math.max(0, 1 - near / (this.duskEdge - this.nightHalf) * 2);
-        ctx.fillStyle = `rgba(${20 + sunset * 60},${26 + sunset * 10},${60 - sunset * 30},${(darkness * 0.42).toFixed(3)})`;
-        ctx.fillRect(0, 0, this.vw, this.vh);
+        const tint = `rgba(${20 + sunset * 60},${26 + sunset * 10},${60 - sunset * 30},${(darkness * 0.42).toFixed(3)})`;
+        this.drawNightLight(tint);
       }
     }
 
     this.drawMinimap(ctx);
+  }
+
+  // ── НОЧНОЕ ОСВЕЩЕНИЕ: факелы у зданий ───────────────────────────────────────
+  // Свет здесь НЕ рисуется поверх темноты (так получается мутное молочное пятно,
+  // потому что светлый спрайт ложится НА затемнение). Вместо этого затемнение
+  // копится в отдельном слое, а факелы ВЫРЕЗАЮТ в нём дырки через
+  // 'destination-out' — то есть свет буквально снимает ночь, как и положено.
+  // Отдельный слой нужен ещё и потому, что вырезать из основного холста нельзя:
+  // дырка выела бы саму карту.
+  private lightCv: HTMLCanvasElement | null = null;
+  private lightCtx: CanvasRenderingContext2D | null = null;
+  drawNightLight(tint: string) {
+    const { ctx } = this;
+    const W = Math.max(1, Math.round(this.vw * this.dpr));
+    const H = Math.max(1, Math.round(this.vh * this.dpr));
+    if (!this.lightCv) {
+      this.lightCv = document.createElement('canvas');
+      this.lightCtx = this.lightCv.getContext('2d');
+    }
+    const lc = this.lightCv, lx = this.lightCtx;
+    if (!lc || !lx) {                        // нет второго холста — просто затемняем
+      ctx.fillStyle = tint; ctx.fillRect(0, 0, this.vw, this.vh); return;
+    }
+    if (lc.width !== W || lc.height !== H) { lc.width = W; lc.height = H; }
+    lx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    lx.clearRect(0, 0, this.vw, this.vh);
+    lx.globalCompositeOperation = 'source-over';
+    lx.fillStyle = tint;
+    lx.fillRect(0, 0, this.vw, this.vh);
+
+    // Факелы горят только когда реально темно, и разгораются вместе с сумерками.
+    const lit = this.torchLit();
+    // Список источников собираем ОДИН раз: он нужен и слою ночи, и тёплому
+    // отблеску, а куллинг с проверкой тумана — самая дорогая часть.
+    const lamps: { px: number; py: number; R: number; flick: number }[] = [];
+    if (lit > 0.01) {
+      const z = this.cam.zoom, t = this.time;
+      for (const b of this.blds) {
+        if (b.done < 1) continue;                       // стройка не освещает
+        if (b.key === 'wall' || b.key === 'gate') continue; // у дувала факелов нет
+        // за туманом войны свет не виден — иначе он выдавал бы чужой лагерь
+        if (this.settings.fogOfWar && !this.fogAt(b.x, b.y).expl) continue;
+        const [sx, sy] = this.wToScreen(b.x, b.y);
+        const px = this.vw / 2 + sx * z, py = this.vh / 2 + sy * z;
+        // Радиус — от размера здания: ставка светит далеко, юрта чуть-чуть.
+        // Держим круг близко к постройке: широкое пятно съедает саму ночь и
+        // превращает её в мутные сумерки по всей карте.
+        const R = (b.size * 0.85 + 34) * z;
+        if (px < -R || py < -R || px > this.vw + R || py > this.vh + R) continue;
+        // лёгкое дыхание пламени, у каждого здания своя фаза
+        const flick = 0.92 + 0.08 * Math.sin(t * 3.1 + b.id * 1.7) + 0.04 * Math.sin(t * 7.3 + b.id);
+        lamps.push({ px, py, R, flick });
+      }
+    }
+    if (lamps.length) {
+      lx.globalCompositeOperation = 'destination-out';
+      for (const l of lamps) {
+        const r = l.R * l.flick;
+        const g = lx.createRadialGradient(l.px, l.py, r * 0.12, l.px, l.py, r);
+        // мягкий край: в центре снимаем ночь почти полностью, к краю — плавно на нет
+        g.addColorStop(0, `rgba(0,0,0,${(0.78 * lit).toFixed(3)})`);
+        g.addColorStop(0.35, `rgba(0,0,0,${(0.42 * lit).toFixed(3)})`);
+        g.addColorStop(0.7, `rgba(0,0,0,${(0.14 * lit).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        lx.fillStyle = g;
+        lx.beginPath(); lx.arc(l.px, l.py, r, 0, Math.PI * 2); lx.fill();
+      }
+      lx.globalCompositeOperation = 'source-over';
+    }
+    // готовый слой ночи с дырками — на экран
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(lc, 0, 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+    // Тёплый отблеск пламени поверх — чтобы «дырка» в ночи читалась именно как
+    // огонь, а не как выцветшее пятно.
+    if (lamps.length) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const l of lamps) {
+        const r = l.R * 0.72 * l.flick;
+        const g = ctx.createRadialGradient(l.px, l.py, 0, l.px, l.py, r);
+        g.addColorStop(0, `rgba(255,170,70,${(0.30 * lit).toFixed(3)})`);
+        g.addColorStop(0.5, `rgba(255,150,50,${(0.12 * lit).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(255,140,40,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(l.px, l.py, r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  // Насколько разгорелись факелы: 0 днём, 1 в глухую ночь. Общая формула для
+  // самих огоньков и для света, чтобы они зажигались одновременно.
+  torchLit(): number {
+    if (!this.settings.dayNight) return 0;
+    return Math.min(1, Math.max(0, (this.darkness() - 0.12) / 0.5));
+  }
+  // Пара факелов у передней кромки фундамента, слева и справа от входа.
+  drawBldTorches(b: Bld, ix: number, iy: number, S: number) {
+    const lit = this.torchLit();
+    if (lit <= 0.01) return;
+    if (b.key === 'wall' || b.key === 'gate') return;
+    const off = S * 0.42, fy = iy + S / 2 - 2;
+    drawTorch(this.ctx, ix - off, fy, lit, this.time, b.id);
+    drawTorch(this.ctx, ix + off, fy, lit, this.time, b.id + 0.7);
   }
 
   // dirt is handled via tile selection now
@@ -6573,6 +6679,8 @@ export class Game {
     // вспышка урона — красный спрайт, иначе обычный
     const img: HTMLImageElement | HTMLCanvasElement = (b.flash > 0.05 && sp.flash) ? sp.flash : sp.img;
     ctx.drawImage(img, dx, dy, w, h);
+    // ночные факелы по бокам от входа (сам свет — в drawNightLight)
+    this.drawBldTorches(b, ix, iy, S);
     // ближняя половина кольца выделения — ПОВЕРХ здания (передняя кромка фундамента)
     if (selected) diamondRingHalf(ctx, ix, iy, S * 1.03, S * 1.03 / 2, selColor, false);
 

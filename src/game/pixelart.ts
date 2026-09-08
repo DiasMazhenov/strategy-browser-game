@@ -1649,3 +1649,30 @@ function drawCatapult(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   // противовес на заднем конце
   cx(ctx, ax - f * Math.cos(ang) * 8, ay - Math.sin(ang) * 8, 5, '#57534e');
 }
+
+// ── НОЧНОЙ ФАКЕЛ У ЗДАНИЯ ────────────────────────────────────────────────────
+// Шест с чашей и живым пламенем. Рисуется в изо-координатах здания; сам СВЕТ
+// (дырка в ночи) считается отдельно в engine.drawNightLight — здесь только
+// источник, который видно глазами.
+// lit 0..1 — насколько разгорелся (по темноте), t — игровое время для мерцания,
+// seed разводит фазы, чтобы факелы не пульсировали в унисон.
+export function drawTorch(ctx: CanvasRenderingContext2D, x: number, y: number, lit: number, t: number, seed: number) {
+  if (lit <= 0.01) return;
+  const f1 = Math.sin(t * 6.1 + seed * 2.3), f2 = Math.sin(t * 9.7 + seed * 5.1);
+  const flick = 0.85 + 0.15 * f1 + 0.06 * f2;      // «дыхание» пламени
+  // шест
+  px(ctx, x - 1.5, y - 12, 3, 12, '#4a3115');
+  px(ctx, x - 1.5, y - 12, 1.5, 12, '#63431f');    // блик по левой грани
+  // чаша
+  px(ctx, x - 4, y - 15, 8, 4, '#57534e');
+  px(ctx, x - 4, y - 15, 8, 1.5, '#78716c');
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, lit);
+  // пламя: три язычка, снизу вверх — от тёмно-оранжевого к белому
+  const hh = (6 + 3 * flick);
+  cx(ctx, x, y - 17, 3.2 * flick, '#c2410c');
+  cx(ctx, x + f1 * 0.8, y - 17 - hh * 0.35, 2.6 * flick, '#f97316');
+  cx(ctx, x + f2 * 0.6, y - 17 - hh * 0.62, 1.8 * flick, '#fbbf24');
+  cx(ctx, x + f1 * 0.4, y - 17 - hh * 0.82, 1.0 * flick, '#fef3c7');
+  ctx.restore();
+}
