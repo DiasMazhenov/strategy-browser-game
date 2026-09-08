@@ -8,6 +8,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
+import { cursorCss, type CursorKind } from './cursors';
 import { NATIONS, NATION_BY_ID, TRIBE_IDS, TRIBE_KIND_BY_ID, TRIBE_TYPES, ENVOY_TIERS, envoyCost,
   type FacRel, type TribeKind } from './nations';
 import imgTowncenter from '../assets/sprites/towncenter.png';
@@ -149,6 +150,7 @@ interface Unit {
   wkind?: 'chop' | 'mine' | 'gather' | 'fish' | 'milk';      // текущая работа крестьянина (для кадра анимации)
   herder?: boolean;                    // рабочий назначен пастухом к загону
   female?: boolean;                    // рабочая-женщина (казашка в платке): сбор урожая, дойка
+  buildQueue?: number[];               // очередь строек (Shift+клик): id фундаментов по порядку
   penId?: number;                      // id загона, к которому прикреплён пастух
   herdT?: number;                      // фаза цикла выпаса (счётчик)
   herding?: number[];                  // id животных, которых гонит пастух
@@ -362,6 +364,10 @@ const dist2 = (ax: number, ay: number, bx: number, by: number) => { const dx = a
 // высота одной ступени рельефа в экранных iso-px (плитки поднимаются лесенкой).
 // Максимум 30 ступеней → ~150px на пике (шаг 5): горы заметно возвышаются, но не улетают.
 const RELIEF_STEP = 5;
+// ── Прокрутка стрелками у края экрана (вместо автоскролла по наведению) ──
+const EDGE_ZONE = 52;       // полоса у края, где показывается стрелка, px
+const EDGE_STEP = 620;      // насколько мир проматывается за один клик, px
+const EDGE_GLIDE_T = 0.28;  // время доката, с
 
 export class Game {
   canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
@@ -484,6 +490,13 @@ export class Game {
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   panning: { cx: number; cy: number; px: number; py: number } | null = null;
   mouse = { x: 0, y: 0, in: false, isTouch: false };
+  // Стрелки прокрутки у краёв: dir — какая сейчас под курсором ('' = никакая),
+  // hot — подсветка при наведении, edgeGlide — плавный докат после клика.
+  edgeDir: '' | 'l' | 'r' | 'u' | 'd' = '';
+  edgeFlash = 0;                                   // вспышка стрелки после клика
+  edgeGlide = { dx: 0, dy: 0, t: 0 };
+  curCursor: CursorKind | '' = '';            // текущий CSS-курсор канваса
+  selNode = -1;                               // выбранный ресурс: плашка + полоска запаса
   minimap = { x: 0, y: 0, w: 0, h: 0 };
   grassTile: HTMLCanvasElement | null = null;
   muted = false;
@@ -1491,6 +1504,16 @@ export class Game {
       this.pointers.set(e.pointerId, { x: w.px, y: w.py, sx: w.px, sy: w.py, t: performance.now(), moved: true, btn: 99 });
       return;
     }
+    // Стрелка прокрутки у края: перехватываем ДО выделения и приказов, иначе
+    // клик у края одновременно двигал бы камеру и отдавал приказ юнитам.
+    if (e.button === 0 && !this.placement && !this.rallyArmed && !this.attackArmed && !this.patrolArmed) {
+      const dir = this.edgeArrowAt(w.px, w.py);
+      if (dir) {
+        this.nudgeCam(dir);
+        this.pointers.set(e.pointerId, { x: w.px, y: w.py, sx: w.px, sy: w.py, t: performance.now(), moved: true, btn: 99 });
+        return;
+      }
+    }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: false, btn: e.button });
     if (this.pointers.size === 2) {
       const pts = [...this.pointers.values()];
@@ -1644,6 +1667,80 @@ export class Game {
     this.cam.x = clamp(this.cam.x, -mx + 80, WORLD.w + mx - 80);
     this.cam.y = clamp(this.cam.y, -my + 80, WORLD.h + my - 80);
   }
+
+  // ── Курсор под целью ──────────────────────────────────────────────────────
+  // Курсор показывает, ЧТО произойдёт по клику: сабля — атака, топор — рубка,
+  // кирка — золото, корзина — ягоды, рыба — рыбалка, молоток — стройка,
+  // зелёная стрелка — приказ идти. Без выделения курсор нейтральный.
+  cursorFor(sx: number, sy: number): CursorKind {
+    if (this.over || this.paused) return 'default';
+    if (this.panning) return 'pan';
+    if (this.edgeArrowAt(sx, sy)) return 'default';   // над стрелкой прокрутки
+    if (this.placement) return 'build';
+    const w = this.screenToWorld(sx, sy);
+    const sel = this.selUnits();
+    const hasVill = sel.some(u => u.key === 'villager');
+    const hasMil = sel.some(u => this.combatUnit(u));
+
+    const tu = this.pickUnit(w.x, w.y);
+    if (tu && tu.owner !== 'player') return sel.length ? 'attack' : 'default';
+    const tb = this.pickBld(w.x, w.y);
+    if (tb && tb.owner !== 'player') return sel.length ? 'attack' : 'default';
+
+    // Ресурс: свой курсор на каждый вид — только если есть кому добывать.
+    const nd = this.pickNode(w.x, w.y);
+    if (nd && nd.amount > 0) {
+      if (!hasVill) return sel.length ? 'move' : 'default';
+      return nd.kind === 'wood' ? 'wood' : nd.kind === 'gold' ? 'gold'
+        : nd.kind === 'fish' ? 'fish' : 'food';
+    }
+    // Недостроенное здание игрока → молоток (шаруа пойдёт достраивать).
+    if (tb && tb.owner === 'player' && tb.done < 1 && hasVill) return 'build';
+    if (tb && tb.owner === 'player' && tb.key === 'farm' && hasVill) return 'food';
+    if (tb && tb.owner === 'player') return 'select';
+    if (tu && tu.owner === 'player') return 'select';
+    return (hasVill || hasMil) ? 'move' : 'default';
+  }
+
+  // Ставим курсор на канвас CSS-ом; строку меняем только при смене вида,
+  // иначе каждый кадр дёргается стиль и Chrome моргает курсором.
+  syncCursor() {
+    if (!this.canvas || this.mouse.isTouch) return;
+    const kind = this.mouse.in ? this.cursorFor(this.mouse.x, this.mouse.y) : 'default';
+    if (kind === this.curCursor) return;
+    this.curCursor = kind;
+    this.canvas.style.cursor = cursorCss(kind);
+  }
+
+  // ── Стрелки прокрутки у краёв экрана ──────────────────────────────────────
+  // Какая стрелка под точкой экрана. Углы отдаём вертикали: две стрелки разом
+  // не рисуем, иначе они наезжают друг на друга.
+  edgeArrowAt(sx: number, sy: number): '' | 'l' | 'r' | 'u' | 'd' {
+    if (this.mouse.isTouch) return '';           // на тач-экране жест панорамы удобнее
+    if (sy < EDGE_ZONE) return 'u';
+    if (sy > this.vh - EDGE_ZONE) return 'd';
+    if (sx < EDGE_ZONE) return 'l';
+    if (sx > this.vw - EDGE_ZONE) return 'r';
+    return '';
+  }
+
+  updateEdgeArrows() {
+    this.edgeFlash = Math.max(0, this.edgeFlash - 0.05);
+    // рамка выделения, панорама и режим постройки важнее — прячем стрелки
+    if (!this.mouse.in || this.box || this.panning || this.wallDrag) { this.edgeDir = ''; return; }
+    this.edgeDir = this.edgeArrowAt(this.mouse.x, this.mouse.y);
+  }
+
+  // Клик по стрелке: сдвигаем камеру на экран с плавным докатом.
+  nudgeCam(dir: 'l' | 'r' | 'u' | 'd') {
+    const step = EDGE_STEP / this.cam.zoom;
+    const dx = dir === 'l' ? -step : dir === 'r' ? step : 0;
+    const dy = dir === 'u' ? -step : dir === 'd' ? step : 0;
+    this.edgeGlide = { dx, dy, t: EDGE_GLIDE_T };
+    this.edgeFlash = 1;
+    this.camFollow = false;
+    this.sound.move();
+  }
   centerOn(x: number, y: number, snap = false) {
     if (snap) { this.cam.x = x; this.cam.y = y; }
     else { this.cam.x = x; this.cam.y = y; }
@@ -1750,7 +1847,9 @@ export class Game {
       this.sound.select(); this.pushHud(); return;
     }
     if (this.selected.size) { this.issueSmart(x, y); return; }
-    if (this.selBld >= 0) { this.clearSel(); this.pushHud(); }
+    // Клик по ресурсу без выделения — осмотр: плашка с названием и остатком.
+    if (n) { this.clearSel(); this.selNode = n.id; this.sound.select(); this.pushHud(); return; }
+    if (this.selBld >= 0 || this.selNode >= 0) { this.clearSel(); this.pushHud(); }
   }
 
   issueSmart(x: number, y: number) {
@@ -2903,6 +3002,21 @@ export class Game {
     this.sound.place();
     this.burst(x, y, 22, ['#d6a45c', '#8b5e2e', '#f6d47c'], 120);
     this.floater(x, y - 50, `${BUILDING_DEFS[key].name}: фундамент заложен!`, '#f6d47c', 16);
+    // ОЧЕРЕДЬ ПОСТРОЕК (Shift+клик): второй и последующие фундаменты уходят
+    // в личную очередь ТОГО ЖЕ шаруа, что взялся за первый. Иначе Shift просто
+    // отвлекал на каждый дом нового рабочего, и очереди как таковой не было.
+    const chain = this.keys.has('shift') ? this.units.find(u =>
+      u.owner === 'player' && u.key === 'villager' &&
+      (u.state === 'build' || (u.buildQueue && u.buildQueue.length))) : undefined;
+    if (chain) {
+      (chain.buildQueue ??= []).push(b.id);
+      const n = (chain.buildQueue.length) + 1;
+      this.floater(x, y - 28, `в очередь (${n})`, '#7dd3fc', 13);
+      if (chain.state !== 'build') this.nextQueuedBuild(chain);
+      if (key === 'barracks') { this.barracksBuilt++; this.checkQuests(); }
+      this.pushHud();
+      return;
+    }
     // auto-send nearest idle-ish villager
     let best: Unit | null = null; let bd = 700 * 700;
     for (const u of this.units) {
@@ -2916,6 +3030,23 @@ export class Game {
     if (key === 'barracks') { this.barracksBuilt++; this.checkQuests(); }
     if (!this.keys.has('shift')) this.placement = null;
     this.pushHud();
+  }
+
+  // Очередь построек (Shift+клик). Берём следующий незавершённый фундамент
+  // из личной очереди шаруа; пропускаем снесённые и уже достроенные.
+  nextQueuedBuild(u: Unit): boolean {
+    const q = u.buildQueue;
+    if (!q || !q.length) return false;
+    while (q.length) {
+      const id = q.shift() as number;
+      const b = this.blds.find(bb => bb.id === id);
+      if (!b || b.done >= 1 || b.owner !== 'player') continue;
+      u.state = 'build'; u.buildId = b.id; u.wkind = undefined;
+      u.tx = b.x + rand(-50, 50); u.ty = b.y + rand(-46, 46);
+      return true;
+    }
+    u.buildQueue = undefined;
+    return false;
   }
 
   ageUp() {
@@ -2951,7 +3082,7 @@ export class Game {
     for (const id of this.selected) { const u = this.units.find(u => u.id === id); if (u) out.push(u); }
     return out;
   }
-  clearSel() { this.selected.clear(); this.selBld = -1; }
+  clearSel() { this.selected.clear(); this.selBld = -1; this.selNode = -1; }
   armySelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && this.combatUnit(u)) this.selected.add(u.id); this.sound.ack('soldier'); this.voiceSel('select'); this.pushHud(); }
   villsSelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && u.key === 'villager') this.selected.add(u.id); this.sound.ack('villager'); this.voiceSel('select'); this.pushHud(); }
   idleSelect() {
@@ -3134,15 +3265,20 @@ export class Game {
     if (this.keys.has('s') || this.keys.has('arrowdown')) my += 1;
     if (this.keys.has('a') || this.keys.has('arrowleft')) mx -= 1;
     if (this.keys.has('d') || this.keys.has('arrowright')) mx += 1;
-    let edge = false;
     if (mx || my) { const l = Math.hypot(mx, my); this.cam.x += (mx / l) * spd * dt; this.cam.y += (my / l) * spd * dt; this.clampCam(); this.camFollow = false; }
-    else if (this.mouse.in && !this.mouse.isTouch && !this.box && !this.panning) {
-      const m = 16;
-      if (this.mouse.x < m) { this.cam.x -= spd * dt; edge = true; }
-      if (this.mouse.x > this.vw - m) { this.cam.x += spd * dt; edge = true; }
-      if (this.mouse.y < m) { this.cam.y -= spd * dt; edge = true; }
-      if (this.mouse.y > this.vh - m) { this.cam.y += spd * dt; edge = true; }
-      if (edge) { this.clampCam(); this.camFollow = false; }
+    // Автопрокрутки по краю экрана НЕТ (убрана намеренно: камера уезжала сама,
+    // когда курсор просто проходил мимо края). Вместо неё — стрелки у краёв:
+    // подводим курсор → появляется стрелка → ПРОКРУТКА ТОЛЬКО ПО КЛИКУ.
+    // См. edgeArrowAt() / nudgeCam() и отрисовку в drawEdgeArrows().
+    this.updateEdgeArrows();
+    this.syncCursor();
+    // плавный докат после клика по стрелке
+    if (this.edgeGlide.t > 0) {
+      const k = Math.min(dt, this.edgeGlide.t);
+      this.cam.x += this.edgeGlide.dx * k / EDGE_GLIDE_T;
+      this.cam.y += this.edgeGlide.dy * k / EDGE_GLIDE_T;
+      this.edgeGlide.t -= dt;
+      this.clampCam(); this.camFollow = false;
     }
     // авто-следование за выделением (плавно); ручное движение/скролл его отключают
     this.followTick();
@@ -3987,6 +4123,10 @@ export class Game {
     // но не убегаем за полкарты (дальше 1600 — ждём явного приказа)
     if (u.state === 'idle') {
       u.idleT += dt; u.wkind = undefined;
+      // ОЧЕРЕДЬ ПОСТРОЕК ВПЕРЕДИ ВСЕГО: шаруа мог отвлечься (сдал ресурс, поел,
+      // отдохнул) — вернувшись, он обязан доделать свои фундаменты, иначе очередь
+      // Shift+клика зависала навсегда, а он уходил рубить лес.
+      if (u.buildQueue && u.buildQueue.length && this.nextQueuedBuild(u)) return;
       // работницы-казашки: женская работа — дойка коров в загоне (приоритет), затем сбор урожая на ферме
       if (u.female && !u.herder) {
         const pen = this.pickMilkingPen(u);
@@ -4033,7 +4173,12 @@ export class Game {
     if (u.state === 'move') { u.wkind = undefined; if (this.moveTowardPath(u, u.tx, u.ty, dt)) { u.state = 'idle'; u.idleT = 0; } return; }
     if (u.state === 'build') {
       const b = this.blds.find(b => b.id === u.buildId);
-      if (!b || b.done >= 1) { u.state = 'idle'; u.buildId = -1; u.wkind = undefined; return; }
+      if (!b || b.done >= 1) {
+        // Очередь Shift+клика: закончив фундамент, шаруа сам идёт на следующий,
+        // а не встаёт без дела рядом с готовым домом.
+        if (this.nextQueuedBuild(u)) return;
+        u.state = 'idle'; u.buildId = -1; u.wkind = undefined; return;
+      }
       const arrived = this.moveTowardPath(u, u.tx, u.ty, dt, 10);
       if (arrived || dist2(u.x, u.y, b.x, b.y) < 95 * 95) {
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
@@ -6342,7 +6487,42 @@ export class Game {
       }
     }
 
+    this.drawNodePlate(ctx);
+    this.drawEdgeArrows(ctx);
     this.drawMinimap(ctx);
+  }
+
+  // Стрелка у края экрана: появляется под курсором, прокручивает ПО КЛИКУ.
+  // Рисуется в экранных координатах (после всех iso-трансформаций).
+  drawEdgeArrows(ctx: CanvasRenderingContext2D) {
+    if (!this.edgeDir || this.over) return;
+    const dir = this.edgeDir;
+    const w = this.vw, h = this.vh;
+    // центр стрелки прижат к своему краю
+    const cx = dir === 'l' ? EDGE_ZONE * 0.55 : dir === 'r' ? w - EDGE_ZONE * 0.55 : w / 2;
+    const cy = dir === 'u' ? EDGE_ZONE * 0.55 : dir === 'd' ? h - EDGE_ZONE * 0.55 : h / 2;
+    const ang = dir === 'l' ? Math.PI : dir === 'r' ? 0 : dir === 'u' ? -Math.PI / 2 : Math.PI / 2;
+    const pulse = 1 + Math.sin(this.time * 4) * 0.05 + this.edgeFlash * 0.35;
+    const R = 21 * pulse;
+
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    // подложка-таблетка, чтобы стрелка читалась на любой земле
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(12,10,8,${0.5 + this.edgeFlash * 0.25})`; ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(246,212,124,${0.75 + this.edgeFlash * 0.25})`; ctx.stroke();
+    // сам треугольник
+    ctx.beginPath();
+    ctx.moveTo(R * 0.52, 0);
+    ctx.lineTo(-R * 0.28, -R * 0.44);
+    ctx.lineTo(-R * 0.28, R * 0.44);
+    ctx.closePath();
+    ctx.fillStyle = this.edgeFlash > 0.01 ? '#fde68a' : '#f6d47c';
+    ctx.fill();
+    ctx.restore();
   }
 
   // ── НОЧНОЕ ОСВЕЩЕНИЕ: факелы у зданий ───────────────────────────────────────
@@ -6460,13 +6640,72 @@ export class Game {
     else if (n.kind === 'gold') drawIsoGold(ctx, ix, iy, this.time, n.phase, n.amount / n.max);
     else if (n.kind === 'fish') drawIsoFish(ctx, ix, iy, this.time, n.phase, n.amount / n.max);
     else drawIsoBerries(ctx, ix, iy, n.phase, n.amount / n.max);
-    // depletion bar
-    if (n.amount < n.max) {
+    // Полоска запаса — ТОЛЬКО у выбранного ресурса. Раньше она висела над
+    // каждым початым кустом и деревом, засоряя карту во время добычи.
+    if (n.id === this.selNode && n.amount < n.max) {
       const s = clamp(n.amount / n.max, 0, 1);
       ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(ix - 16, iy + 10, 32, 5);
       ctx.fillStyle = n.kind === 'wood' ? '#65a30d' : n.kind === 'gold' ? '#facc15' : '#fb7185';
       ctx.fillRect(ix - 15, iy + 11, 30 * s, 3);
     }
+  }
+
+  // Плашка выбранного ресурса: название и текущий остаток. Рисуется поверх
+  // мира, в экранных координатах, чтобы не искажаться изо-трансформацией.
+  drawNodePlate(ctx: CanvasRenderingContext2D) {
+    if (this.selNode < 0) return;
+    const n = this.nodes.find(nn => nn.id === this.selNode);
+    if (!n || n.amount <= 0) { this.selNode = -1; return; }
+    const NAME: Record<string, string> = {
+      wood: 'Лес', gold: 'Золотая жила', food: 'Ягодник', fish: 'Рыбное место',
+    };
+    const ICON: Record<string, string> = { wood: '🪵', gold: '🪙', food: '🍖', fish: '🐟' };
+    const COLOR: Record<string, string> = {
+      wood: '#a3e635', gold: '#facc15', food: '#fb7185', fish: '#7dd3fc',
+    };
+    const [wx, wy] = toIso(n.x, n.y);
+    // мир → экран той же матрицей, что ставит draw(): центр экрана, зум,
+    // сдвиг на изо-камеру. Плашку поднимаем над спрайтом на 46 мировых px.
+    const sx = this.vw / 2 + (wx - this.camIsoX()) * this.cam.zoom;
+    const sy = this.vh / 2 + (wy - this.camIsoY() - 46) * this.cam.zoom;
+
+    const title = `${ICON[n.kind]} ${NAME[n.kind] ?? 'Ресурс'}`;
+    const sub = `${Math.ceil(n.amount)} / ${Math.round(n.max)}`;
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.font = '800 13px Inter, sans-serif';
+    const w1 = ctx.measureText(title).width;
+    ctx.font = '700 12px Inter, sans-serif';
+    const w2 = ctx.measureText(sub).width;
+    const pw = Math.max(w1, w2) + 26, ph = 40;
+    const px = clamp(sx - pw / 2, 6, this.vw - pw - 6);
+    const py = clamp(sy - ph, 6, this.vh - ph - 6);
+
+    ctx.fillStyle = 'rgba(12,10,8,0.82)';
+    ctx.strokeStyle = 'rgba(246,212,124,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const r = 7;
+    ctx.moveTo(px + r, py); ctx.lineTo(px + pw - r, py); ctx.quadraticCurveTo(px + pw, py, px + pw, py + r);
+    ctx.lineTo(px + pw, py + ph - r); ctx.quadraticCurveTo(px + pw, py + ph, px + pw - r, py + ph);
+    ctx.lineTo(px + r, py + ph); ctx.quadraticCurveTo(px, py + ph, px, py + ph - r);
+    ctx.lineTo(px, py + r); ctx.quadraticCurveTo(px, py, px + r, py);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.font = '800 13px Inter, sans-serif';
+    ctx.fillStyle = '#f6e7c1';
+    ctx.fillText(title, px + 8, py + 17);
+    ctx.font = '700 12px Inter, sans-serif';
+    ctx.fillStyle = COLOR[n.kind] ?? '#f6d47c';
+    ctx.fillText(sub, px + 8, py + 32);
+    // мини-полоска остатка внутри плашки
+    const s = clamp(n.amount / n.max, 0, 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fillRect(px + 8 + w2 + 8, py + 24, Math.max(24, pw - w2 - 32), 6);
+    ctx.fillStyle = COLOR[n.kind] ?? '#f6d47c';
+    ctx.fillRect(px + 8 + w2 + 8, py + 24, Math.max(24, pw - w2 - 32) * s, 6);
+    ctx.restore();
   }
 
   // Редкий AI-объект рельефа (вершина/холм, gpt image): низ спрайта кладётся на опорную

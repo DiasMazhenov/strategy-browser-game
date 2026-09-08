@@ -1,0 +1,37 @@
+[
+  {
+    "name": "attack",
+    "hx": 2,
+    "hy": 2
+  },
+  {
+    "name": "wood",
+    "hx": 2,
+    "hy": 9
+  },
+  {
+    "name": "gold",
+    "hx": 6,
+    "hy": 4
+  },
+  {
+    "name": "food",
+    "hx": 16,
+    "hy": 16
+  },
+  {
+    "name": "fish",
+    "hx": 16,
+    "hy": 16
+  },
+  {
+    "name": "build",
+    "hx": 6,
+    "hy": 6
+  },
+  {
+    "name": "move",
+    "hx": 16,
+    "hy": 30
+  }
+]
