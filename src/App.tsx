@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.083';
+export const GAME_VERSION = '1.0.084';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -63,6 +63,7 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [showQuests, setShowQuests] = useState(true);
   const [showTech, setShowTech] = useState(false);
+  const [showGreats, setShowGreats] = useState(false);
   const [showDip, setShowDip] = useState(false);
   const [gameId, setGameId] = useState(0);
   const [loadSave, setLoadSave] = useState(false);
@@ -73,15 +74,15 @@ export default function App() {
 
   const difficulty = settings.difficulty;
 
-  // горячая клавиша досье технологий — L (рус. Д)
+  // горячие клавиши: L (рус. Д) — досье технологий, J (рус. О) — великие люди
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if ((k === 'l' || k === 'д') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const tag = (e.target as HTMLElement | null)?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-        setShowTech(s => !s);
-      }
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if ((k === 'l' || k === 'д') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowTech(s => !s);
+      // J (рус. О) — совет великих людей
+      if ((k === 'j' || k === 'о') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowGreats(s => !s);
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -100,7 +101,7 @@ export default function App() {
   const startGame = useCallback((d?: Difficulty, resume = false) => {
     if (d) setSettings(prev => { const next = { ...prev, difficulty: d }; try { localStorage.setItem(LS_SETTINGS, JSON.stringify(next)); } catch { /* noop */ } return next; });
     setLoadSave(resume);
-    setOver(null); setSaved(false); setName(''); setHud(null); setPaused(false); setShowSettings(false); setShowTech(false);
+    setOver(null); setSaved(false); setName(''); setHud(null); setPaused(false); setShowSettings(false); setShowTech(false); setShowGreats(false);
     setDockTab('units');
     setScreen('game');
     setGameId(g => g + 1);
@@ -265,6 +266,21 @@ export default function App() {
                 ⭐ Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
               </div>
             )}
+            {(hud?.wisdomRate ?? 0) > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-teal-500/20 px-2 py-0.5 text-[11px] font-black text-teal-100"
+                title="Мудрость: копится от Мешіт-медресе, Мавзолея и реликвий. Призыв великих людей — клавиша J">
+                ✨ {hud!.wisdom}
+              </div>
+            )}
+            {/* Объединение степи: показываем, когда союз уже собирается */}
+            {(hud?.unite?.have ?? 0) >= 3 && (
+              <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
+                (hud!.unite.t) > 0 ? 'animate-pulse bg-teal-500/25 text-teal-100' : 'bg-white/10 text-slate-200'}`}
+                title={`Станьте сюзереном ${hud!.unite.need} народов и удержите союз — дипломатическая победа`}>
+                🤝 Степь: {hud!.unite.have}/{hud!.unite.need}
+                {hud!.unite.t > 0 && <> • {Math.floor((hud!.unite.hold - hud!.unite.t) / 60)}:{String((hud!.unite.hold - hud!.unite.t) % 60).padStart(2, '0')}</>}
+              </div>
+            )}
           </div>
 
           {/* buttons */}
@@ -280,6 +296,10 @@ export default function App() {
             </IconBtn>
             <IconBtn onClick={() => setShowTech(true)} label="Дерево технологий (L)">
               <ScrollText className="h-4 w-4" />
+            </IconBtn>
+            <IconBtn onClick={() => setShowGreats(true)} label="Великие люди степи (J)">
+              <span className="relative text-sm leading-none">✨{(hud?.greats?.some(x => x.afford) ?? false) &&
+                <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full bg-amber-400" />}</span>
             </IconBtn>
             <IconBtn onClick={() => setShowSettings(true)} label="Настройки">
               <SettingsIcon className="h-4 w-4" />
@@ -704,6 +724,50 @@ export default function App() {
                   <div className="text-[13px] font-black text-slate-100">{o.label}</div>
                   <div className="text-[11px] text-slate-400">{o.desc}</div>
                 </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== СОВЕТ ВЕЛИКИХ ЛЮДЕЙ ===== */}
+      {showGreats && hud && (
+        <div className="absolute inset-0 z-[61] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setShowGreats(false)}>
+          <div className="panel-iron w-full max-w-2xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between">
+              <div className="font-display text-lg font-black tracking-wide text-amber-200">✨ ВЕЛИКИЕ ЛЮДИ СТЕПИ</div>
+              <button onClick={() => setShowGreats(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10">✕</button>
+            </div>
+            <p className="mb-3 text-[12px] leading-relaxed text-slate-400">
+              Мудрость копят Мешіт-медресе, Мавзолей хана и найденные реликвии. Призванный бий
+              остаётся с ханством навсегда. Сейчас: <b className="text-teal-200">{hud.wisdom} мудрости</b>
+              {hud.wisdomRate > 0 && <span className="text-slate-500"> (+{hud.wisdomRate}/с)</span>}
+            </p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {hud.greats.map(gr => (
+                <div key={gr.id} className={`rounded-2xl border p-2.5 transition ${
+                  gr.called ? 'border-lime-400/50 bg-lime-500/10'
+                    : gr.afford ? 'border-amber-300/50 bg-amber-400/10' : 'border-white/10 bg-white/5'}`}>
+                  <img src={gr.portrait} alt={gr.name}
+                    className={`mb-2 aspect-square w-full rounded-xl object-cover ${gr.called ? '' : 'opacity-80 grayscale-[35%]'}`} />
+                  <div className="text-[13px] font-black text-slate-100">{gr.name}</div>
+                  <div className="mb-1 text-[10px] text-slate-400">{gr.title}</div>
+                  <div className="mb-2 text-[11px] leading-snug text-slate-300">{gr.effect}</div>
+                  {gr.called ? (
+                    <div className="rounded-xl bg-lime-500/20 py-1.5 text-center text-[11px] font-black text-lime-200">
+                      ✓ В совете хана
+                    </div>
+                  ) : (
+                    <button onClick={() => { gameRef.current?.callGreat(gr.id as 'tole' | 'kazybek' | 'aiteke'); }}
+                      disabled={!gr.afford}
+                      className={`w-full rounded-xl py-1.5 text-[11px] font-black transition ${
+                        gr.afford ? 'bg-amber-400/25 text-amber-100 hover:bg-amber-400/40'
+                          : 'cursor-not-allowed bg-black/40 text-slate-500'}`}>
+                      Призвать • {gr.cost} ✨
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>

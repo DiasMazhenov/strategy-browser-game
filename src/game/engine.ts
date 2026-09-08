@@ -9,6 +9,7 @@ import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
+import { GREATS, GREAT_BY_ID, type GreatId } from './greats';
 import { NATIONS, NATION_BY_ID, TRIBE_IDS, TRIBE_KIND_BY_ID, TRIBE_TYPES, ENVOY_TIERS, envoyCost,
   type FacRel, type TribeKind } from './nations';
 import imgTowncenter from '../assets/sprites/towncenter.png';
@@ -317,6 +318,12 @@ export interface HudSnapshot {
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   woodDiscount: number;   // множитель цены дерева от союза с ремесленниками (1 = без скидки)
   playerPow: number; enemyPow: number; wonderT: number; wonderHold: number;
+  // победа «Объединение степи»: сколько народов под сюзеренитетом и сколько удержано
+  unite: { have: number; need: number; t: number; hold: number };
+  // великие люди: мудрость и карточки призыва
+  wisdom: number; wisdomRate: number;
+  greats: { id: string; name: string; title: string; portrait: string; cost: number;
+    effect: string; called: boolean; afford: boolean }[];
   techTree: TechTreeRow[];
   // ── дипломатия народов (Civilization-стиль) ──
   nations: NationHud[];
@@ -446,6 +453,15 @@ export class Game {
   tributeGold = 0;               // размер периодической дани
   wonderT = 0;                   // таймер удержания Чуда света (0 = нет активного Чуда)
   readonly WONDER_HOLD = 180;    // сколько секунд нужно удержать Чудо до победы
+  // ── ПОБЕДА «ОБЪЕДИНЕНИЕ СТЕПИ» (пункт 9 плана) ──
+  // Дипломатический путь: стать сюзереном 5 из 7 кочевых народов и удержать
+  // союз 3 минуты. Отсчёт идёт, только пока условие выполняется; потеря
+  // сюзеренитета не обнуляет прогресс мгновенно, а откатывает его — иначе
+  // одна перебитая джунгарами делегация стирала бы десять минут работы.
+  readonly UNITE_NEED = 5;       // сколько народов нужно под сюзеренитетом
+  readonly UNITE_HOLD = 180;     // сколько секунд удерживать союз
+  uniteT = 0;                    // накоплено секунд удержания
+  uniteAnn = false;              // объявляли ли уже «союз собран»
   // ── знакомства с народами (дипломатия Civilization): изначально мы никого не знаем ──
   rivalMet = false;              // контакт с Джунгарским ханством (главный соперник) установлен
   tribeMet: Record<string, boolean> = {};   // встреченные племена (nationId → true)
@@ -1002,6 +1018,106 @@ export class Game {
     if (p === r) return null;
     return p > r ? 'player' : 'rival';
   }
+  // ── ВЕЛИКИЕ ЛЮДИ: накопление мудрости ──────────────────────────────────────
+  // Источники: Мешіт-медресе (учёность), Мавзолей (память предков), реликвии.
+  // Копим раз в секунду, а не каждый кадр: иначе на быстрой машине мудрость
+  // набегала бы вдвое быстрее, чем на медленной.
+  wisdomRate(): number {
+    let r = 0;
+    for (const b of this.blds) {
+      if (b.owner !== 'player' || b.done < 1) continue;
+      if (b.key === 'mosque') r += 1.2;
+      else if (b.key === 'wonder') r += 2.5;
+    }
+    r += this.relicsHeld * 0.8;
+    // призванный Айтеке би ускоряет и саму «культурную» линию
+    if (this.hasGreat('aiteke')) r *= 1.15;
+    return r;
+  }
+
+  hasGreat(id: GreatId): boolean { return this.greatsCalled.includes(id); }
+
+  updateWisdom(dt: number) {
+    const rate = this.wisdomRate();
+    if (rate <= 0) return;
+    this.wisdomT += dt;
+    if (this.wisdomT < 1) return;
+    const secs = Math.floor(this.wisdomT);
+    this.wisdomT -= secs;
+    this.wisdom += rate * secs;
+  }
+
+  // Призвать великого человека. Возвращает false, если рано или уже призван.
+  callGreat(id: GreatId): boolean {
+    const def = GREAT_BY_ID[id];
+    if (!def || this.over) return false;
+    if (this.hasGreat(id)) { this.sound.error(); return false; }
+    if (this.wisdom < def.cost) {
+      this.floater(this.cam.x, this.cam.y - 100,
+        `Нужно ${def.cost} мудрости (есть ${Math.floor(this.wisdom)})`, '#f87171', 16);
+      this.sound.error();
+      return false;
+    }
+    this.wisdom -= def.cost;
+    this.greatsCalled.push(id);
+    this.score += 400;
+
+    // ── эффекты ──
+    if (id === 'tole') {
+      // дипломат: гасит накопленную неприязнь и мирит степь
+      this.grievance = Math.max(0, this.grievance - 30);
+      this.casusBelli = Math.max(0, this.casusBelli - 20);
+      for (const nid of TRIBE_IDS) {
+        if (this.tribeRel[nid] === 'hostile') this.tribeRel[nid] = 'neutral';
+      }
+    } else if (id === 'kazybek') {
+      // торговец: разовый дар и постоянный рост дохода (см. tradeBonus)
+      this.res.gold += 300;
+    }
+    // aiteke — постоянные множители, читаются из hasGreat() в местах расчёта
+
+    this.pushBanner(`✨ ${def.name} — ${def.title}`, def.lore, 6);
+    this.sound.ageup();
+    this.burst(HOME.x, HOME.y, 36, ['#f6d47c', '#fff', '#a3e635'], 150);
+    this.pushHud();
+    return true;
+  }
+
+  // Сколько кочевых народов признают игрока сюзереном (для победы «Объединение степи»).
+  // Враждебное племя не в счёт, даже если посланников там больше: союзом это не назвать.
+  uniteCount(): number {
+    let n = 0;
+    for (const nid of TRIBE_IDS) {
+      if (this.tribeRel[nid] === 'hostile') continue;
+      if (this.suzerain(nid) === 'player') n++;
+    }
+    return n;
+  }
+
+  // Тик дипломатической победы. Отсчёт идёт, пока союз держится; при распаде
+  // прогресс ОТКАТЫВАЕТСЯ вдвое медленнее, чем набирался, — одна перехваченная
+  // делегация не должна стирать десять минут дипломатии.
+  updateUnite(dt: number) {
+    const have = this.uniteCount();
+    if (have >= this.UNITE_NEED) {
+      if (!this.uniteAnn) {
+        this.uniteAnn = true;
+        this.pushBanner('🤝 СТЕПЬ ОБЪЕДИНЯЕТСЯ!',
+          `${have} народов признали вас сюзереном. Удержите союз ${Math.round(this.UNITE_HOLD / 60)} мин — и ханство победит без большой войны`, 6);
+        this.sound.ageup();
+      }
+      this.uniteT += dt;
+      if (this.uniteT >= this.UNITE_HOLD) { this.uniteT = this.UNITE_HOLD; this.finish('victory'); }
+    } else if (this.uniteT > 0) {
+      if (this.uniteAnn) {
+        this.uniteAnn = false;
+        this.pushBanner('💔 Союз распадается',
+          `Народов под вашей рукой осталось ${have} из ${this.UNITE_NEED} — отсчёт откатывается`, 4);
+      }
+      this.uniteT = Math.max(0, this.uniteT - dt * 0.5);
+    }
+  }
+
   tribeKind(nid: string): TribeKind | null { return TRIBE_KIND_BY_ID[nid] ?? null; }
   // действует ли у игрока бонус уровня lv (1..3) у племён типа kind — и сколько таких племён
   bonusTier(kind: TribeKind, lv: number): boolean {
@@ -1104,7 +1220,8 @@ export class Game {
       this.tribeGoldT = (this.tribeGoldT ?? 0) + dt;
       if (this.tribeGoldT >= 8) {
         this.tribeGoldT = 0;
-        this.res.gold += 3;
+        // Казыбек би («торговля»): караваны идут чаще и с большим прибытком
+        this.res.gold += this.hasGreat('kazybek') ? 6 : 3;
         if (Math.random() < 0.35) this.sound.coin();
       }
     }
@@ -1313,6 +1430,13 @@ export class Game {
   }
 
   relicsHeld = 0; // реликвий собрано игроком (пассивное золото)
+  // ── ВЕЛИКИЕ ЛЮДИ (пункт 11 плана) ──
+  // Мудрость капает от Мешіт-медресе, Мавзолея и найденных реликвий. Это мягкий
+  // ресурс: он не тратится на войска и стройку, поэтому «культурная» линия не
+  // отбирает у обычной экономики, а идёт параллельно.
+  wisdom = 0;
+  greatsCalled: GreatId[] = [];   // кого уже призвали (каждый — один раз)
+  wisdomT = 0;                    // аккумулятор долей секунды
   relicT = 0;     // таймер дохода с реликвий
   idleIdx = 0;    // позиция циклического поиска свободных крестьян
 
@@ -2258,8 +2382,10 @@ export class Game {
       blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null })),
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       relicsHeld: this.relicsHeld,
+      wisdom: this.wisdom, greatsCalled: this.greatsCalled,
       dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
-        tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT },
+        tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT,
+        uniteT: this.uniteT, uniteAnn: this.uniteAnn },
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
@@ -2322,10 +2448,13 @@ export class Game {
       if (d.ageMark) this.ageMark = d.ageMark;
       this.soldiersTrained = d.soldiersTrained || 0; this.barracksBuilt = d.barracksBuilt || 0; this.wolvesSlain = d.wolvesSlain || 0;
       this.relicsHeld = d.relicsHeld || 0;
+      this.wisdom = d.wisdom || 0;
+      this.greatsCalled = Array.isArray(d.greatsCalled) ? d.greatsCalled : [];
       // восстановить взятые реликвии как убранные с карты
       if (this.relicsHeld > 0) for (let i = 0; i < Math.min(this.relics.length, this.relicsHeld); i++) this.relics[i].taken = true;
       this.questsDone = d.questsDone || {};
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
+        this.uniteT = d.dip.uniteT ?? 0; this.uniteAnn = !!d.dip.uniteAnn;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
       if (d.day) {
@@ -2497,7 +2626,8 @@ export class Game {
     if (!b) { this.floater(this.cam.x, this.cam.y - 110, `Нужна свободная: ${BUILDING_DEFS[t.bld].name}`, '#f87171', 16); this.sound.error(); return; }
     if (!this.afford(t.cost)) { this.floater(this.cam.x, this.cam.y - 110, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
     this.pay(t.cost);
-    b.research = { id, t: 0, total: t.time };
+    // Айтеке би («право»): своды законов ускоряют учёные споры — исследования на 20% быстрее
+    b.research = { id, t: 0, total: t.time * (this.hasGreat('aiteke') ? 0.8 : 1) };
     this.sound.select();
     this.floater(b.x, b.y - 40, `Исследуем: ${t.name}`, '#93c5fd', 15);
     this.pushHud();
@@ -2886,7 +3016,9 @@ export class Game {
   bldCost(key: BuildingKey): { wood: number; food: number; gold: number } {
     const c = BUILDING_DEFS[key].cost;
     const d = this.woodDiscount();
-    return { wood: Math.round(c.wood * d), food: c.food, gold: c.gold };
+    // Айтеке би: единый свод правил — артели строят дешевле на 10%
+    const g = this.hasGreat('aiteke') ? 0.9 : 1;
+    return { wood: Math.round(c.wood * d * g), food: Math.round(c.food * g), gold: Math.round(c.gold * g) };
   }
   // прибавка еды от аграрных союзников (пашни/дойка): +15% / +35%
   farmMult(): number {
@@ -3537,6 +3669,11 @@ export class Game {
         this.wonderT = 0; // Чудо разрушено до завершения отсчёта
       }
     }
+
+    // ── «Объединение степи»: удержание союза племён ──
+    if (!this.over) this.updateUnite(dt);
+    // ── мудрость для призыва великих людей ──
+    if (!this.over) this.updateWisdom(dt);
 
     // AI tick
     this.aiT += dt;
@@ -6146,6 +6283,12 @@ export class Game {
       woodDiscount: this.woodDiscount(),
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
+      unite: { have: this.uniteCount(), need: this.UNITE_NEED,
+        t: Math.floor(this.uniteT), hold: this.UNITE_HOLD },
+      wisdom: Math.floor(this.wisdom), wisdomRate: Math.round(this.wisdomRate() * 10) / 10,
+      greats: GREATS.map(g => ({ id: g.id, name: g.name, title: g.title, portrait: g.portrait,
+        cost: g.cost, effect: g.effect, called: this.hasGreat(g.id),
+        afford: this.wisdom >= g.cost && !this.hasGreat(g.id) })),
       techTree: this.techTreeData(),
       nations: this.nationsHud(),
       audience: this.audienceId ? this.audienceHud(this.audienceId) : null,
