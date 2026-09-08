@@ -379,9 +379,9 @@ export function drawCampProp(ctx: CanvasRenderingContext2D, kind: 'kazan' | 'swi
   if (!im.complete || !im.naturalWidth) return;
   // Высота от роста шаруа (46px), как у сценок отдыха: казан ×1.0, рама ×1.9.
   const VH = UNIT_TARGET_H.villager ?? 46;
-  // ×1.67 — та же пропорция, что у сценки катания: пустые качели и качели
+  // ×1.94 — та же пропорция, что у сценки катания: пустые качели и качели
   // с парой обязаны быть одного размера, иначе при посадке рама «прыгнет».
-  const H = Math.round(kind === 'kazan' ? VH : VH * 1.67) * zoom;
+  const H = Math.round(kind === 'kazan' ? VH : VH * 1.94) * zoom;
   const w = im.naturalWidth * (H / im.naturalHeight);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(im, snap(ix - w / 2), snap(iy - H), Math.round(w), Math.round(H));
@@ -689,10 +689,10 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // Без этой поправки девушка на качелях выходила вдвое мельче шаруа, а женщина
   // у казана — вдвое крупнее.
   const VILL_H = UNIT_TARGET_H.villager ?? 46;
-  // kz_swing_ride: пара стоит поперёк доски, парень занимает 59.9% высоты
-  // кадра (91 из 152 px) → чтобы он был ростом со шаруа, кадр = 46/0.599 ≈ 77px,
-  // то есть ×1.67. Старые ×1.9 считались от рамы прежнего спрайта.
-  const restH = anKey.startsWith('kz_swing_ride') ? Math.round(VILL_H * 1.67)
+  // kz_swing_ride (ИЗОМЕТРИЯ): пара стоит на концах доски, доска лежит вдоль
+  // оси раскачки. Парень занимает 51.5 % высоты кадра (68 из 132 px) →
+  // для роста шаруа кадр = 46/0.515 ≈ 89 px, то есть ×1.94.
+  const restH = anKey.startsWith('kz_swing_ride') ? Math.round(VILL_H * 1.94)
     : anKey.startsWith('kz_swing') ? Math.round(VILL_H * 1.9)
     : anKey.startsWith('kz_kazan') ? VILL_H
     : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 1.06) : 0;

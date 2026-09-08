@@ -462,7 +462,7 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   // ── сценки отдыха (посменная работа): алтыбакан, казан, асыки ──
   "kz_swing_l": { "ax": 50.3, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
   "kz_swing_c": { "ax": 52.1, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
-  "kz_swing_ride": { "ax": 53.0, "ay": 152, "baseW": 106, "w": 106, "h": 152 },
+  "kz_swing_ride": { "ax": 67.5, "ay": 132, "baseW": 135, "w": 135, "h": 132 },
   "kz_swing_r": { "ax": 51.2, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
   "kz_kazan_a": { "ax": 60.7, "ay": 151, "baseW": 123, "w": 123, "h": 150 },
   "kz_kazan_b": { "ax": 60.7, "ay": 151, "baseW": 124, "w": 124, "h": 150 },

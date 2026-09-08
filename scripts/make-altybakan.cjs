@@ -130,7 +130,10 @@ function resize(im, nw, nh) {
 // ── разделение на «опоры» и «маятник» ───────────────────────────────────────
 // Ниже перекладины маятник (верёвки+доска+пара) — отдельная связная область,
 // не касающаяся ног опор. Берём её заливкой из центра доски и от верёвок.
-function splitPendulum(im, cutY) {
+// Ограничение по геометрии: маятник висит ВНУТРИ пролёта между тripodами.
+// Без рамки заливка перетекает через точку касания в опоры и уносит их
+// (в изо-кадре получалось 86% «маятника» — разваливалась вся конструкция).
+function splitPendulum(im, cutY, box) {
   const { w, h, px } = im;
   const mask = new Uint8Array(w * h);
   const opaque = i => px[i * 4 + 3] > 16;
@@ -146,19 +149,21 @@ function splitPendulum(im, cutY) {
     if (run) seeds.push(probe * w + ((run[0] + run[1]) >> 1));
   }
   // доска и стоящие на ней люди — центральная колонка ближе к низу
-  for (const fy of [0.72, 0.8, 0.86, 0.9]) {
+  for (const fy of [0.5, 0.58, 0.66, 0.72]) {
     const y = Math.floor(h * fy);
-    for (const fx of [0.44, 0.5, 0.56]) {
+    for (const fx of [0.42, 0.48, 0.54, 0.6]) {
       const i = y * w + Math.floor(w * fx);
       if (opaque(i)) seeds.push(i);
     }
   }
+  const lim = box || { x0: 0, x1: w - 1, y1: h - 1 };
   const st = seeds.filter(i => opaque(i));
   while (st.length) {
     const i = st.pop();
     if (i < 0 || i >= w * h || mask[i] || !opaque(i)) continue;
-    const y = (i / w) | 0;
+    const y = (i / w) | 0, xx = i % w;
     if (y <= cutY) continue;                 // выше линии реза — это уже рама
+    if (xx < lim.x0 || xx > lim.x1 || y > lim.y1) continue;   // вне пролёта
     mask[i] = 1;
     const x = i % w;
     if (x > 0) st.push(i - 1);

@@ -85,7 +85,7 @@ console.log('\n=== 4. Спрайты декораций собраны из го
   const d = body(art, 'export function drawCampProp');
   ok(d.length > 100, 'drawCampProp реализован');
   ok(/UNIT_TARGET_H\.villager/.test(d), 'размер считается от роста шаруа, а не «на глаз»');
-  ok(/1\.67/.test(d), 'качели ×1.67 — тот же размер, что у сценки катания');
+  ok(/1\.94/.test(d), 'качели ×1.94 — тот же размер, что у сценки катания');
   ok(/imageSmoothingEnabled = false/.test(d), 'пиксель-арт рисуется без сглаживания');
 }
 
@@ -97,7 +97,25 @@ console.log('\n=== 4b. Алтыбакан: пара стоит поперёк д
   ok(/kzSwingRideL/.test(cyc) && /kzSwingRideC/.test(cyc) && /kzSwingRideR/.test(cyc),
     'цикл качелей собран из новых кадров (влево-центр-вправо-центр)');
   ok(!/kzSwingL\b/.test(art), 'старые кадры одиночной девушки больше не используются');
-  ok(/1\.67/.test(art), 'масштаб сценки ×1.67 — человек ростом со шаруа');
+  ok(/1\.94/.test(art), 'масштаб сценки ×1.94 — человек ростом со шаруа');
+}
+
+console.log('\n=== 4c. Алтыбакан нарисован в изометрии ===');
+{
+  const { readFileSync: rf } = await import('node:fs');
+  const dims = (p) => { const b = rf(new URL(p, import.meta.url));
+    return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) }; };
+  const base = '../src/assets/sprites/units/kz/';
+  const c = dims(base + 'kz_swing_ride_c.png');
+  const e = dims(base + 'kz_prop_swing.png');
+  ok(c.w === e.w && c.h === e.h, `пустые качели и катание одного размера (${c.w}x${c.h})`);
+  // фронтальный спрайт был 106x152 (узкий и высокий); изо-ракурс шире, чем высок
+  ok(c.w >= c.h, `изо-ракурс: кадр шире или равен по высоте (${c.w}x${c.h}) — не фронтальный вид`);
+  const l = dims(base + 'kz_swing_ride_l.png'), r = dims(base + 'kz_swing_ride_r.png');
+  ok(l.w === c.w && l.h === c.h && r.w === c.w && r.h === c.h,
+    'все фазы качания одного размера — рама не прыгает');
+  ok(/ИЗОМЕТРИЯ|изометри/i.test(rf(new URL('../scripts/build-altybakan.cjs', import.meta.url), 'utf8')),
+    'сборщик документирует изо-проекцию');
 }
 
 console.log('\n=== 5. Плашка волны скрыта в мирное время ===');
