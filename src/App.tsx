@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.073';
+export const GAME_VERSION = '1.0.074';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -189,9 +189,14 @@ export default function App() {
             <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-xl px-4 py-1.5 text-xs font-bold">
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
               <span className="flex items-center gap-1 text-slate-300"><Timer className="h-3.5 w-3.5" />{fmtTime(hud?.timeSec ?? 0)}</span>
-              <span className={`hidden items-center gap-1 sm:flex ${(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}`}>
-                <Swords className="h-3.5 w-3.5" />Волна {hud?.wave ?? 0} → {hud?.nextWave ?? 0}с
-              </span>
+              {/* Счётчик волны — только во время войны. В мире набеги не идут
+                  (движок крутит waveT лишь при atWar), и отсчёт до несуществующей
+                  атаки только пугал игрока зря. */}
+              {hud?.atWar && (
+                <span className={`hidden items-center gap-1 sm:flex ${(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}`}>
+                  <Swords className="h-3.5 w-3.5" />Волна {hud?.wave ?? 0} → {hud?.nextWave ?? 0}с
+                </span>
+              )}
             </div>
             {/* кнопка дипломатии: компактная, с индикатором войны/новых контактов */}
             <button
@@ -290,7 +295,9 @@ export default function App() {
           <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-full px-3 py-1 text-[11px] font-bold">
             <span className="text-amber-300">🏆{hud?.score ?? 0}</span>
             <span className="text-slate-300">{fmtTime(hud?.timeSec ?? 0)}</span>
-            <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}>🌊{hud?.nextWave ?? 0}с</span>
+            {hud?.atWar && (
+              <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}>🌊{hud?.nextWave ?? 0}с</span>
+            )}
             <span className="text-amber-200">{AGES[hud?.age ?? 0].icon}</span>
           </div>
         </div>

@@ -194,6 +194,11 @@ import kzKazanC from '../assets/sprites/units/kz/kz_kazan_c.png';
 import kzAsykA from '../assets/sprites/units/kz/kz_asyk_a.png';
 import kzAsykB from '../assets/sprites/units/kz/kz_asyk_b.png';
 import kzAsykC from '../assets/sprites/units/kz/kz_asyk_c.png';
+// ── постоянные декорации стойбища: казан на треноге и рама алтыбакана.
+// Вырезаны из кадров сценок отдыха (scripts/make-camp-props.cjs), людей в них нет —
+// это инвентарь, который стоит у ханской ставки всегда. ──
+import kzPropKazan from '../assets/sprites/units/kz/kz_prop_kazan.png';
+import kzPropSwing from '../assets/sprites/units/kz/kz_prop_swing.png';
 // казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
 import kzScout from '../assets/sprites/units/kz/kz_scout.png';
 import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
@@ -353,6 +358,27 @@ const KZ_ASYK: [HTMLImageElement, string][] = [
   [mk(kzAsykA), 'kz_asyk_a'], [mk(kzAsykA), 'kz_asyk_a'],
   [mk(kzAsykB), 'kz_asyk_b'], [mk(kzAsykC), 'kz_asyk_c'],
 ];
+
+// декорации стойбища: [картинка, высота в мировых px]. Казан по росту шаруа,
+// рама алтыбакана вдвое выше человека — те же пропорции, что и в сценках отдыха.
+const KZ_PROP_KAZAN = mk(kzPropKazan);
+const KZ_PROP_SWING = mk(kzPropSwing);
+
+/**
+ * Постоянная декорация стойбища (казан / алтыбакан).
+ * Рисуется по «низ-центр»: (ix, iy) — точка касания земли.
+ * @param kind 'kazan' — котёл на треноге, 'swing' — рама алтыбакана
+ */
+export function drawCampProp(ctx: CanvasRenderingContext2D, kind: 'kazan' | 'swing', ix: number, iy: number, zoom = 1) {
+  const im = kind === 'kazan' ? KZ_PROP_KAZAN : KZ_PROP_SWING;
+  if (!im.complete || !im.naturalWidth) return;
+  // Высота от роста шаруа (46px), как у сценок отдыха: казан ×1.0, рама ×1.9.
+  const VH = UNIT_TARGET_H.villager ?? 46;
+  const H = Math.round(kind === 'kazan' ? VH : VH * 1.9) * zoom;
+  const w = im.naturalWidth * (H / im.naturalHeight);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(im, snap(ix - w / 2), snap(iy - H), Math.round(w), Math.round(H));
+}
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
 const WALK_ANCHOR_A: Partial<Record<UnitKey, string>> = {

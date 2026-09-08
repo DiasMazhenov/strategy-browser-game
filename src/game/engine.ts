@@ -6,7 +6,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
   type HexKind,
   TILE_STEP } from './iso';
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
-import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch } from './pixelart';
+import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { NATIONS, NATION_BY_ID, TRIBE_IDS, TRIBE_KIND_BY_ID, TRIBE_TYPES, ENVOY_TIERS, envoyCost,
   type FacRel, type TribeKind } from './nations';
@@ -157,6 +157,7 @@ interface Unit {
   pastureId?: number;                  // [скот] id загона, к которому приписано стадо
   herdState?: 'graze' | 'home' | 'pen' | 'back'; // фаза пастушего цикла
   herdStateT?: number;                 // таймер текущей фазы
+  herdStuckT?: number;                 // сколько пастух стоит на месте (сторож застревания)
   wphase?: number;                                // фаза рабочего цикла 0..1
   aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
@@ -2392,6 +2393,32 @@ export class Game {
     return { x: best.x + Math.cos(a) * r, y: best.y + Math.sin(a) * r * 0.6, b: best };
   }
 
+  // ── ПОСТОЯННЫЕ ДЕКОРАЦИИ СТОЙБИЩА ──
+  // Казан и алтыбакан стоят у ханской ставки всегда, а не только когда кто-то
+  // отдыхает. Шаг гекса в мире ≈30 (по X) / ≈34.6 (по Y), отсюда дистанции:
+  //   казан      — 2-3 клетки  ≈ 60..100
+  //   алтыбакан  — 7-8 клеток  ≈ 210..277
+  // Место считается от центра ставки и не зависит от времени, поэтому объекты
+  // не «скачут» между кадрами и переживают сохранение без отдельных полей.
+  private campCache: { key: string; props: { x: number; y: number; kind: 'kazan' | 'swing' }[] } | null = null;
+  campProps(): { x: number; y: number; kind: 'kazan' | 'swing' }[] {
+    const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter' && b.done >= 1);
+    if (!tc) { this.campCache = null; return []; }
+    // позиция зависит только от ставки — считаем один раз, а не каждый кадр
+    const key = `${tc.id}:${tc.x}:${tc.y}`;
+    if (this.campCache && this.campCache.key === key) return this.campCache.props;
+    const out: { x: number; y: number; kind: 'kazan' | 'swing' }[] = [];
+    // казан — юго-восточнее ставки, ближний круг (2.5 клетки)
+    const rk = 2.5 * 32;
+    out.push({ x: tc.x + Math.cos(0.6) * rk, y: tc.y + Math.sin(0.6) * rk, kind: 'kazan' });
+    // алтыбакан — дальний круг (7.5 клетки), с другой стороны, чтобы не спорил
+    // с казаном за место и не налезал на постройки вплотную к ставке
+    const rs = 7.5 * 32;
+    out.push({ x: tc.x + Math.cos(2.5) * rs, y: tc.y + Math.sin(2.5) * rs, kind: 'swing' });
+    this.campCache = { key, props: out };
+    return out;
+  }
+
   // отправить работника на отдых
   sendToRest(u: Unit) {
     const spot = this.restSpotFor(u);
@@ -2405,14 +2432,27 @@ export class Game {
       if (pen && pen.milkWid === u.id) pen.milkWid = undefined;
       u.penId = undefined;
     }
-    // разброс ±20% — чтобы артель не уходила и не возвращалась строем
-    u.resting = true; u.restT = this.REST_TIME * rand(0.85, 1.2);
-    u.restX = spot.x; u.restY = spot.y;
-    u.state = 'move'; u.tx = spot.x; u.ty = spot.y;
-    u.nodeId = -1; u.buildId = -1; u.wkind = undefined; u.targetU = -1;
     // чем занять на отдыхе: женщины — казан, мужчины — асыки, кто-то на алтыбакане
     const r = Math.random();
-    u.restKind = u.female ? (r < 0.55 ? 'kazan' : 'swing') : (r < 0.6 ? 'asyk' : 'swing');
+    let kind: 'kazan' | 'swing' | 'asyk' = u.female ? (r < 0.55 ? 'kazan' : 'swing') : (r < 0.6 ? 'asyk' : 'swing');
+    // Казан и алтыбакан — РЕАЛЬНЫЕ объекты у ставки, а не выдумка на месте отдыха:
+    // работник идёт именно к ним. Место одно, поэтому занятый инвентарь не делим —
+    // иначе две сценки наложатся друг на друга в одной точке.
+    const props = this.campProps();
+    let px = spot.x, py = spot.y;
+    if (kind === 'kazan' || kind === 'swing') {
+      const pr = props.find(q => q.kind === kind);
+      const taken = pr ? this.units.some(o => o.id !== u.id && o.resting && o.restKind === kind) : true;
+      if (pr && !taken) { px = pr.x; py = pr.y; }
+      else kind = u.female ? 'kazan' : 'asyk';   // инвентарь занят — отдыхаем у юрты
+      if (kind === 'kazan' && (!pr || taken)) kind = 'asyk';
+    }
+    u.restKind = kind;
+    // разброс ±20% — чтобы артель не уходила и не возвращалась строем
+    u.resting = true; u.restT = this.REST_TIME * rand(0.85, 1.2);
+    u.restX = px; u.restY = py;
+    u.state = 'move'; u.tx = px; u.ty = py;
+    u.nodeId = -1; u.buildId = -1; u.wkind = undefined; u.targetU = -1;
     return true;
   }
 
@@ -3674,7 +3714,16 @@ export class Game {
         const phi = Math.atan2(ctr.y - cy, ctr.x - cx);
         const mvx = -Math.sin(phi), mvy = Math.cos(phi);
         const rx = Math.cos(phi), ry = Math.sin(phi);
-        this.moveToward(u, ctr.x - mvx * 60 + rx * 26, ctr.y - mvy * 60 + ry * 26, dt, 18);
+        this.herdMove(u, ctr.x - mvx * 60 + rx * 26, ctr.y - mvy * 60 + ry * 26, dt, 18);
+      } else {
+        // Стада нет (волки задрали или скот ещё не создан) — раньше здесь не было
+        // ветки else, и пастух ЗАМИРАЛ у базы навсегда: цели для движения не было.
+        // Едем на пастбище сами; если и там пусто — восполняем стадо.
+        this.herdMove(u, cx, cy, dt, 40);
+        if (dist2(u.x, u.y, cx, cy) < 260 * 260 && !herd.length) {
+          this.stockPasture(cx, cy, pen.id);
+          this.floater(cx, cy - 40, '🐑 Новое стадо', '#a3e635', 14);
+        }
       }
       if (u.herdStateT >= GRAZE_T) { u.herdState = 'home'; u.herdStateT = 0; this.pushBanner('🐎 Перегон', 'Пастух гонит стадо с пастбища в загон', 3); }
     }
@@ -3692,9 +3741,9 @@ export class Game {
       if (out) {
         // пастух со стороны поля (противоположной загону), толкает стадо к нему
         const ddx = pen.x - out.x, ddy = pen.y - out.y, dd = Math.max(1, Math.hypot(ddx, ddy));
-        this.moveToward(u, out.x - (ddx / dd) * 80, out.y - (ddy / dd) * 80, dt, 22);
+        this.herdMove(u, out.x - (ddx / dd) * 80, out.y - (ddy / dd) * 80, dt, 22);
       } else {
-        this.moveToward(u, pen.x + 70, pen.y + 50, dt, 26);
+        this.herdMove(u, pen.x + 70, pen.y + 50, dt, 26);
       }
       // стадо дошло (≥80% в загоне) или таймаут 150с — переходим к постое
       if (inPen() >= Math.ceil(herd.length * 0.8) || u.herdStateT > 150) { u.herdState = 'pen'; u.herdStateT = 0; u.gatherT = 0; }
@@ -3710,7 +3759,7 @@ export class Game {
         a.herdY = pen.y + Math.sin(s.ang) * (13 + s.ring * 8 + br * 0.7);
         a.anim += dt * 1.6;
       }
-      this.moveToward(u, pen.x + 70, pen.y + 50, dt, 26);
+      this.herdMove(u, pen.x + 70, pen.y + 50, dt, 26);
       const n = inPen();
       if (n > 0) {
         u.gatherT += dt;
@@ -3738,10 +3787,49 @@ export class Game {
       if (ctr) {
         // пастух позади стада на пути к пастбищу
         const ddx = cx - ctr.x, ddy = cy - ctr.y, dd = Math.max(1, Math.hypot(ddx, ddy));
-        this.moveToward(u, ctr.x - (ddx / dd) * 70, ctr.y - (ddy / dd) * 70, dt, 22);
+        this.herdMove(u, ctr.x - (ddx / dd) * 70, ctr.y - (ddy / dd) * 70, dt, 22);
+      } else {
+        this.herdMove(u, cx, cy, dt, 40);      // стада нет — возвращаемся сами
       }
       if (u.herdStateT > 120) { u.herdState = 'graze'; u.herdStateT = 0; }
     }
+  }
+
+  // ── ДВИЖЕНИЕ ПАСТУХА ────────────────────────────────────────────────────────
+  // Весь цикл выпаса раньше ходил через moveToward — движение строго по прямой.
+  // Упёршись в гору или угол здания, оно скользит только по одной оси и, если
+  // перекрыты обе, молча стоит на месте. Отсюда и был «пастух завис у базы».
+  // Здесь: обход препятствий через A*, плюс сторож — если пастух долго никуда
+  // не сместился, дёргаем его в обход и, в крайнем случае, перезапускаем цикл.
+  herdMove(u: Unit, tx: number, ty: number, dt: number, arrive = 6): boolean {
+    const px = u.x, py = u.y;
+    const done = this.moveTowardPath(u, tx, ty, dt, arrive);
+    if (done) { u.herdStuckT = 0; return true; }
+    // сместился ли заметно за кадр (порог — четверть ожидаемого шага)
+    const moved = Math.hypot(u.x - px, u.y - py);
+    if (moved > u.speed * dt * 0.25) { u.herdStuckT = 0; return false; }
+    u.herdStuckT = (u.herdStuckT ?? 0) + dt;
+    // 1.5 с без движения — сбрасываем маршрут, пусть A* проложит заново.
+    // Пересчитываем НЕ каждый кадр (это был бы A* по 30 раз в секунду на юнита),
+    // а раз в 0.75 с: шаг таймера пересекает границу интервала лишь однажды.
+    const beat = Math.floor(u.herdStuckT / 0.75) !== Math.floor(((u.herdStuckT ?? 0) - dt) / 0.75);
+    if (u.herdStuckT > 1.5 && beat) {
+      u.path = undefined; u.pathGoal = undefined; u.noPathT = 0;
+      // объезд: шаг вбок от направления на цель
+      const dx = tx - u.x, dy = ty - u.y, d = Math.max(1, Math.hypot(dx, dy));
+      const sx = -dy / d, sy = dx / d, side = (u.id % 2) ? 1 : -1;
+      const bx = u.x + sx * side * 90, by = u.y + sy * side * 90;
+      if (!this.terrainBlocked(bx, by)) this.moveToward(u, bx, by, dt, 6);
+    }
+    // 6 с — совсем безнадёжно: телепорта нет, но цикл перезапускаем, чтобы
+    // пастух выбрал новую фазу и новую цель вместо вечного упора в стену
+    if (u.herdStuckT > 6) {
+      u.herdStuckT = 0;
+      u.herdState = u.herdState === 'graze' ? 'home' : 'graze';
+      u.herdStateT = 0;
+      u.path = undefined; u.pathGoal = undefined;
+    }
+    return false;
   }
 
   // кнопка «Пасти скот»: выбранные рабочие по одному назначаются к ближайшим/свободным загонам
@@ -5976,6 +6064,19 @@ export class Game {
       if (b.owner !== 'player' && !this.canSeeEnemy(b.x, b.y)) continue;
       const [ix, iy] = toIso(b.x, b.y);
       drawList.push({ iy, draw: () => this.drawBldIso(b, ix, iy) });
+    }
+    // ── постоянные декорации стойбища: казан и алтыбакан у ханской ставки ──
+    // Идут через общий drawList, поэтому корректно перекрываются юртами и людьми.
+    // Если у казана/качелей уже отдыхает шаруа, сама СЦЕНКА рисует и инвентарь —
+    // тогда декорацию пропускаем, иначе получится два казана в одной точке.
+    for (const pr of this.campProps()) {
+      if (!this.inView(pr.x, pr.y, 120)) continue;
+      const busy = this.units.some(u => u.resting && u.restKind === pr.kind &&
+        u.state === 'idle' && dist2(u.x, u.y, pr.x, pr.y) < 46 * 46);
+      if (busy) continue;
+      const [pix, piy0] = toIso(pr.x, pr.y);
+      const piy = piy0 - upAt(pr.x, pr.y);
+      drawList.push({ iy: piy, draw: () => drawCampProp(ctx, pr.kind, pix, piy) });
     }
     // rally flag
     if (this.selBld >= 0) {
