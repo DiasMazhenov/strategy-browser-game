@@ -4,7 +4,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
   getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
   HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex,
   type HexKind,
-  TILE_STEP } from './iso';
+  TILE_STEP, HEX_CELL } from './iso';
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
@@ -2396,11 +2396,12 @@ export class Game {
 
   // ── ПОСТОЯННЫЕ ДЕКОРАЦИИ СТОЙБИЩА ──
   // Казан и алтыбакан стоят у ханской ставки всегда, а не только когда кто-то
-  // отдыхает. Шаг гекса в мире ≈30 (по X) / ≈34.6 (по Y), отсюда дистанции:
-  //   казан      — 2-3 клетки  ≈ 60..100
-  //   алтыбакан  — 7-8 клеток  ≈ 210..277
-  // Место считается от центра ставки и не зависит от времени, поэтому объекты
-  // не «скачут» между кадрами и переживают сохранение без отдельных полей.
+  // отдыхает. КЛЕТКА = ГЕКС, её шаг в мире = √3 * HS ≈ 34.64 (не 32!).
+  // Дистанции от центра ставки:
+  //   казан     — 4.5 клетки (было 2.5, отодвинут по просьбе на 2 клетки)
+  //   алтыбакан — 7.5 клетки
+  // Место не зависит от времени, поэтому объекты не «скачут» между кадрами
+  // и переживают сохранение без отдельных полей.
   private campCache: { key: string; props: { x: number; y: number; kind: 'kazan' | 'swing' }[] } | null = null;
   campProps(): { x: number; y: number; kind: 'kazan' | 'swing' }[] {
     const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter' && b.done >= 1);
@@ -2409,12 +2410,12 @@ export class Game {
     const key = `${tc.id}:${tc.x}:${tc.y}`;
     if (this.campCache && this.campCache.key === key) return this.campCache.props;
     const out: { x: number; y: number; kind: 'kazan' | 'swing' }[] = [];
-    // казан — юго-восточнее ставки, ближний круг (2.5 клетки)
-    const rk = 2.5 * 32;
+    // казан — юго-восточнее ставки, 4.5 клетки
+    const rk = 4.5 * HEX_CELL;
     out.push({ x: tc.x + Math.cos(0.6) * rk, y: tc.y + Math.sin(0.6) * rk, kind: 'kazan' });
-    // алтыбакан — дальний круг (7.5 клетки), с другой стороны, чтобы не спорил
-    // с казаном за место и не налезал на постройки вплотную к ставке
-    const rs = 7.5 * 32;
+    // алтыбакан — 7.5 клетки, с другой стороны, чтобы не спорил с казаном
+    // за место и не налезал на постройки вплотную к ставке
+    const rs = 7.5 * HEX_CELL;
     out.push({ x: tc.x + Math.cos(2.5) * rs, y: tc.y + Math.sin(2.5) * rs, kind: 'swing' });
     this.campCache = { key, props: out };
     return out;

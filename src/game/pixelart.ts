@@ -185,9 +185,6 @@ import kzFemB from '../assets/sprites/units/kz/kz_fem_b.png';
 import kzFemGather from '../assets/sprites/units/kz/kz_fem_gather.png';
 import kzFemMilk from '../assets/sprites/units/kz/kz_fem_milk.png';
 // ── сценки отдыха (посменная работа): алтыбакан, казан, асыки ──
-import kzSwingL from '../assets/sprites/units/kz/kz_swing_l.png';
-import kzSwingC from '../assets/sprites/units/kz/kz_swing_c.png';
-import kzSwingR from '../assets/sprites/units/kz/kz_swing_r.png';
 import kzKazanA from '../assets/sprites/units/kz/kz_kazan_a.png';
 import kzKazanB from '../assets/sprites/units/kz/kz_kazan_b.png';
 import kzKazanC from '../assets/sprites/units/kz/kz_kazan_c.png';
@@ -199,6 +196,11 @@ import kzAsykC from '../assets/sprites/units/kz/kz_asyk_c.png';
 // это инвентарь, который стоит у ханской ставки всегда. ──
 import kzPropKazan from '../assets/sprites/units/kz/kz_prop_kazan.png';
 import kzPropSwing from '../assets/sprites/units/kz/kz_prop_swing.png';
+// алтыбакан с парой: качание влево-центр-вправо (люди стоят ПОПЕРЁК доски,
+// лицом по ходу движения — парень спиной к камере, девушка лицом)
+import kzSwingRideC from '../assets/sprites/units/kz/kz_swing_ride_c.png';
+import kzSwingRideL from '../assets/sprites/units/kz/kz_swing_ride_l.png';
+import kzSwingRideR from '../assets/sprites/units/kz/kz_swing_ride_r.png';
 // казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
 import kzScout from '../assets/sprites/units/kz/kz_scout.png';
 import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
@@ -343,9 +345,12 @@ const KZ_FEM_GATHER: [HTMLImageElement, string] = [mk(kzFemGather), 'kz_fem_gath
 const KZ_FEM_MILK: [HTMLImageElement, string] = [mk(kzFemMilk), 'kz_fem_milk'];
 // циклы сценок отдыха: качели качаются влево-центр-вправо, у казана помешивают,
 // в асыки бросают и радуются. Кадр выбирается по фазе u.anim.
+// Алтыбакан: маятник качается влево → центр → вправо → центр. Кадры собраны
+// поворотом маятника вокруг подвеса (scripts/build-altybakan.cjs), поэтому
+// опоры на всех кадрах стоят пиксель в пиксель.
 const KZ_SWING: [HTMLImageElement, string][] = [
-  [mk(kzSwingL), 'kz_swing_l'], [mk(kzSwingC), 'kz_swing_c'],
-  [mk(kzSwingR), 'kz_swing_r'], [mk(kzSwingC), 'kz_swing_c'],
+  [mk(kzSwingRideL), 'kz_swing_ride'], [mk(kzSwingRideC), 'kz_swing_ride'],
+  [mk(kzSwingRideR), 'kz_swing_ride'], [mk(kzSwingRideC), 'kz_swing_ride'],
 ];
 const KZ_KAZAN: [HTMLImageElement, string][] = [
   [mk(kzKazanA), 'kz_kazan_a'], [mk(kzKazanB), 'kz_kazan_b'],
@@ -374,7 +379,9 @@ export function drawCampProp(ctx: CanvasRenderingContext2D, kind: 'kazan' | 'swi
   if (!im.complete || !im.naturalWidth) return;
   // Высота от роста шаруа (46px), как у сценок отдыха: казан ×1.0, рама ×1.9.
   const VH = UNIT_TARGET_H.villager ?? 46;
-  const H = Math.round(kind === 'kazan' ? VH : VH * 1.9) * zoom;
+  // ×1.67 — та же пропорция, что у сценки катания: пустые качели и качели
+  // с парой обязаны быть одного размера, иначе при посадке рама «прыгнет».
+  const H = Math.round(kind === 'kazan' ? VH : VH * 1.67) * zoom;
   const w = im.naturalWidth * (H / im.naturalHeight);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(im, snap(ix - w / 2), snap(iy - H), Math.round(w), Math.round(H));
@@ -682,7 +689,11 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // Без этой поправки девушка на качелях выходила вдвое мельче шаруа, а женщина
   // у казана — вдвое крупнее.
   const VILL_H = UNIT_TARGET_H.villager ?? 46;
-  const restH = anKey.startsWith('kz_swing') ? Math.round(VILL_H * 1.9)
+  // kz_swing_ride: пара стоит поперёк доски, парень занимает 59.9% высоты
+  // кадра (91 из 152 px) → чтобы он был ростом со шаруа, кадр = 46/0.599 ≈ 77px,
+  // то есть ×1.67. Старые ×1.9 считались от рамы прежнего спрайта.
+  const restH = anKey.startsWith('kz_swing_ride') ? Math.round(VILL_H * 1.67)
+    : anKey.startsWith('kz_swing') ? Math.round(VILL_H * 1.9)
     : anKey.startsWith('kz_kazan') ? VILL_H
     : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 1.06) : 0;
   const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46));

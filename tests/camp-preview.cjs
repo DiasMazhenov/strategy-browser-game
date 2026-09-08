@@ -29,9 +29,10 @@ for(let i=0;i<W*H;i++){const y=(i/W)|0;const t=y/H;
   out[i*4]=88-t*26;out[i*4+1]=104-t*30;out[i*4+2]=62-t*18;out[i*4+3]=255;}
 const toIso=(x,y)=>[x-y,(x+y)*0.5];
 const TC={x:0,y:0};
+const HEX=20*Math.sqrt(3);           // шаг гекса = «одна клетка» ≈34.64
 const props=[
-  {x:TC.x+Math.cos(0.6)*2.5*32, y:TC.y+Math.sin(0.6)*2.5*32, kind:'kazan'},
-  {x:TC.x+Math.cos(2.5)*7.5*32, y:TC.y+Math.sin(2.5)*7.5*32, kind:'swing'},
+  {x:TC.x+Math.cos(0.6)*4.5*HEX, y:TC.y+Math.sin(0.6)*4.5*HEX, kind:'kazan'},
+  {x:TC.x+Math.cos(2.5)*7.5*HEX, y:TC.y+Math.sin(2.5)*7.5*HEX, kind:'swing'},
 ];
 const CAM_X=W/2+150, CAM_Y=H/2+40, Z=1.25;
 // сетка гексов для масштаба
@@ -62,10 +63,10 @@ const items=props.map(p=>{const [ix,iy]=toIso(p.x,p.y);return {...p,sx:CAM_X+ix*
 items.sort((a,b)=>a.iy-b.iy);
 for(const it of items){
   const im=readPNG(path.join(DIR, it.kind==='kazan'?'kz_prop_kazan.png':'kz_prop_swing.png'));
-  blit(im,it.sx,it.sy,Math.round((it.kind==='kazan'?VH:VH*1.9)*Z));
+  blit(im,it.sx,it.sy,Math.round((it.kind==='kazan'?VH:VH*1.67)*Z));
 }
 writePNG(path.join(__dirname,'camp-props.png'),W,H,out);
-const d=(p)=>Math.hypot(p.x,p.y)/32;
+const d=(p)=>Math.hypot(p.x,p.y)/HEX;
 console.log(`казан     — ${d(props[0]).toFixed(1)} клетки от ставки`);
 console.log(`алтыбакан — ${d(props[1]).toFixed(1)} клетки от ставки`);
 console.log('превью: tests/camp-props.png');

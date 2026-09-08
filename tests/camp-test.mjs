@@ -64,10 +64,13 @@ console.log('\n=== 3. Казан и алтыбакан — постоянные 
   ok(/kind:\s*'swing'/.test(cp), 'алтыбакан в списке декораций');
 
   // дистанции: 2-3 клетки для казана, 7-8 для алтыбакана (шаг гекса ~32)
-  const mk = cp.match(/const rk = ([\d.]+) \* 32/);
-  const ms = cp.match(/const rs = ([\d.]+) \* 32/);
-  ok(mk && +mk[1] >= 2 && +mk[1] <= 3, `казан в 2-3 клетках от ставки (${mk ? mk[1] : '?'})`);
+  // КЛЕТКА = ГЕКС: шаг √3·HS ≈ 34.64, а не 32
+  const mk = cp.match(/const rk = ([\d.]+) \* HEX_CELL/);
+  const ms = cp.match(/const rs = ([\d.]+) \* HEX_CELL/);
+  ok(mk && +mk[1] >= 4 && +mk[1] <= 5, `казан в 4-5 клетках от ставки (${mk ? mk[1] : '?'})`);
   ok(ms && +ms[1] >= 7 && +ms[1] <= 8, `алтыбакан в 7-8 клетках от ставки (${ms ? ms[1] : '?'})`);
+  ok(/export const HEX_CELL/.test(readFileSync(new URL('../src/game/iso.ts', import.meta.url), 'utf8')),
+    'HEX_CELL (шаг гекса) объявлен в iso.ts — единая единица «клетки»');
 
   ok(/drawCampProp\(ctx, pr\.kind/.test(eng), 'декорации рисуются в общем drawList');
   ok(/drawList\.push\(\{ iy: piy/.test(eng), 'декорации участвуют в сортировке по глубине');
@@ -82,8 +85,19 @@ console.log('\n=== 4. Спрайты декораций собраны из го
   const d = body(art, 'export function drawCampProp');
   ok(d.length > 100, 'drawCampProp реализован');
   ok(/UNIT_TARGET_H\.villager/.test(d), 'размер считается от роста шаруа, а не «на глаз»');
-  ok(/1\.9/.test(d), 'рама алтыбакана вдвое выше человека (×1.9, как в сценке отдыха)');
+  ok(/1\.67/.test(d), 'качели ×1.67 — тот же размер, что у сценки катания');
   ok(/imageSmoothingEnabled = false/.test(d), 'пиксель-арт рисуется без сглаживания');
+}
+
+console.log('\n=== 4b. Алтыбакан: пара стоит поперёк доски ===');
+{
+  ok(/kz_swing_ride_c/.test(art), 'центральный кадр катания импортирован');
+  ok(/kz_swing_ride_l/.test(art) && /kz_swing_ride_r/.test(art), 'боковые фазы качания импортированы');
+  const cyc = art.slice(art.indexOf('const KZ_SWING'), art.indexOf('const KZ_KAZAN'));
+  ok(/kzSwingRideL/.test(cyc) && /kzSwingRideC/.test(cyc) && /kzSwingRideR/.test(cyc),
+    'цикл качелей собран из новых кадров (влево-центр-вправо-центр)');
+  ok(!/kzSwingL\b/.test(art), 'старые кадры одиночной девушки больше не используются');
+  ok(/1\.67/.test(art), 'масштаб сценки ×1.67 — человек ростом со шаруа');
 }
 
 console.log('\n=== 5. Плашка волны скрыта в мирное время ===');

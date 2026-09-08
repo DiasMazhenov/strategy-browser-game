@@ -55,7 +55,7 @@ const game = new Game(mkCanvas(), { difficulty: 'normal', loadSave: false,
   onHud: (h) => { hud = h; }, onGameOver: () => {}, onPauseRequest: () => {} });
 
 const tc = game.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
-const CELL = 32;
+const CELL = 20 * Math.sqrt(3);   // шаг ГЕКСА ≈ 34.64 — «одна клетка»
 
 console.log('\n=== Казан и алтыбакан у ханской ставки ===');
 const props = game.campProps();
@@ -63,7 +63,7 @@ ok(props.length === 2, `две декорации (получено ${props.leng
 for (const p of props) {
   const cells = Math.hypot(p.x - tc.x, p.y - tc.y) / CELL;
   const name = p.kind === 'kazan' ? 'казан' : 'алтыбакан';
-  const [lo, hi] = p.kind === 'kazan' ? [2, 3] : [7, 8];
+  const [lo, hi] = p.kind === 'kazan' ? [4, 5] : [7, 8];
   ok(cells >= lo && cells <= hi, `${name}: ${cells.toFixed(1)} клетки (требуется ${lo}-${hi})`);
 }
 
