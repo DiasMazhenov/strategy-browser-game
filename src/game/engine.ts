@@ -315,7 +315,8 @@ export interface HudSnapshot {
   pTc: number; pTcMax: number; eTc: number; eTcMax: number;
   dmgFlash: number; ageAfford: boolean; ageCost: string;
   hint: string;
-  ageReport: AgeReport | null;   // экран итогов эпохи (null — закрыт)
+  ageReport: AgeReport | null;
+  prayerTruce: boolean;   // идёт азан — враг не атакует   // экран итогов эпохи (null — закрыт)
   atWar: boolean; grievance: number; casusBelli: number; morale: number;
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   woodDiscount: number;   // множитель цены дерева от союза с ремесленниками (1 = без скидки)
@@ -2081,7 +2082,7 @@ export class Game {
     if (u && u.owner === 'player') {
       if (!additive) this.clearSel();
       this.selected.add(u.id); this.selBld = -1;
-      this.sound.select(); this.sound.voice(u.key, 'select'); this.pushHud(); return;
+      this.sound.select(); this.sound.voice(u.key, 'select', u); this.pushHud(); return;
     }
     if (b && b.owner === 'player') {
       this.clearSel(); this.selBld = b.id;
@@ -2898,8 +2899,9 @@ export class Game {
         const d = Math.abs(ph - target);
         const near = d < win || d > 1 - win;
         if (!near || this.azanDone.includes(i)) continue;
-        // враг у ворот — намаз откладывается: оборона важнее
-        if (this.enemyNearHome()) { this.azanDone.push(i); continue; }
+        // Раньше намаз отменялся, если враг у ворот. Теперь наоборот: азан
+        // звучит всегда, а нападающие из уважения к нему приостанавливают
+        // атаку (см. prayerTruce и заморозку waveT).
         this.callToPrayer(mosque, i);
         break;
       }
@@ -2943,7 +2945,6 @@ export class Game {
 
     const cur = currentPrayer(now, this.azanCity(), 60);
     if (!cur || this.realAzanDone.includes(cur.key)) return false;
-    if (this.enemyNearHome()) { this.realAzanDone.push(cur.key); return false; }
 
     this.realAzanDone.push(cur.key);
     this.lastRealPrayer = { key: cur.key, at: fmtHM(prayerTimes(now, this.azanCity())[cur.key]) };
@@ -2969,7 +2970,14 @@ export class Game {
       `${city.name}: время ${nm.ru} намаза${late}. Шаруа идут к мешіті`, 5);
   }
 
-  // есть ли враг вблизи ставки (тогда азан пропускаем)
+  /**
+   * Идёт ли «перемирие азана»: пока звучит призыв, нападающие приостанавливают
+   * атаку из уважения к молитве. Работает только когда призыв реально звучит,
+   * то есть у игрока построена мешіт.
+   */
+  prayerTruce(): boolean { return this.prayT > 0; }
+
+  // есть ли враг вблизи ставки (используется для баннера о перемирии)
   enemyNearHome(): boolean {
     const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
     if (!tc) return false;
@@ -2979,7 +2987,13 @@ export class Game {
     // idx = -1 приходит из режима реального времени: там своё расписание
     // (realAzanDone), а в azanDone писать нечего.
     if (idx >= 0) this.azanDone.push(idx);
-    const played = this.sound.azan();
+    // Если враг у ворот — сообщаем игроку, что набег замер: иначе перемирие
+    // выглядело бы как «противник завис», а не как осознанное уважение.
+    if (this.enemyNearHome()) {
+      this.pushBanner('🤍 Враг опустил оружие',
+        'Из уважения к азану джунгары приостановили атаку. Перемирие продлится до конца намаза', 4);
+    }
+    const played = this.sound.azan(mosque);
     this.prayT = this.PRAYER_LEN;
     // сзываем мирных жителей к мечети
     let called = 0;
@@ -3179,7 +3193,8 @@ export class Game {
     const us = this.selUnits().filter(u => u.owner === 'player' && u.key !== 'wolf');
     if (!us.length) return;
     const u = us[(Math.random() * us.length) | 0];
-    this.sound.voice(u.key, event);
+    // реплика звучит из точки, где стоит юнит: далёкий отряд слышно тише
+    this.sound.voice(u.key, event, u);
   }
 
   // ── рынок: обмен ресурсов на золото ──
@@ -3647,6 +3662,8 @@ export class Game {
     // когда курсор просто проходил мимо края). Вместо неё — стрелки у краёв:
     // подводим курсор → появляется стрелка → ПРОКРУТКА ТОЛЬКО ПО КЛИКУ.
     // См. edgeArrowAt() / nudgeCam() и отрисовку в drawEdgeArrows().
+    // «уши» игрока — камера: звуки затухают по мере удаления от центра экрана
+    this.sound.setListener(this.cam.x, this.cam.y, this.cam.zoom);
     this.updateEdgeArrows();
     this.updateHoverHex();
     this.syncCursor();
@@ -3712,7 +3729,10 @@ export class Game {
     }
 
     // waves — набеги идут только во время войны с соседом
-    if (this.atWar && !this.over) {
+    // ПЕРЕМИРИЕ АЗАНА: пока звучит призыв, набег не выступает — даже враги
+    // чтят молитву. Таймер замирает, а не сбрасывается: волна придёт сразу
+    // после намаза, так что это отсрочка, а не отмена.
+    if (this.atWar && !this.over && !this.prayT) {
       this.waveT -= dt;
       if (this.waveT <= 8 && this.waveT + dt > 8) {
         this.sound.horn();
@@ -3829,6 +3849,18 @@ export class Game {
         const r = this.relics.find(x => x.id === u.relicTarget);
         if (!r || r.taken) { u.relicTarget = undefined; }
         else if (dist2(u.x, u.y, r.x, r.y) < 30 * 30) { this.collectRelic(u, r); continue; }
+      }
+      // ── ПЕРЕМИРИЕ АЗАНА ──
+      // Пока звучит призыв, вражеские ВОИНЫ опускают оружие: замирают на месте
+      // и не бьют. Из уважения к молитве набег приостанавливается — это и
+      // тактическая передышка для игрока, и повод строить мешіт.
+      // Крестьяне врага продолжают работать: перемирие о бое, не о труде.
+      if (this.prayerTruce() && u.owner === 'enemy' && u.key !== 'villager') {
+        u.targetU = -1; u.targetB = -1;
+        u.state = 'idle';
+        (u as Unit & { walk?: boolean }).walk = false;
+        u.cd = Math.max(u.cd, 0.4);      // не даём ударить сразу после намаза
+        continue;
       }
       const px0 = u.x, py0 = u.y;
       const stateMoving = u.state === 'move' || u.state === 'attackmove' || u.state === 'gather' || u.state === 'return' || u.state === 'build';
@@ -4647,8 +4679,8 @@ export class Game {
         const take = Math.min(2.5 * this.workMult(u), n.amount);
         n.amount -= take;
         u.carry.amt += take;
-        if (n.kind === 'wood') { this.burst(n.x + rand(-10, 10), n.y - 6, 3, ['#a16207', '#65a30d', '#d6a45c'], 80, 0.55); if (Math.random() < 0.5) this.sound.chop(); }
-        else if (n.kind === 'gold') { this.burst(n.x, n.y - 8, 3, ['#fde047', '#facc15', '#fff'], 70, 0.5); this.spark(n.x, n.y - 10, '#fef08a'); if (Math.random() < 0.4) this.sound.mine(); }
+        if (n.kind === 'wood') { this.burst(n.x + rand(-10, 10), n.y - 6, 3, ['#a16207', '#65a30d', '#d6a45c'], 80, 0.55); if (Math.random() < 0.5) this.sound.chop(n); }
+        else if (n.kind === 'gold') { this.burst(n.x, n.y - 8, 3, ['#fde047', '#facc15', '#fff'], 70, 0.5); this.spark(n.x, n.y - 10, '#fef08a'); if (Math.random() < 0.4) this.sound.mine(n); }
         else if (n.kind === 'fish') { this.burst(n.x, n.y - 2, 4, ['#7dd3fc', '#38bdf8', '#e0f2fe'], 70, 0.5); if (Math.random() < 0.3) this.sound.gatherFood(); }
         else { this.burst(n.x, n.y - 6, 3, ['#f472b6', '#fb7185', '#a3e635'], 60, 0.5); if (Math.random() < 0.3) this.sound.gatherFood(); }
         if (n.amount <= 0) { this.burst(n.x, n.y, 14, n.kind === 'wood' ? ['#65a30d', '#3f6212'] : n.kind === 'gold' ? ['#facc15'] : n.kind === 'fish' ? ['#7dd3fc','#38bdf8'] : ['#fb7185'], 110, 0.7); }
@@ -5554,17 +5586,17 @@ export class Game {
       const sp = isCata ? 300 : 420;
       this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind: isCata ? 'rock' : 'arrow', srcU: att.id });
       if (isCata) { this.sound.boom(); this.trauma = Math.min(1, this.trauma + 0.12); this.burst(att.x, att.y - 26, 8, ['#a8a29e', '#78716c'], 120, 0.5); }
-      else { this.sound.arrow(); this.spark(att.x, att.y - 14, '#fef3c7'); }
+      else { this.sound.arrow(att); this.spark(att.x, att.y - 14, '#fef3c7'); }
     } else {
       // копейщик бьёт конницу с бонусом
       if (att.key === 'spearman' && tu && (tu.key === 'knight' || tu.key === 'cavalry')) dmg *= 1.8;
       if (tu) this.damageUnit(tu, dmg, att);
       if (tb) this.damageBld(tb, dmg, att.owner);
-      this.sound.sword();
+      this.sound.sword(att);
       // батальный шум рукопашной — ТОЛЬКО против разумных юнитов (воины/войска/племя),
       // не против зверей (волки/скот/дичь): охота на животных звучит иначе
       const vsAnimal = tu && tu.owner === 'neutral' && !tu.tribe;
-      if (!vsAnimal) this.sound.battleClash();
+      if (!vsAnimal) this.sound.battleClash(att);
       const hx = tu ? tu.x : tb ? tb.x : att.x + att.face * 20, hy = (tu ? tu.y : tb ? tb.y : att.y) - 10;
       this.burst(hx, hy, 4, ['#fecaca', '#fff', '#f87171'], 90, 0.4);
     }
@@ -5579,7 +5611,7 @@ export class Game {
     if (t.owner === 'player' && from && from.owner !== 'player' && !this.inView(t.x, t.y, 40)) {
       this.raiseAlert(t.x, t.y, t.key === 'villager' ? 'Шаруа под ударом!' : 'Ваши воины в бою');
     }
-    this.sound.hit();
+    this.sound.hit(t);
     this.spark(t.x, t.y - 12, t.owner === 'player' ? '#93c5fd' : '#fca5a5');
     if (t.owner === 'player') this.dmgFlash = Math.min(0.5, this.dmgFlash + 0.06);
     this.floaters.push({ x: t.x + rand(-6, 6), y: t.y - 30, life: 0.7, max: 0.7, text: `${Math.round(dmg)}`, color: from && from.owner === 'player' ? '#fde047' : '#fca5a5', size: 12 });
@@ -5859,7 +5891,7 @@ export class Game {
               const ang = ang0 + spread;
               this.projs.push({ x: px0, y: py0, vx: Math.cos(ang) * 470, vy: Math.sin(ang) * 470, tx: best.x, ty: best.y, targetU: best.id, targetB: -1, dmg: baseDmg * (s === 0 ? 1 : 0.7), owner: b.owner, life: 1.2, kind: b.key === 'towncenter' ? 'rock' : 'bolt' });
             }
-            this.sound.arrow();
+            this.sound.arrow(b);
             if (archers && Math.random() < 0.3) this.burst(b.x, b.y - 46, 3, ['#fde68a', '#fff'], 60, 0.4);
           }
         }
@@ -6357,6 +6389,7 @@ export class Game {
       ageCost: next?.cost ? `${next.cost.food}🍖${next.cost.gold ? ` ${next.cost.gold}🪙` : ''}` : 'MAX',
       hint: this.hint,
       ageReport: this.ageReport,
+      prayerTruce: this.prayerTruce(),
       atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale,
       tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
       hasMarket: this.marketCount() > 0,

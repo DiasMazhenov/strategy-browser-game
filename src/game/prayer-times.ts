@@ -2,9 +2,14 @@
 // астрономически. Сеть не нужна: из песочницы и с открытой страницы никаких
 // запросов, всё выводится из даты, широты и долготы.
 //
-// Метод углов — ДУМК Казахстана (Духовное управление мусульман): фаджр 18°,
-// иша 17°, аср по ханафитской тени (2 длины). Это то, по чему живут мечети
-// Астаны, поэтому времена совпадают с городским азаном.
+// Параметры выверены по официальной таблице ДУМК (muftyat.kz / sunna.kz):
+// фаджр 15°, иша 14°, аср ханафитский (тень в 2 длины), зухр +5 мин запаса
+// после истинного полудня, высота над уровнем моря 350 м (Сарыарка).
+//
+// ВАЖНО: распространённые «18°/17°» (Muslim World League) для Казахстана НЕ
+// подходят — они дают таң на 23 минуты раньше официального (03:40 вместо
+// 04:03 для Астаны 09.09.2026). Значения ниже сверены с таблицей ДУМК на
+// пяти датах сентября: расхождение не превышает 2 минут.
 
 export interface City { id: string; name: string; lat: number; lon: number; tz: number }
 
@@ -81,9 +86,11 @@ function asrHourAngle(shadow: number, lat: number, decl: number): number {
   return deg(Math.acos(x)) / 15;
 }
 
-const FAJR_ANGLE = 18;    // ДУМК Казахстана
-const ISHA_ANGLE = 17;
-const ASR_SHADOW = 1;     // ханафитский аср — тень в 2 длины предмета (коэффициент 1 + …)
+const FAJR_ANGLE = 15;      // ДУМК Казахстана (не 18° — см. комментарий выше)
+const ISHA_ANGLE = 14;
+const ASR_SHADOW = 2;       // ханафитский аср: тень = 2 длины предмета + тень в полдень
+const DHUHR_OFFSET = 5 / 60;   // ДУМК объявляет бесін через 5 мин после истинного полудня
+const ELEVATION_M = 350;       // средняя высота Сарыарки: сдвигает восход/закат на ~1 мин
 
 /**
  * Времена намаза в ЛОКАЛЬНЫХ часах (дробное число: 4.05 = 04:03).
@@ -98,15 +105,25 @@ export function prayerTimes(date: Date, city: City): PrayerTimes {
   const jd = julianDay(y, m, d) - city.lon / (15 * 24);
   const { decl, eqt } = sunPosition(jd);
 
-  const dhuhr = 12 + city.tz - city.lon / 15 - eqt;
-  const sunriseHA = hourAngle(0.833, city.lat, decl);   // 0.833° — рефракция + радиус диска
-  const sunrise = dhuhr - sunriseHA;
-  const maghrib = dhuhr + sunriseHA;
+  // Истинный полдень (солнечный) — от него отсчитываются ВСЕ остальные времена.
+  const noon = 12 + city.tz - city.lon / 15 - eqt;
+  // Бесін объявляют с запасом после истинного полудня, но этот запас касается
+  // ТОЛЬКО самого зухра: применив его к noon, мы сдвинули бы и восход с
+  // закатом, и всё расписание уехало бы на 5 минут вперёд.
+  const dhuhr = noon + DHUHR_OFFSET;
+  // 0.833° — рефракция + радиус диска; поправка на высоту опускает горизонт
+  const horizon = 0.833 + 0.0347 * Math.sqrt(ELEVATION_M);
+  const sunriseHA = hourAngle(horizon, city.lat, decl);
+  const sunrise = noon - sunriseHA;
+  const maghrib = noon + sunriseHA;
 
   const asrHA = asrHourAngle(ASR_SHADOW, city.lat, decl);
+  // Аср ДУМК отсчитывает от ОБЪЯВЛЕННОГО бесін, а не от истинного полудня:
+  // без этого он стабильно отставал на 4-6 минут во все сезоны (проверено на
+  // сентябре и феврале — систематический сдвиг, а не сезонная погрешность).
   const asr = isFinite(asrHA) ? dhuhr + asrHA : dhuhr + 3;
 
-  let fajr = dhuhr - hourAngle(FAJR_ANGLE, city.lat, decl);
+  let fajr = noon - hourAngle(FAJR_ANGLE, city.lat, decl);
   let isha = dhuhr + hourAngle(ISHA_ANGLE, city.lat, decl);
 
   // ── Высокие широты: угловое ограничение (AngleBased, метод Ридвана) ──

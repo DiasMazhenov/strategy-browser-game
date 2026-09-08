@@ -67,7 +67,10 @@ ok('audio.ts: есть azanPlaying()', /azanPlaying\s*\(/.test(audio));
 ok('audio.ts: есть stopAzan()', /stopAzan\s*\(/.test(audio));
 // именно ОБЪЯВЛЕНИЕ метода, а не первый вызов this.stopVoice()
 ok('audio.ts: stopVoice() глушит и азан', /stopAzan\s*\(/.test(body(audio, '\n  stopVoice()')));
-const azanBody = body(audio, 'azan(): boolean');
+// azan() принимает необязательную позицию (пространственный звук), и в её типе
+// есть свои фигурные скобки — body() схватил бы их вместо тела метода.
+// Поэтому отрезаем тело от ': boolean {', которая идёт уже после параметров.
+const azanBody = body(audio.slice(audio.indexOf('  azan(')), '): boolean');
 ok('azan(): второй вызов поверх играющего запрещён', /if \(this\.azanEl\) return false/.test(azanBody));
 ok('azan(): молчит при выключенном звуке', /this\.muted \|\| !this\.voiceOn/.test(azanBody));
 ok('azan(): слышен поверх шума боя', /Math\.max\(0\.35/.test(azanBody));

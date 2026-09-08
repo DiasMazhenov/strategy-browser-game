@@ -165,13 +165,64 @@ export class SoundBank {
     this.lastPlay[key] = t;
     return true;
   }
+  // ── ПРОСТРАНСТВЕННЫЙ ЗВУК ─────────────────────────────────────────────────
+  // Камера = «уши» игрока. Чем дальше событие от центра экрана, тем тише.
+  // Позицию обновляет движок каждый кадр (setListener).
+  private lx = 0; private ly = 0; private lzoom = 1;
+  /** Радиус полной слышимости в МИРОВЫХ единицах (внутри — без ослабления). */
+  private readonly NEAR = 260;
+  /** Дальше этого не слышно вовсе — иначе бой на другом конце карты шумел бы. */
+  private readonly FAR = 1750;
+
+  setListener(x: number, y: number, zoom = 1) { this.lx = x; this.ly = y; this.lzoom = zoom; }
+
+  /**
+   * Множитель громкости для события в мировой точке (1 — рядом, 0 — не слышно).
+   * Спад линейный по расстоянию, а не 1/d: обратный квадрат на игровых
+   * масштабах глушит звук почти сразу за краем экрана и звучит неестественно.
+   *
+   * При отдалении камеры (zoom < 1) слышно дальше: игрок «поднялся выше»,
+   * в поле зрения больше мира — логично слышать всю видимую область.
+   */
+  spatial(x: number, y: number): number {
+    const near = this.NEAR / Math.max(0.35, this.lzoom);
+    const far = this.FAR / Math.max(0.35, this.lzoom);
+    const d = Math.hypot(x - this.lx, y - this.ly);
+    if (d <= near) return 1;
+    if (d >= far) return 0;
+    const k = 1 - (d - near) / (far - near);
+    return k * k;      // квадрат кривой: ближняя зона громкая, хвост мягкий
+  }
+
+  /** Панорама -1..1 по горизонтали экрана — звук идёт с той стороны, где событие. */
+  private pan(x: number, y: number): number {
+    // мир → изо-экран: та же проекция, что в iso.ts (x - y)
+    const ix = (x - y) - (this.lx - this.ly);
+    return Math.max(-1, Math.min(1, ix / (900 / Math.max(0.35, this.lzoom))));
+  }
+
   // лёгкий случайный разброс высоты для «живости»
   private jitter(n: number, cents = 0.02) { return n * (1 + (Math.random() * 2 - 1) * cents); }
 
   // мягкий тон с быстрой атакой и (опционально) второй гармоникой для тела
-  private tone(freq: number, dur: number, type: OscType = 'sine', vol = 0.4, slide = 0, delay = 0, harm = 0) {
+  // Куда подключать источник: при заданной позиции — через панораму,
+  // иначе прямо в мастер (звуки интерфейса не должны «уезжать» в сторону).
+  private sink(at?: { x: number; y: number }): AudioNode {
+    if (!at || !this.ctx || !this.master) return this.master!;
+    try {
+      const p = this.ctx.createStereoPanner();
+      p.pan.value = this.pan(at.x, at.y);
+      p.connect(this.master);
+      return p;
+    } catch { return this.master; }   // StereoPanner есть не везде
+  }
+
+  private tone(freq: number, dur: number, type: OscType = 'sine', vol = 0.4, slide = 0, delay = 0, harm = 0, at?: { x: number; y: number }) {
     if (this.muted || !this.ctx || !this.master) return;
+    // затухание по расстоянию: далёкое событие не должно бить в уши
+    if (at) { vol *= this.spatial(at.x, at.y); if (vol < 0.004) return; }
     const t0 = this.ctx.currentTime + delay;
+    const out = this.sink(at);
     const mk = (f: number, v: number, detune: number) => {
       const o = this.ctx!.createOscillator();
       const g = this.ctx!.createGain();
@@ -180,7 +231,7 @@ export class SoundBank {
       g.gain.setValueAtTime(0.0001, t0);
       g.gain.exponentialRampToValueAtTime(v, t0 + Math.min(0.012, dur * 0.25)); // мягкая атака
       g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
-      o.connect(g); g.connect(this.master!);
+      o.connect(g); g.connect(out);
       o.start(t0); o.stop(t0 + dur + 0.03);
     };
     mk(this.jitter(freq), vol, 0);
@@ -188,8 +239,9 @@ export class SoundBank {
   }
 
   // фильтрованный шум с мягкой атакой (удары, выдохи, свист)
-  private noise(dur: number, vol = 0.35, type: BiquadFilterType = 'lowpass', freq = 1200, delay = 0, q = 0.8) {
+  private noise(dur: number, vol = 0.35, type: BiquadFilterType = 'lowpass', freq = 1200, delay = 0, q = 0.8, at?: { x: number; y: number }) {
     if (this.muted || !this.ctx || !this.master) return;
+    if (at) { vol *= this.spatial(at.x, at.y); if (vol < 0.004) return; }
     const t0 = this.ctx.currentTime + delay;
     const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
     const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
@@ -201,17 +253,23 @@ export class SoundBank {
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(0.01, dur * 0.2));
     g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
-    src.connect(f); f.connect(g); g.connect(this.master);
+    src.connect(f); f.connect(g); g.connect(this.sink(at));
     src.start(t0);
   }
 
   // внутреннее проигрывание записи; на 404 пробуем NFD-вариант имени (macOS-загрузки)
-  private playUrl(url: string) {
+  private playUrl(url: string, at?: { x: number; y: number }) {
     if (this.activeClips.length >= 3) return;
+    // Записи (голоса юнитов) идут через <audio>: панорамы у него нет, но
+    // громкость по расстоянию работает — далёкий шаруа звучит тише.
+    // Совсем далёкие реплики не проигрываем вовсе: они бы съедали лимит
+    // одновременных клипов, заглушая близкие.
+    const att = at ? this.spatial(at.x, at.y) : 1;
+    if (att < 0.06) return;
     let a: HTMLAudioElement;
     const done = () => { const i = this.activeClips.indexOf(a); if (i >= 0) this.activeClips.splice(i, 1); };
     try { a = new Audio(url); } catch { return; }
-    a.volume = this.voiceVolume;
+    a.volume = this.voiceVolume * att;
     this.activeClips.push(a);
     a.addEventListener('ended', done);
     a.addEventListener('error', () => {
@@ -259,7 +317,7 @@ export class SoundBank {
   // ── голос: проиграть запись фразы ──
   // event: select|move|attack|gather. Игрок — казахская раса: сперва казахские записи,
   // для команд без них (часть рабочих реплик) — откат на русскую озвучку.
-  voice(unit: string, event: 'select' | 'move' | 'attack' | 'gather') {
+  voice(unit: string, event: 'select' | 'move' | 'attack' | 'gather', at?: { x: number; y: number }) {
     if (this.muted || !this.voiceOn) return;
     // выделение — отклик всегда; приказы/атака — реже, чтобы не трещало
     const prob = event === 'select' ? 1 : event === 'attack' ? 0.5 : 0.7;
@@ -281,14 +339,14 @@ export class SoundBank {
     const kzList = kzSet ? kzSet[event] : [];
     if (kzList && kzList.length) {
       const url = pickUrl(kzList[(Math.random() * kzList.length) | 0]);
-      if (url) { this.playUrl(url); return; }
+      if (url) { this.playUrl(url, at); return; }
     }
     // казахской реплики нет — русский набор
     const set = PHRASES[unit] || PHRASES.swordsman;
     const list = set[event];
     if (!list || !list.length) return;
     const url = pickUrl(list[(Math.random() * list.length) | 0]);
-    if (url) this.playUrl(url);
+    if (url) this.playUrl(url, at);
   }
 
   // ── игровые звуки (мягче и естественнее) ──
@@ -303,9 +361,9 @@ export class SoundBank {
   move() { this.ensure(); if (!this.gate('mov', 90)) return; this.tone(400, 0.09, 'sine', 0.12, 150, 0, 0.2); this.noise(0.05, 0.05, 'lowpass', 900); }
   error() { this.ensure(); if (!this.gate('err', 120)) return; this.tone(170, 0.18, 'sine', 0.2, -50); this.noise(0.12, 0.12, 'lowpass', 300); }
   // топор: глухой «тук» по дереву
-  chop() { this.ensure(); if (!this.gate('chop', 110)) return; this.noise(0.06, 0.3, 'lowpass', 500); this.tone(150, 0.08, 'sine', 0.28, -40); }
+  chop(at?: { x: number; y: number }) { this.ensure(); if (!this.gate('chop', 110)) return; this.noise(0.06, 0.3, 'lowpass', 500, 0, 0.8, at); this.tone(150, 0.08, 'sine', 0.28, -40, 0, 0, at); }
   // кирка по камню: короткий «клик» с металлическим верхом
-  mine() { this.ensure(); if (!this.gate('mine', 140)) return; this.noise(0.05, 0.22, 'bandpass', 2600, 0, 2); this.tone(900, 0.06, 'triangle', 0.12, -300); }
+  mine(at?: { x: number; y: number }) { this.ensure(); if (!this.gate('mine', 140)) return; this.noise(0.05, 0.22, 'bandpass', 2600, 0, 2, at); this.tone(900, 0.06, 'triangle', 0.12, -300, 0, 0, at); }
   gatherFood() { this.ensure(); if (!this.gate('food', 160)) return; this.tone(500, 0.1, 'sine', 0.14, 120, 0, 0.2); }
   // монеты: два ясных колокольчика
   coin() { this.ensure(); if (!this.gate('coin', 120)) return; this.tone(1320, 0.12, 'sine', 0.14, 0, 0, 0.15); this.tone(1760, 0.18, 'sine', 0.12, 0, 0.06, 0.1); }
@@ -314,28 +372,32 @@ export class SoundBank {
   build() { this.ensure(); if (!this.gate('build', 150)) return; this.noise(0.05, 0.32, 'lowpass', 700); this.tone(120, 0.07, 'sine', 0.3, -30); }
   place() { this.ensure(); if (!this.gate('place', 80)) return; this.tone(240, 0.1, 'triangle', 0.18, 60, 0, 0.2); this.noise(0.08, 0.15, 'lowpass', 600); }
   // клинки: лязг металла (bandpass-шум) + короткий «звон»
-  sword() {
+  // Боевые звуки позиционные: `at` — мировая точка события. Без неё звук
+  // играет «в центре», как раньше (интерфейсные вызовы).
+  sword(at?: { x: number; y: number }) {
     this.ensure(); if (!this.gate('sword', 90)) return;
-    this.noise(0.09, 0.28, 'bandpass', 3600, 0, 1.5);
-    this.tone(1400 + Math.random() * 500, 0.07, 'triangle', 0.08, -500);
+    this.noise(0.09, 0.28, 'bandpass', 3600, 0, 1.5, at);
+    this.tone(1400 + Math.random() * 500, 0.07, 'triangle', 0.08, -500, 0, 0, at);
   }
   // лук: «твань» струны + свист стрелы
-  arrow() { this.ensure(); if (!this.gate('arrow', 110)) return; this.tone(340, 0.12, 'triangle', 0.16, -180); this.noise(0.16, 0.12, 'bandpass', 2400, 0, 1); }
+  arrow(at?: { x: number; y: number }) { this.ensure(); if (!this.gate('arrow', 110)) return; this.tone(340, 0.12, 'triangle', 0.16, -180, 0, 0, at); this.noise(0.16, 0.12, 'bandpass', 2400, 0, 1, at); }
   // попадание: мягкий удар
-  hit() { this.ensure(); if (!this.gate('hit', 70)) return; this.noise(0.07, 0.26, 'lowpass', 900); this.tone(200, 0.06, 'sine', 0.18, -60); }
+  hit(at?: { x: number; y: number }) { this.ensure(); if (!this.gate('hit', 70)) return; this.noise(0.07, 0.26, 'lowpass', 900, 0, 0.8, at); this.tone(200, 0.06, 'sine', 0.18, -60, 0, 0, at); }
 
   // ── столкновение воинов: проигрывание батальной записи с РАЗНЫХ мест ──
   //    трек длинный — каждая стычка стартует со случайной секунды (5..40с),
   //    играет короткий плотный фрагмент, одновременно звучит не больше одного.
   private battle: HTMLAudioElement | null = null;
   private readonly BATTLE_URL = 'voices/battle-sword-fight.mp3';
-  battleClash() {
+  battleClash(at?: { x: number; y: number }) {
     this.ensure();
     if (this.muted) return;
     if (!this.gate('battle', 900)) return; // не накладываем кашу: ~один фрагмент в ~0.9с
+    const att = at ? this.spatial(at.x, at.y) : 1;
+    if (att < 0.06) return;                // сеча на другом конце карты не слышна
     let a: HTMLAudioElement;
     try { a = new Audio(this.BATTLE_URL); } catch { return; }
-    a.volume = 0.42;
+    a.volume = 0.42 * att;
     a.preload = 'auto';
     // старт со случайной секунды (зависит от фактической длительности трека)
     const startAt = () => {
@@ -360,13 +422,17 @@ export class SoundBank {
   private azanEl: HTMLAudioElement | null = null;
   private readonly AZAN_URL = 'voices/azan.mp3';
   azanPlaying(): boolean { return !!this.azanEl; }
-  azan(): boolean {
+  azan(at?: { x: number; y: number }): boolean {
     this.ensure();
     if (this.muted || !this.voiceOn) return false;
     if (this.azanEl) return false;                 // уже звучит — не накладываем
     let a: HTMLAudioElement;
     try { a = new Audio(this.AZAN_URL); } catch { return false; }
-    a.volume = Math.max(0.35, this.voiceVolume);   // азан слышен поверх шума боя
+    // Азан затухает с расстоянием, но мягче прочих звуков: минарет на то и
+    // высокий, чтобы призыв слышало всё становище. Пол 0.35 — даже с другого
+    // конца карты слышен отголосок, вблизи мешіті звучит в полную силу.
+    const att = at ? 0.35 + 0.65 * this.spatial(at.x, at.y) : 1;
+    a.volume = Math.max(0.35, this.voiceVolume) * att;   // азан слышен поверх шума боя
     a.preload = 'auto';
     const done = () => { if (this.azanEl === a) this.azanEl = null; };
     a.addEventListener('ended', done, { once: true });

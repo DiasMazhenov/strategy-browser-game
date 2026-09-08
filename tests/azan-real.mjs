@@ -59,16 +59,38 @@ let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ok   ' + n); } else { fail++; console.log('  FAIL ' + n); } };
 const astana = CITY_BY_ID.astana;
 
-console.log('\n=== 1. Времена совпадают с календарём ДУМК (Астана) ===');
+console.log('\n=== 1. Расписание СОВПАДАЕТ с таблицей ДУМК (muftyat.kz) ===');
 {
-  // эталон: календарь намаза Астаны на 9 сентября 2026 (ДУМК, 18°/17°)
-  const t = prayerTimes(new Date(2026, 8, 9), astana);
-  console.log(`     таң ${fmtHM(t.fajr)}  восход ${fmtHM(t.sunrise)}  бесін ${fmtHM(t.dhuhr)}  екінті ${fmtHM(t.asr)}  ақшам ${fmtHM(t.maghrib)}  құптан ${fmtHM(t.isha)}`);
-  ok(Math.abs(t.fajr - 3.67) < 0.25, `таң ≈ 03:40 (${fmtHM(t.fajr)})`);
-  ok(Math.abs(t.dhuhr - 12.2) < 0.2, `бесін ≈ 12:12 (${fmtHM(t.dhuhr)})`);
-  ok(Math.abs(t.maghrib - 18.73) < 0.25, `ақшам ≈ 18:44 (${fmtHM(t.maghrib)})`);
-  ok(t.fajr < t.sunrise && t.sunrise < t.dhuhr && t.dhuhr < t.asr
-    && t.asr < t.maghrib && t.maghrib < t.isha, 'намазы идут в правильном порядке');
+  // Эталон — официальная таблица ДУМК для Астаны. Проверяем ВСЕ пять намазов
+  // на нескольких датах двух разных сезонов: параметры не должны быть
+  // подгонкой под один месяц.
+  const toMin = (s) => { const [a, b] = s.split(':').map(Number); return a * 60 + b; };
+  const REF = [
+    [8, 1,  ['03:47', '05:22', '12:19', '17:00', '19:06', '20:40']],
+    [8, 9,  ['04:03', '05:35', '12:17', '16:46', '18:48', '20:19']],
+    [8, 15, ['04:15', '05:44', '12:15', '16:34', '18:34', '20:03']],
+    [8, 21, ['04:26', '05:53', '12:12', '16:23', '18:20', '19:48']],
+    [8, 30, ['04:41', '06:08', '12:09', '16:05', '18:00', '19:26']],
+    [1, 1,  ['06:17', '07:47', '12:33', '15:21', '17:09', '18:40']],
+    [1, 15, ['05:56', '07:23', '12:33', '15:44', '17:35', '19:02']],
+  ];
+  let worst = 0, worstAt = '';
+  for (const [m, d, w] of REF) {
+    const t = prayerTimes(new Date(2026, m, d), astana);
+    const got = [t.fajr, t.sunrise, t.dhuhr, t.asr, t.maghrib, t.isha];
+    got.forEach((g, i) => {
+      const diff = Math.abs(Math.round(g * 60 - toMin(w[i])));
+      if (diff > worst) { worst = diff; worstAt = `${d}.${m + 1} ${['таң','күн','бесін','екінті','ақшам','құптан'][i]}`; }
+    });
+  }
+  const sep9 = prayerTimes(new Date(2026, 8, 9), astana);
+  console.log(`     9 сентября: таң ${fmtHM(sep9.fajr)}  күн ${fmtHM(sep9.sunrise)}  бесін ${fmtHM(sep9.dhuhr)}  екінті ${fmtHM(sep9.asr)}  ақшам ${fmtHM(sep9.maghrib)}  құптан ${fmtHM(sep9.isha)}`);
+  ok(fmtHM(sep9.fajr) === '04:03', `таң 9 сентября = 04:03 (${fmtHM(sep9.fajr)})`);
+  ok(fmtHM(sep9.dhuhr) === '12:17', `бесін = 12:17 (${fmtHM(sep9.dhuhr)})`);
+  ok(fmtHM(sep9.asr) === '16:46', `екінті = 16:46 (${fmtHM(sep9.asr)})`);
+  ok(worst <= 3, `отклонение от ДУМК ≤3 мин на 7 датах (максимум ${worst} мин${worst ? ', ' + worstAt : ''})`);
+  ok(sep9.fajr < sep9.sunrise && sep9.sunrise < sep9.dhuhr && sep9.dhuhr < sep9.asr
+    && sep9.asr < sep9.maghrib && sep9.maghrib < sep9.isha, 'намазы идут в правильном порядке');
 }
 
 console.log('\n=== 2. Полярное лето не ломает расчёт ===');
@@ -107,10 +129,14 @@ console.log('\n=== 3. Все города считаются ===');
 
 console.log('\n=== 4. Определение текущего и следующего намаза ===');
 {
-  const at345 = new Date(2026, 8, 9, 3, 45);
-  const cur = currentPrayer(at345, astana, 60);
-  ok(cur && cur.key === 'fajr', `в 03:45 текущий намаз — таң (${cur && cur.key})`);
+  // таң 9 сентября = 04:03 (ДУМК), поэтому «только что наступил» — это 04:08
+  const at408 = new Date(2026, 8, 9, 4, 8);
+  const cur = currentPrayer(at408, astana, 60);
+  ok(cur && cur.key === 'fajr', `в 04:08 текущий намаз — таң (${cur && cur.key})`);
   ok(cur && cur.agoMin < 10, `прошло меньше 10 мин (${cur && Math.round(cur.agoMin)})`);
+  // а до наступления таң намаза ещё нет
+  ok(currentPrayer(new Date(2026, 8, 9, 3, 45), astana, 60) === null,
+    'в 03:45 (до таң) намаза ещё не было');
 
   const at1000 = new Date(2026, 8, 9, 10, 0);
   ok(currentPrayer(at1000, astana, 60) === null, 'в 10:00 намаза не было последний час');
@@ -120,10 +146,10 @@ console.log('\n=== 4. Определение текущего и следующ�
   ok(nx.inMin > 0 && nx.inMin < 24 * 60, `до него ${Math.round(nx.inMin)} мин`);
 
   // догоняющий: через 40 минут после намаза он ещё считается текущим
-  const at420 = new Date(2026, 8, 9, 4, 20);
-  const late = currentPrayer(at420, astana, 60);
+  const at443 = new Date(2026, 8, 9, 4, 43);   // 40 мин после таң 04:03
+  const late = currentPrayer(at443, astana, 60);
   ok(late && late.key === 'fajr', 'через 40 мин намаз ещё «догоняет» (окно 60 мин)');
-  ok(currentPrayer(at420, astana, 15) === null, 'с окном 15 мин — уже нет');
+  ok(currentPrayer(at443, astana, 15) === null, 'с окном 15 мин — уже нет');
 }
 
 console.log('\n=== 5. Поведение в игре ===');
