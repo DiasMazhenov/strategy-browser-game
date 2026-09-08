@@ -62,9 +62,25 @@ console.log('\n=== 3. Курсоры действий ===');
       const b = readFileSync(p);
       size = `${b.readUInt32BE(16)}x${b.readUInt32BE(20)}`;
     }
-    ok(okFile && size === '32x32', `курсор ${n}.png собран (${size || 'нет файла'})`);
+    // 16 px: вчетверо меньше по площади, чем было. Системная «рука» (pointer)
+    // на своих юнитах — не PNG, её размером управляет ОС.
+    ok(okFile && size === '16x16', `курсор ${n}.png собран (${size || 'нет файла'})`);
   }
   ok(/hx: \d+, hy: \d+/.test(curs), 'у курсоров заданы горячие точки');
+  // Горячие точки в коде обязаны совпадать с тем, что посчитал сборщик:
+  // иначе курсор кликает не туда, куда показывает остриё.
+  {
+    const hs = JSON.parse(readFileSync(join(root, 'src/assets/cursors/hotspots.json'), 'utf8'));
+    let bad = [];
+    for (const h of hs) {
+      const m = new RegExp(`${h.name}: \\{ url: cur\\w+, hx: (\\d+), hy: (\\d+)`).exec(curs);
+      if (!m || +m[1] !== h.hx || +m[2] !== h.hy) bad.push(h.name);
+    }
+    ok(bad.length === 0, `горячие точки в коде совпадают со сборщиком${bad.length ? ': разошлись ' + bad.join(',') : ''}`);
+    // все точки обязаны лежать внутри кадра 16×16
+    const out = hs.filter(h => h.hx < 0 || h.hy < 0 || h.hx > 15 || h.hy > 15);
+    ok(out.length === 0, 'горячие точки внутри кадра 16×16');
+  }
   ok(/crosshair/.test(curs), 'есть системный запасной курсор');
   const cf = body(eng, 'cursorFor(sx: number, sy: number)');
   ok(/'attack'/.test(cf), 'по врагу — сабля');

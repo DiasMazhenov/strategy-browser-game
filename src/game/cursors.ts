@@ -17,16 +17,17 @@ export type CursorKind =
   | 'build' | 'move' | 'select' | 'pan';
 
 // hx,hy — горячая точка: пиксель картинки, попадающий ровно в точку клика.
+// Значения для кадра 16×16 — держать в согласии с scripts/build-cursors.cjs.
 // У инструментов это рабочая кромка (остриё сабли, лезвие топора), у стрелки
 // «идти» — её жало, у предметов-символов — центр.
 const ART: Record<string, { url: string; hx: number; hy: number }> = {
-  attack: { url: curAttack, hx: 2, hy: 2 },
-  wood: { url: curWood, hx: 2, hy: 9 },
-  gold: { url: curGold, hx: 6, hy: 4 },
-  food: { url: curFood, hx: 16, hy: 16 },
-  fish: { url: curFish, hx: 16, hy: 16 },
-  build: { url: curBuild, hx: 6, hy: 6 },
-  move: { url: curMove, hx: 16, hy: 30 },
+  attack: { url: curAttack, hx: 1, hy: 1 },
+  wood: { url: curWood, hx: 1, hy: 5 },
+  gold: { url: curGold, hx: 3, hy: 2 },
+  food: { url: curFood, hx: 8, hy: 8 },
+  fish: { url: curFish, hx: 8, hy: 8 },
+  build: { url: curBuild, hx: 3, hy: 3 },
+  move: { url: curMove, hx: 8, hy: 14 },
 };
 
 // Запасные системные курсоры: пока png не загрузился (или если он не нужен).

@@ -7,7 +7,7 @@ const M = require('../scripts/make-altybakan.cjs');
 
 const DIR = path.join(__dirname, '..', 'src', 'assets', 'cursors');
 const names = ['attack', 'wood', 'gold', 'food', 'fish', 'build', 'move'];
-const S = 32, Z = 3, PAD = 8;
+const S = 16, Z = 6, PAD = 8;
 const cellW = S + PAD + S * Z + PAD * 2;
 const W = cellW * names.length, H = S * Z + PAD * 2;
 const px = Buffer.alloc(W * H * 4);
@@ -35,7 +35,7 @@ names.forEach((n, i) => {
   if (!fs.existsSync(f)) return;
   const im = M.readPNG(f);
   const ox = i * cellW + PAD;
-  blit(im, ox, PAD + (S * Z - S) / 2, 1);          // как увидит игрок
+  blit(im, ox, PAD + (S * Z - S) / 2, 1);          // как увидит игрок (1:1)
   blit(im, ox + S + PAD, PAD, Z);                   // крупно
 });
 

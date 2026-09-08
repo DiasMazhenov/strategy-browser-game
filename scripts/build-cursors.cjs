@@ -22,10 +22,13 @@ const CURSORS = [
   { src: 'cur_food.png',   out: 'food.png',   hx: 0.50, hy: 0.50 },
   { src: 'cur_fish2.png',  out: 'fish.png',   hx: 0.50, hy: 0.50 },
   { src: 'cur_build.png',  out: 'build.png',  hx: 0.18, hy: 0.18 },  // боёк молотка
-  { src: 'cur_move2.png',  out: 'move.png',   hx: 0.50, hy: 0.96 },  // жало стрелки
+  { src: 'cur_move3.png',  out: 'move.png',   hx: 0.50, hy: 0.96, noOutline: true },  // своя золотая кайма
 ];
 
-const SIZE = 32;
+// 16 px — вдвое меньше по стороне (вчетверо по площади). Крупнее выглядело
+// громоздко и перекрывало то, на что наводишься. Системная «рука» (pointer)
+// на своих юнитах не трогается: её размер задаёт ОС.
+const SIZE = 16;
 
 // Кайма: модель иногда рисует рамку по краю кадра и белые поля за ней.
 // Считаем строку/столбец «мусорной», если она почти целиком тёмная или белая.
@@ -109,7 +112,9 @@ function outline(im) {
     const i = (y * w + x) * 4;
     if (src[i + 3] > 40) continue;
     let near = false;
-    for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1; dx++) {
+    // только 4 стороны: на мелком кадре диагональная обводка утолщает контур
+    // вдвое и рисунок превращается в чёрное пятно
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx, ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
       if (src[(ny * w + nx) * 4 + 3] > 150) { near = true; break; }
@@ -133,7 +138,7 @@ for (const c of CURSORS) {
   im = M.crop(im, bb);
   im = square(im);
   im = M.resize(im, SIZE, SIZE);
-  im = outline(im);
+  if (!c.noOutline) im = outline(im);   // у стрелки уже есть золотой контур
   M.writePNG(path.join(OUT, c.out), im.w, im.h, im.px);
   const hx = Math.round(c.hx * (SIZE - 1)), hy = Math.round(c.hy * (SIZE - 1));
   meta.push({ name: c.out.replace('.png', ''), hx, hy });
