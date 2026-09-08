@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# ГОТОВЫЙ WORKFLOW УВЕДОМЛЕНИЙ — требуется установка вручную (один раз).
+#
+# Токен агента не имеет права `workflows`, поэтому GitHub отклоняет пуш файлов
+# в .github/workflows/. Скопируйте этот файл на место и запушьте сами:
+#
+#   git pull
+#   mkdir -p .github/workflows && cp ci/notify-workflow.yml .github/workflows/notify.yml
+#   git add .github/workflows/notify.yml && git commit -m "ci: уведомления ntfy" && git push
+#
+# Затем подпишитесь на тему ArenaAI в приложении ntfy или на https://ntfy.sh/ArenaAI
+# ---------------------------------------------------------------------------
+name: Уведомление о завершении задачи
+
+# Из песочницы агента ntfy.sh недоступен (исходящий трафик по белому списку),
+# поэтому уведомление отправляет GitHub Actions. Агент пушит коммит в момент
+# сдачи задачи — значит пуш и есть сигнал «задача готова».
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      text:
+        description: 'Текст проверочного уведомления'
+        required: false
+        default: 'Проверка связи: уведомления настроены и работают.'
+
+# Тему можно поменять, не трогая код: Settings → Secrets and variables →
+# Actions → Variables → NTFY_TOPIC. По умолчанию — ArenaAI.
+env:
+  NTFY_TOPIC: ${{ vars.NTFY_TOPIC || 'ArenaAI' }}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # нужен предыдущий коммит, чтобы сравнить версию
+
+      - name: Собрать данные о коммите
+        id: info
+        run: |
+          echo "version=$(node -p "require('./package.json')._gameVersion || 'н/д'")" >> "$GITHUB_OUTPUT"
+          echo "subject=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
+          echo "author=$(git log -1 --pretty=%an)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+          # Уведомляем только когда поднята версия игры — это и есть маркер
+          # завершённой задачи. Промежуточные и чужие коммиты не шумят.
+          prev=$(git show HEAD~1:package.json 2>/dev/null | node -p "try{JSON.parse(require('fs').readFileSync(0,'utf8'))._gameVersion}catch(e){''}" || echo '')
+          curr=$(node -p "require('./package.json')._gameVersion || ''")
+          if [ "$prev" != "$curr" ]; then echo "changed=yes" >> "$GITHUB_OUTPUT"; else echo "changed=no" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Отправить уведомление о завершённой задаче
+        if: github.event_name == 'push' && steps.info.outputs.changed == 'yes'
+        run: |
+          # Публикуем через JSON, а не через заголовки X-Title: так кириллица
+          # уходит в UTF-8 без RFC 2047 и не превращается в кракозябры.
+          jq -n \
+            --arg topic   "$NTFY_TOPIC" \
+            --arg title   "Задача сдана — v${{ steps.info.outputs.version }}" \
+            --arg message "${{ steps.info.outputs.subject }}
+
+          Версия: ${{ steps.info.outputs.version }}
+          Коммит: ${{ steps.info.outputs.short }} (${{ steps.info.outputs.author }})" \
+            --arg click   "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+            '{topic:$topic, title:$title, message:$message, click:$click,
+              tags:["white_check_mark","video_game"], priority:4}' \
+          | curl -sS --fail-with-body --max-time 30 -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh/
+          echo "Уведомление отправлено в тему $NTFY_TOPIC"
+
+      - name: Проверочное уведомление (ручной запуск)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          jq -n \
+            --arg topic   "$NTFY_TOPIC" \
+            --arg title   "Казахское Ханство — проверка" \
+            --arg message "${{ inputs.text }}" \
+            '{topic:$topic, title:$title, message:$message, tags:["satellite"], priority:3}' \
+          | curl -sS --fail-with-body --max-time 30 -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh/
+          echo "Проверочное уведомление отправлено в тему $NTFY_TOPIC"
+
+      - name: Пропущено
+        if: github.event_name == 'push' && steps.info.outputs.changed != 'yes'
+        run: echo "Версия игры не менялась — уведомление не отправлено."
