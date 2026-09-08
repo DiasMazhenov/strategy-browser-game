@@ -172,6 +172,13 @@ import kzVfish1 from '../assets/sprites/units/kz/kz_villager_fish1.png';
 import kzVfish2 from '../assets/sprites/units/kz/kz_villager_fish2.png';
 import kzShep1 from '../assets/sprites/units/kz/kz_shepherd_1.png';
 import kzShep2 from '../assets/sprites/units/kz/kz_shepherd_2.png';
+// казашка-работница (платок, чапан): бок покой/шаг, перёд, спина, сбор урожая, дойка
+import kzFem from '../assets/sprites/units/kz/kz_fem.png';
+import kzFemW from '../assets/sprites/units/kz/kz_fem_w.png';
+import kzFemF from '../assets/sprites/units/kz/kz_fem_f.png';
+import kzFemB from '../assets/sprites/units/kz/kz_fem_b.png';
+import kzFemGather from '../assets/sprites/units/kz/kz_fem_gather.png';
+import kzFemMilk from '../assets/sprites/units/kz/kz_fem_milk.png';
 // казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
 import kzScout from '../assets/sprites/units/kz/kz_scout.png';
 import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
@@ -274,6 +281,13 @@ const KZ_SHEPHERD: [HTMLImageElement, string][] = [
   [mk(kzShep1), 'kz_shepherd_1'],
   [mk(kzShep2), 'kz_shepherd_2'],
 ];
+// ── казашка-работница: бок (покой/шаг), перёд, спина, сбор урожая, дойка ──
+const KZ_FEM_SIDE: [HTMLImageElement, string] = [mk(kzFem), 'kz_fem'];
+const KZ_FEM_SIDE_W: [HTMLImageElement, string] = [mk(kzFemW), 'kz_fem_w'];
+const KZ_FEM_FRONT: [HTMLImageElement, string] = [mk(kzFemF), 'kz_fem_f'];
+const KZ_FEM_BACK: [HTMLImageElement, string] = [mk(kzFemB), 'kz_fem_b'];
+const KZ_FEM_GATHER: [HTMLImageElement, string] = [mk(kzFemGather), 'kz_fem_gather'];
+const KZ_FEM_MILK: [HTMLImageElement, string] = [mk(kzFemMilk), 'kz_fem_milk'];
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
 const WALK_ANCHOR_A: Partial<Record<UnitKey, string>> = {
@@ -541,8 +555,21 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     const pair = KZ_SHEPHERD[sh];
     if (ready(pair[0])) { im = pair[0]; anKey = pair[1]; flip = f; }
   }
+  // казашка-работница (не пастух): свои кадры — дойка/сбор/ходьба по направлению
+  if (isKz && isVill && (u as U & { female?: boolean }).female && !(u as U & { herder?: boolean }).herder) {
+    const milking = (u as U & { wkind?: string }).wkind === 'milk' && !move;
+    const harvesting = (u as U & { wkind?: string }).wkind === 'gather' && !move &&
+      (u.state === 'gather' || u.state === 'return');
+    if (milking && ready(KZ_FEM_MILK[0])) { im = KZ_FEM_MILK[0]; anKey = KZ_FEM_MILK[1]; flip = f; }
+    else if (harvesting && ready(KZ_FEM_GATHER[0])) { im = KZ_FEM_GATHER[0]; anKey = KZ_FEM_GATHER[1]; flip = f; }
+    else if (move && u.fmode === 1 && ready(KZ_FEM_FRONT[0])) { im = KZ_FEM_FRONT[0]; anKey = KZ_FEM_FRONT[1]; flip = 1; }
+    else if (move && u.fmode === 2 && ready(KZ_FEM_BACK[0])) { im = KZ_FEM_BACK[0]; anKey = KZ_FEM_BACK[1]; flip = 1; }
+    else if (move && ready(KZ_FEM_SIDE_W[0])) { im = KZ_FEM_SIDE_W[0]; anKey = KZ_FEM_SIDE_W[1]; flip = f; }
+    else if (ready(KZ_FEM_SIDE[0])) { im = KZ_FEM_SIDE[0]; anKey = KZ_FEM_SIDE[1]; flip = f; }
+  }
   const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
-  const H = anKey.startsWith('kz_shepherd') ? 54 : (UNIT_TARGET_H[u.key] ?? 46);
+  const femMilking = isKz && isVill && (u as U & { female?: boolean }).female && anKey === 'kz_fem_milk';
+  const H = anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46);
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
   // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
@@ -993,7 +1020,7 @@ export function diamondRingHalf(ctx: CanvasRenderingContext2D, ix: number, iy: n
 interface U { key: UnitKey; owner: 'player' | 'enemy' | 'neutral'; face: number; anim: number; atkAnim: number; state: string; carry?: { type: string; amt: number }; hp?: number; maxHp?: number; walk?: boolean; level?: number;
   // изо-направление корпуса: 0 — сбоку (по face), 1 — спереди (к камере), 2 — спина (от камеры)
   fmode?: 0 | 1 | 2;
-  wkind?: 'chop' | 'mine' | 'gather' | 'fish';   // текущая работа крестьянина (для кадра)
+  wkind?: 'chop' | 'mine' | 'gather' | 'fish' | 'milk';   // текущая работа крестьянина (для кадра)
   wphase?: number;                      // фаза рабочего цикла 0..1 (замах→удар)
   aiming?: boolean;                     // лучник в зоне выстрела (натягивает/держит лук)
   herder?: boolean;                     // рабочий-пастух (верхом на коне с кнутом)

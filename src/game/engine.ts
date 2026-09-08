@@ -140,8 +140,9 @@ interface Unit {
   tx: number; ty: number; targetU: number; targetB: number; nodeId: number; buildId: number;
   carry: Carry; gatherT: number; anim: number; face: number; atkAnim: number; retarget: number; idleT: number; flash: number;
   fmode?: 0 | 1 | 2;                              // изо-направление корпуса: 0 сбоку, 1 спереди (к камере), 2 спина
-  wkind?: 'chop' | 'mine' | 'gather' | 'fish';      // текущая работа крестьянина (для кадра анимации)
+  wkind?: 'chop' | 'mine' | 'gather' | 'fish' | 'milk';      // текущая работа крестьянина (для кадра анимации)
   herder?: boolean;                    // рабочий назначен пастухом к загону
+  female?: boolean;                    // рабочая-женщина (казашка в платке): сбор урожая, дойка
   penId?: number;                      // id загона, к которому прикреплён пастух
   herdT?: number;                      // фаза цикла выпаса (счётчик)
   herding?: number[];                  // id животных, которых гонит пастух
@@ -217,6 +218,7 @@ interface Bld {
   nationId?: string;                                            // народ-племя (id из NATIONS), владеющий лагерем
   pastureX?: number; pastureY?: number;                         // точка дальнего пастбища загона
   pastureStocked?: boolean;                                     // стадо (5 овец + 5 коров) уже создано
+  milkWid?: number;   // id работницы-казашки, назначенной на дойку этого загона
 }
 interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
@@ -355,6 +357,7 @@ export class Game {
   banners: Banner[] = [];
   questsDone: Record<string, boolean> = {};
   nextId = 1;
+  villagerSexToggle = false;   // чередование пола у рабочих игрока: мужчина/женщина
   pointers = new Map<number, { x: number; y: number; sx: number; sy: number; t: number; moved: boolean; btn: number }>();
   pinchD = 0;
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -428,6 +431,11 @@ export class Game {
       atkAnim: 0, retarget: rand(0, 0.4), idleT: 0, flash: 0, wx: x, wy: y,
       stance: 'aggressive', homeX: x, homeY: y, patrolX: x, patrolY: y, waitT: 0,
     };
+    // рабочие игрока (казахи) спавнятся по очереди: мужчина-крестьянин / женщина-работница
+    if (key === 'villager' && owner === 'player') {
+      this.villagerSexToggle = !this.villagerSexToggle;
+      u.female = this.villagerSexToggle;
+    }
     this.units.push(u);
     return u;
   }
@@ -2774,7 +2782,7 @@ export class Game {
           this.checkQuests();
         }
       }
-      if (u.herdStateT >= 25) { u.herdState = 'back'; u.herdStateT = 0; }
+      if (u.herdStateT >= 210) { u.herdState = 'back'; u.herdStateT = 0; } // ~3.5 мин дойка/постой
     }
     else { // 'back': стадо возвращается на пастбище, пастух гонит за ним
       for (const a of herd) {
@@ -2856,8 +2864,45 @@ export class Game {
     // но не убегаем за полкарты (дальше 1600 — ждём явного приказа)
     if (u.state === 'idle') {
       u.idleT += dt; u.wkind = undefined;
+      // работницы-казашки: женская работа — дойка коров в загоне (приоритет), затем сбор урожая на ферме
+      if (u.female && !u.herder) {
+        const pen = this.pickMilkingPen(u);
+        if (pen) { pen.milkWid = u.id; u.penId = pen.id; u.state = 'gather'; u.wkind = 'milk';
+          u.tx = pen.x + 34; u.ty = pen.y + 40; u.buildId = pen.id; u.nodeId = -1; u.gatherT = 0; return; }
+        const farm = this.nearestFarmForWoman(u);
+        if (farm) { u.state = 'gather'; u.wkind = 'gather'; u.buildId = farm.id; u.nodeId = -1;
+          u.tx = farm.x + rand(-20, 20); u.ty = farm.y + rand(-16, 16); u.gatherT = 0; return; }
+      }
       const near = this.nearestResource(u.x, u.y);
       if (near && dist2(u.x, u.y, near.x, near.y) < 1600 * 1600) { this.orderGather(u, near.id); return; }
+      return;
+    }
+    // работница на дойке: идёт к загону и доит, пока стадо на постое (фаза pen)
+    if (u.female && !u.herder && u.wkind === 'milk') {
+      const pen = this.blds.find(b => b.id === u.penId && b.key === 'pen' && b.done >= 1);
+      const shep = this.units.find(s => s.herder && s.penId === (pen?.id ?? -2));
+      const herding = pen && shep && shep.herdState === 'pen';
+      if (!pen || pen.milkWid !== u.id || !herding) {
+        // дойка окончена (стадо увели на выпас/загон снесён): освобождаемся и сдаём молоко
+        if (pen) pen.milkWid = undefined;
+        u.penId = undefined; u.wkind = undefined; u.buildId = -1;
+        if (u.carry.amt > 0) { u.state = 'return'; this.sendToDrop(u); return; }
+        u.state = 'idle'; u.idleT = 0; return;
+      }
+      if (dist2(u.x, u.y, pen.x, pen.y) > 62 * 62) { u.wkind = undefined; this.moveTowardPath(u, u.tx, u.ty, dt); return; }
+      // доим: молоко капает
+      u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
+      const cyc = 0.9 / this.gatherMult();
+      u.wphase = u.gatherT / cyc;
+      if (u.gatherT >= cyc) {
+        u.gatherT = 0; u.wphase = 0;
+        u.carry = { type: 'food', amt: u.carry.amt + 3 * this.gatherMult() };
+        if (Math.random() < 0.7) this.burst(u.x + 14, u.y - 6, 2, ['#fef3c7', '#fde68a', '#fff'], 46, 0.5);
+        if (u.carry.amt >= this.carryCap()) {
+          this.res.food += Math.floor(u.carry.amt); this.gatheredTotal += u.carry.amt; this.score += u.carry.amt * 0.35;
+          this.floater(u.x, u.y - 26, `+${Math.floor(u.carry.amt)} 🥛`, '#fde68a', 13); u.carry.amt = 0; this.checkQuests();
+        }
+      }
       return;
     }
     if (u.state === 'move') { u.wkind = undefined; if (this.moveTowardPath(u, u.tx, u.ty, dt)) { u.state = 'idle'; u.idleT = 0; } return; }
@@ -2982,6 +3027,31 @@ export class Game {
       let d = dist2(x, y, n.x, n.y);
       if (prefer && n.kind === prefer) d *= 0.5; // лёгкий приоритет предпочитаемого типа
       if (d < bd) { bd = d; best = n; }
+    }
+    return best;
+  }
+
+  // загон, где стадо сейчас на постое (фаза pen) и ещё нет доярки, ближайший к работнице
+  private pickMilkingPen(u: Unit): Bld | null {
+    let best: Bld | null = null; let bd = 1400 * 1400;
+    for (const b of this.blds) {
+      if (b.owner !== 'player' || b.key !== 'pen' || b.done < 1) continue;
+      if (b.milkWid != null && this.units.some(w => w.id === b.milkWid && w.hp > 0)) continue;
+      const shep = this.units.find(s => s.herder && s.penId === b.id);
+      if (!shep || shep.herdState !== 'pen') continue; // стадо в загоне — есть что доить
+      const d = dist2(u.x, u.y, b.x, b.y);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+
+  // ближайшая достроенная ферма игрока для сбора урожая (женская работа)
+  private nearestFarmForWoman(u: Unit): Bld | null {
+    let best: Bld | null = null; let bd = 1200 * 1200;
+    for (const b of this.blds) {
+      if (b.owner !== 'player' || b.key !== 'farm' || b.done < 1) continue;
+      const d = dist2(u.x, u.y, b.x, b.y);
+      if (d < bd) { bd = d; best = b; }
     }
     return best;
   }
