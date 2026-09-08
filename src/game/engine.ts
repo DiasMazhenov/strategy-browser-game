@@ -286,6 +286,18 @@ export interface TechTreeRow {
   state: 'done' | 'researching' | 'ready' | 'nobuild' | 'age';
   canStart: boolean;
 }
+// Экран итогов эпохи: сводка за прожитую эпоху (пункт 10 плана).
+export interface AgeReport {
+  fromName: string; fromIcon: string; toName: string; toIcon: string;
+  mins: number;                                   // сколько длилась эпоха
+  wood: number; food: number; gold: number;       // добыто ЗА эпоху
+  kills: number; razed: number; built: number;    // бои и стройка за эпоху
+  peakArmy: number; pop: number; popCap: number;
+  powP: number; powE: number;                     // расклад сил с джунгарами
+  unlocks: string[];                              // что открылось в новой эпохе
+  score: number;                                  // очков набрано за эпоху
+}
+
 export interface HudSnapshot {
   wood: number; food: number; gold: number; pop: number; popCap: number;
   age: number; ageName: string; score: number; kills: number; razed: number;
@@ -294,9 +306,13 @@ export interface HudSnapshot {
   banner: { title: string; sub: string } | null;
   quests: { id: string; label: string; done: boolean; progress: string }[];
   muted: boolean; idleVills: number; relics: number;
+  // сводка экономики: сколько шаруа на каждом промысле (макро-информация как в AoE)
+  econ: { wood: number; food: number; gold: number; build: number; idle: number;
+    rest: number; total: number; idlePct: number };
   pTc: number; pTcMax: number; eTc: number; eTcMax: number;
   dmgFlash: number; ageAfford: boolean; ageCost: string;
   hint: string;
+  ageReport: AgeReport | null;   // экран итогов эпохи (null — закрыт)
   atWar: boolean; grievance: number; casusBelli: number; morale: number;
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   woodDiscount: number;   // множитель цены дерева от союза с ремесленниками (1 = без скидки)
@@ -391,6 +407,11 @@ export class Game {
   score = 0; kills = 0; razed = 0; gatheredTotal = 0; woodGathered = 0;
   soldiersTrained = 0; barracksBuilt = 0; wolvesSlain = 0;
   builtCount = 0; peakPop = 0; peakArmy = 0;
+  // Подробная добыча по видам (для экрана итогов эпохи) и срез на её начало:
+  // итоги считаем как разницу «сейчас минус на входе в эпоху».
+  gotWood = 0; gotFood = 0; gotGold = 0;
+  ageMark = { t: 0, wood: 0, food: 0, gold: 0, kills: 0, razed: 0, built: 0, score: 0 };
+  ageReport: AgeReport | null = null;   // открытый экран итогов (пауза до закрытия)
   // история по минутам для графика (ресурсы/армия)
   history: { t: number; army: number; pop: number }[] = []; histT = 0;
   time = 0; wave = 0; waveT: number;
@@ -2230,6 +2251,7 @@ export class Game {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
       kills: this.kills, razed: this.razed, gatheredTotal: this.gatheredTotal, woodGathered: this.woodGathered,
+      gotWood: this.gotWood, gotFood: this.gotFood, gotGold: this.gotGold, ageMark: this.ageMark,
       soldiersTrained: this.soldiersTrained, barracksBuilt: this.barracksBuilt, wolvesSlain: this.wolvesSlain,
       cam: this.cam, tech: this.tech, questsDone: this.questsDone,
       units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0 })),
@@ -2294,6 +2316,10 @@ export class Game {
       this.res = { ...this.res, ...d.res }; this.eres = { ...this.eres, ...d.eres };
       this.score = d.score || 0; this.kills = d.kills || 0; this.razed = d.razed || 0;
       this.gatheredTotal = d.gatheredTotal || 0; this.woodGathered = d.woodGathered || 0;
+      // счётчики для итогов эпохи: без них после загрузки сводка показала бы
+      // добычу «с нуля» и следующий отчёт получился бы завышенным
+      this.gotWood = d.gotWood || 0; this.gotFood = d.gotFood || 0; this.gotGold = d.gotGold || 0;
+      if (d.ageMark) this.ageMark = d.ageMark;
       this.soldiersTrained = d.soldiersTrained || 0; this.barracksBuilt = d.barracksBuilt || 0; this.wolvesSlain = d.wolvesSlain || 0;
       this.relicsHeld = d.relicsHeld || 0;
       // восстановить взятые реликвии как убранные с карты
@@ -3160,8 +3186,38 @@ export class Game {
     this.pushBanner(`${next.icon} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
     this.burst(HOME.x, HOME.y, 40, ['#f6d47c', '#fff'], 160);
     this.checkQuests();
+    // ── ЭКРАН ИТОГОВ ЭПОХИ (пункт 10 плана) ──
+    // Сводка за прожитую эпоху: всё считаем как разницу с меткой на её входе,
+    // поэтому цифры относятся именно к этой эпохе, а не ко всей партии.
+    const prev = AGES[this.age - 1];
+    const unlocks: Record<number, string[]> = {
+      1: ['🗼 Сторожевая башня', '🐴 Конюшня: батыры и жасауылы', '⚒️ Новые улучшения'],
+      2: ['🔨 Кузница', '🪨 Катапульты', '⚒️ Тяжёлая пехота'],
+      3: ['⭐ Мавзолей хана — путь к победе', '⚒️ Высшие улучшения'],
+    };
+    this.ageReport = {
+      fromName: prev.name, fromIcon: prev.icon, toName: next.name, toIcon: next.icon,
+      mins: Math.max(1, Math.round((this.time - this.ageMark.t) / 60)),
+      wood: Math.round(this.gotWood - this.ageMark.wood),
+      food: Math.round(this.gotFood - this.ageMark.food),
+      gold: Math.round(this.gotGold - this.ageMark.gold),
+      kills: this.kills - this.ageMark.kills,
+      razed: this.razed - this.ageMark.razed,
+      built: this.builtCount - this.ageMark.built,
+      peakArmy: this.peakArmy,
+      pop: this.popUsed('player'), popCap: this.popCap('player'),
+      powP: Math.round(this.milStrength('player')), powE: Math.round(this.milStrength('enemy')),
+      unlocks: unlocks[this.age] ?? [],
+      score: Math.round(this.score - this.ageMark.score),
+    };
+    // метка для следующей эпохи
+    this.ageMark = { t: this.time, wood: this.gotWood, food: this.gotFood, gold: this.gotGold,
+      kills: this.kills, razed: this.razed, built: this.builtCount, score: this.score };
     this.pushHud();
   }
+
+  // Закрыть экран итогов эпохи (кнопка «Вести ханство дальше»).
+  closeAgeReport() { this.ageReport = null; this.sound.select(); this.pushHud(); }
 
   // ---------- selection helpers ----------
   selUnits(): Unit[] {
@@ -3172,6 +3228,26 @@ export class Game {
   clearSel() { this.selected.clear(); this.selBld = -1; this.selNode = -1; }
   armySelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && this.combatUnit(u)) this.selected.add(u.id); this.sound.ack('soldier'); this.voiceSel('select'); this.pushHud(); }
   villsSelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && u.key === 'villager') this.selected.add(u.id); this.sound.ack('villager'); this.voiceSel('select'); this.pushHud(); }
+  // Выделить всех шаруа на конкретном промысле — клик по строке сводки экономики.
+  // Тот же критерий, что и в подсчёте econ, иначе цифра и выделение разошлись бы.
+  tradeSelect(kind: 'wood' | 'food' | 'gold' | 'build') {
+    this.clearSel();
+    for (const u of this.units) {
+      if (u.owner !== 'player' || u.key !== 'villager' || u.resting) continue;
+      if (kind === 'build') { if (u.state === 'build') this.selected.add(u.id); continue; }
+      if (u.state !== 'gather' && u.state !== 'return') continue;
+      const nd = u.nodeId >= 0 ? this.nodes.find(n => n.id === u.nodeId) : null;
+      const k = nd ? nd.kind
+        : (u.wkind === 'milk' || u.wkind === 'gather') ? 'food'
+        : (u.carry.amt > 0 ? u.carry.type : null);
+      const norm = k === 'fish' ? 'food' : k;
+      if (norm === kind) this.selected.add(u.id);
+    }
+    if (this.selected.size) { this.sound.ack('villager'); this.voiceSel('select'); }
+    else this.sound.error();
+    this.pushHud();
+  }
+
   idleSelect() {
     this.clearSel();
     for (const u of this.units) if (u.owner === 'player' && u.key === 'villager' && !u.resting && (u.state === 'idle' || u.state === 'move')) this.selected.add(u.id);
@@ -3279,7 +3355,9 @@ export class Game {
     else if (v.carry.type === 'food') bank.food += amt;
     else bank.gold += amt;
     if (v.owner === 'player') {
-      if (v.carry.type === 'wood') this.woodGathered += amt;
+      if (v.carry.type === 'wood') { this.woodGathered += amt; this.gotWood += amt; }
+      else if (v.carry.type === 'food') this.gotFood += amt;
+      else this.gotGold += amt;
       this.gatheredTotal += amt;
       this.score += amt * 0.35;
       const cols: Record<string, string> = { wood: '#d6a45c', food: '#fda4af', gold: '#fde047' };
@@ -6011,6 +6089,34 @@ export class Game {
     // отдыхающие в смене НЕ простаивают — иначе счётчик простоя врал бы, а кнопка
     // «Простой»/«За работу» срывала бы людей с законного отдыха
     const idleVills = this.units.filter(u => u.owner === 'player' && u.key === 'villager' && !u.resting && (u.state === 'idle' || u.state === 'move')).length;
+    // ── СВОДКА ЭКОНОМИКИ ──
+    // Куда распределены шаруа. Считаем по НАМЕРЕНИЮ (куда назначен), а не по
+    // сиюминутному кадру: несущий груз домой (state 'return') всё ещё числится
+    // за своим промыслом, иначе цифры прыгали бы каждую секунду.
+    const econ = { wood: 0, food: 0, gold: 0, build: 0, idle: 0, rest: 0, total: 0, idlePct: 0 };
+    for (const u of this.units) {
+      if (u.owner !== 'player' || u.key !== 'villager') continue;
+      econ.total++;
+      if (u.resting) { econ.rest++; continue; }
+      if (u.state === 'build') { econ.build++; continue; }
+      if (u.state === 'gather' || u.state === 'return') {
+        // вид промысла: у рудокопа/дровосека он в узле, у доярки и пашни — в wkind
+        const nd = u.nodeId >= 0 ? this.nodes.find(n => n.id === u.nodeId) : null;
+        const kind = nd ? nd.kind
+          : (u.wkind === 'milk' || u.wkind === 'gather') ? 'food'
+          : (u.carry.amt > 0 ? u.carry.type : null);
+        if (kind === 'wood') econ.wood++;
+        else if (kind === 'gold') econ.gold++;
+        else if (kind === 'food' || kind === 'fish') econ.food++;
+        else econ.idle++;
+        continue;
+      }
+      econ.idle++;
+    }
+    // Процент простоя считаем от РАБОТОСПОСОБНЫХ (без отдыхающих в ночную смену):
+    // иначе ночью показывало бы «80 % простаивают», хотя это законный отдых.
+    const able = econ.total - econ.rest;
+    econ.idlePct = able > 0 ? Math.round((econ.idle / able) * 100) : 0;
     const next = AGES[this.age + 1];
     this.onHud({
       wood: Math.floor(this.res.wood), food: Math.floor(this.res.food), gold: Math.floor(this.res.gold),
@@ -6026,13 +6132,14 @@ export class Game {
         { id: 'wolf', label: 'Убить 4 волка', done: !!this.questsDone.wolf, progress: `${Math.min(4, this.wolvesSlain)}/4` },
         { id: 'age', label: 'Открыть Век жузов (T)', done: !!this.questsDone.age, progress: this.age >= 1 ? '1/1' : '0/1' },
       ],
-      muted: this.muted, idleVills, relics: this.relicsHeld,
+      muted: this.muted, idleVills, relics: this.relicsHeld, econ,
       pTc: ptc ? Math.max(0, Math.ceil(ptc.hp)) : 0, pTcMax: ptc ? ptc.maxHp : 1,
       eTc: etc ? Math.max(0, Math.ceil(etc.hp)) : 0, eTcMax: etc ? etc.maxHp : 1,
       dmgFlash: this.dmgFlash,
       ageAfford: next?.cost ? this.res.food >= next.cost.food && this.res.gold >= (next.cost.gold || 0) : false,
       ageCost: next?.cost ? `${next.cost.food}🍖${next.cost.gold ? ` ${next.cost.gold}🪙` : ''}` : 'MAX',
       hint: this.hint,
+      ageReport: this.ageReport,
       atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale,
       tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
       hasMarket: this.marketCount() > 0,

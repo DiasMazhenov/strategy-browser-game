@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.082';
+export const GAME_VERSION = '1.0.083';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -340,6 +340,47 @@ export default function App() {
             <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
             <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
           </div>
+          {/* ===== СВОДКА ЭКОНОМИКИ: куда распределены шаруа ===== */}
+          {(hud?.econ?.total ?? 0) > 0 && (
+            <div className="rounded-xl bg-black/35 px-2 py-1.5">
+              <div className="mb-1 flex items-center justify-between text-[10px] font-black tracking-widest text-amber-200/90">
+                <span>ЭКОНОМИКА</span>
+                <span className={`rounded px-1 ${(hud!.econ.idlePct) >= 25 ? 'bg-red-500/30 text-red-200' : (hud!.econ.idlePct) >= 10 ? 'bg-amber-400/25 text-amber-200' : 'bg-lime-500/20 text-lime-300'}`}>
+                  простой {hud!.econ.idlePct}%
+                </span>
+              </div>
+              {/* полоска распределения: видно перекос одним взглядом */}
+              <div className="mb-1 flex h-1.5 overflow-hidden rounded-full bg-black/50">
+                {([['wood', 'bg-lime-600'], ['food', 'bg-rose-500'], ['gold', 'bg-amber-400'],
+                   ['build', 'bg-sky-500'], ['idle', 'bg-slate-600']] as const).map(([k, c]) => {
+                  const v = hud!.econ[k];
+                  const base = hud!.econ.total - hud!.econ.rest;
+                  return v > 0 && base > 0
+                    ? <span key={k} className={c} style={{ width: `${(v / base) * 100}%` }} />
+                    : null;
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] font-bold">
+                {([['wood', '🪵', 'Лес', 'text-lime-300'], ['food', '🍖', 'Еда', 'text-rose-300'],
+                   ['gold', '🪙', 'Золото', 'text-amber-300'], ['build', '🔨', 'Стройка', 'text-sky-300']] as const)
+                  .map(([k, icon, label, cls]) => (
+                    <button key={k} onClick={() => g()?.tradeSelect(k)}
+                      title={`Выделить всех шаруа: ${label.toLowerCase()}`}
+                      className={`flex items-center justify-between rounded px-1 py-0.5 hover:bg-white/10 ${cls}`}>
+                      <span>{icon} {label}</span><b>{hud!.econ[k]}</b>
+                    </button>
+                  ))}
+                <button onClick={() => g()?.idleSelect()} title="Выделить простаивающих"
+                  className="flex items-center justify-between rounded px-1 py-0.5 text-slate-300 hover:bg-white/10">
+                  <span>💤 Простой</span><b>{hud!.econ.idle}</b>
+                </button>
+                <div className="flex items-center justify-between px-1 py-0.5 text-indigo-300"
+                  title="Отдыхают в ночную смену — это не простой">
+                  <span>🌙 Отдых</span><b>{hud!.econ.rest}</b>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-1">
             <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />Центр</MiniBtn>
             <MiniBtn onClick={() => g()?.focusSelection()} title="Камера к выделенному юниту/группе"><Crosshair className="h-3.5 w-3.5" />К юниту</MiniBtn>
@@ -665,6 +706,84 @@ export default function App() {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ИТОГИ ЭПОХИ ===== */}
+      {hud?.ageReport && (
+        <div className="absolute inset-0 z-[62] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="panel-iron anim-banner w-full max-w-lg rounded-3xl p-5">
+            <div className="mb-3 text-center">
+              <div className="text-[11px] font-black tracking-[0.2em] text-slate-400">ЭПОХА ЗАВЕРШЕНА</div>
+              <div className="font-display mt-1 flex items-center justify-center gap-2 text-lg font-black text-amber-200">
+                <span>{hud.ageReport.fromIcon} {hud.ageReport.fromName}</span>
+                <span className="text-slate-500">→</span>
+                <span className="text-lime-300">{hud.ageReport.toIcon} {hud.ageReport.toName}</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-slate-400">
+                длилась {hud.ageReport.mins} мин • набрано {hud.ageReport.score} очков
+              </div>
+            </div>
+
+            <div className="mb-2 grid grid-cols-3 gap-1.5">
+              {([['🪵', 'дерева', hud.ageReport.wood, 'text-lime-300'],
+                 ['🍖', 'еды', hud.ageReport.food, 'text-rose-300'],
+                 ['🪙', 'золота', hud.ageReport.gold, 'text-amber-300']] as const).map(([ic, lb, v, cls]) => (
+                <div key={lb} className="rounded-2xl bg-black/35 px-2 py-2 text-center">
+                  <div className="text-lg">{ic}</div>
+                  <div className={`text-base font-black ${cls}`}>{v}</div>
+                  <div className="text-[10px] text-slate-400">{lb}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mb-3 grid grid-cols-4 gap-1.5 text-center">
+              {([['⚔️', 'врагов', hud.ageReport.kills], ['🔥', 'снесено', hud.ageReport.razed],
+                 ['🏗️', 'построек', hud.ageReport.built], ['🛡️', 'пик армии', hud.ageReport.peakArmy]] as const)
+                .map(([ic, lb, v]) => (
+                  <div key={lb} className="rounded-xl bg-white/5 px-1 py-1.5">
+                    <div className="text-sm">{ic}</div>
+                    <div className="text-[13px] font-black text-slate-100">{v}</div>
+                    <div className="text-[9px] text-slate-400">{lb}</div>
+                  </div>
+                ))}
+            </div>
+
+            {/* расклад сил с джунгарами — главный вопрос перед новой эпохой */}
+            <div className="mb-3 rounded-2xl bg-black/35 px-3 py-2">
+              <div className="mb-1 flex items-center justify-between text-[10px] font-black tracking-widest">
+                <span className="text-lime-300">ВАШЕ ВОЙСКО {hud.ageReport.powP}</span>
+                <span className="text-slate-400">СИЛЫ</span>
+                <span className="text-red-300">{hud.ageReport.powE} ДЖУНГАРЫ</span>
+              </div>
+              <div className="flex h-2 overflow-hidden rounded-full bg-red-900/60">
+                <span className="bg-lime-500" style={{
+                  width: `${Math.round((hud.ageReport.powP / Math.max(1, hud.ageReport.powP + hud.ageReport.powE)) * 100)}%`,
+                }} />
+              </div>
+              <div className="mt-1 text-[10px] text-slate-400">
+                {hud.ageReport.powP >= hud.ageReport.powE * 1.2 ? 'Вы сильнее — можно наступать'
+                  : hud.ageReport.powP >= hud.ageReport.powE * 0.8 ? 'Силы примерно равны'
+                  : 'Джунгары сильнее — крепите оборону'}
+              </div>
+            </div>
+
+            {hud.ageReport.unlocks.length > 0 && (
+              <div className="mb-4">
+                <div className="mb-1 text-[10px] font-black tracking-widest text-amber-200/90">ОТКРЫЛОСЬ</div>
+                <div className="space-y-1">
+                  {hud.ageReport.unlocks.map(u => (
+                    <div key={u} className="rounded-xl bg-lime-500/10 px-2.5 py-1 text-[12px] font-bold text-lime-200">{u}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button onClick={() => gameRef.current?.closeAgeReport()}
+              className="w-full rounded-2xl border border-amber-300/40 bg-amber-400/15 py-2.5 text-[13px] font-black tracking-wide text-amber-100 transition hover:bg-amber-400/25">
+              Вести ханство дальше →
+            </button>
           </div>
         </div>
       )}
