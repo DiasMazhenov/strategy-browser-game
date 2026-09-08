@@ -186,6 +186,14 @@ interface Unit {
   hunt?: boolean;         // крестьянин получил явный приказ охотиться/атаковать (преследует дичь)
   xp?: number; level?: number; kills?: number; // опыт и ранг героя
   upg?: number;           // ступень линии апгрейда (0/1/2) — задаёт султан на шлеме
+  // ── посменная работа: усталость, отдых, отдохнувшая бодрость ──
+  fatigue?: number;       // накопленная усталость 0..1 (растёт во время работы)
+  resting?: boolean;      // сейчас на отдыхе у юрты
+  restT?: number;         // сколько ещё отдыхать, сек
+  restKind?: 'swing' | 'kazan' | 'asyk';  // чем занят на отдыхе (спрайт сценки)
+  restX?: number; restY?: number;         // точка отдыха у юрты
+  freshT?: number;        // «после выходных»: бодрость, пока тикает — работа быстрее
+  shiftBack?: { nodeId: number; kind?: string } | null; // куда вернуться после смены
   // ── разведчик: приказы и шпионаж ──
   mission?: 'explore' | 'bases' | 'diplomacy' | 'infiltrate'; // задание разведчика
   mtx?: number; mty?: number;       // цель приказа (база/точка)
@@ -298,6 +306,9 @@ export interface HudSnapshot {
   alertHud: { sub: string; t: number } | null;
   // имена родов войск с учётом взятых ступеней апгрейда (для кнопок обучения)
   unitNames: Record<string, string>;
+  // сутки и посменная работа
+  day: { num: number; name: string; icon: string; phase: number; night: boolean;
+    resting: number; fresh: number; tired: number };
 }
 export interface NationHud {
   id: string; name: string; ruler: string; title: string; portrait: string; color: string; greet: string;
@@ -404,6 +415,14 @@ export class Game {
   lastAlertT = -99;              // время прошлой тревоги (антиспам)
   droughtT = 0;                  // засуха: пашни дают меньше, пока тикает
   plagueT = 0;                   // эпидемия: шаруа работают медленнее
+  // ── СУТКИ И ПОСМЕННАЯ РАБОТА ──
+  // Условные сутки — 240 с. Шаруа устают за смену, уходят к юртам отдыхать
+  // (алтыбакан / казан / асыки), возвращаются отдохнувшими и работают быстрее.
+  readonly DAY_LEN = 240;        // длительность условных суток, сек
+  dayT = 0;                      // фаза суток 0..DAY_LEN (0 = полдень, стартуем днём)
+  dayNum = 1;                    // номер дня (для «после выходных»)
+  restCycleT = 0;                // накопитель проверки смен
+  restedTotal = 0;               // сколько работников успело отдохнуть (статистика)
   audienceId: string | null = null;             // id народа на экране переговоров (открыт из модалки)
   greetQueue: string[] = [];     // очередь народов на приветствие
   greetShown = new Set<string>();// народы, приветствие которых уже показано
@@ -1691,6 +1710,9 @@ export class Game {
   issueSmart(x: number, y: number) {
     const us = this.selUnits();
     if (!us.length) return;
+    // ПРЯМОЙ ПРИКАЗ ОТМЕНЯЕТ ОТДЫХ: игрок главнее расписания смен.
+    // Работник встаёт с алтыбакана недоотдохнувшим — усталость остаётся как есть.
+    for (const u of us) if (u.resting) { u.resting = false; u.restT = 0; u.restKind = undefined; u.shiftBack = null; }
     // find explicit target
     const tu = this.pickUnit(x, y);
     const tb = this.pickBld(x, y);
@@ -1984,6 +2006,7 @@ export class Game {
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
+      day: { dayT: this.dayT, dayNum: this.dayNum, restedTotal: this.restedTotal },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
     };
     return JSON.stringify(data);
@@ -2043,6 +2066,7 @@ export class Game {
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
+      if (d.day) { this.dayT = d.day.dayT ?? 0; this.dayNum = d.day.dayNum ?? 1; this.restedTotal = d.day.restedTotal ?? 0; }
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
@@ -2235,6 +2259,146 @@ export class Game {
     if (this.bonusTier('craft', 3)) m *= 1.15;   // союз с ремесленниками ускоряет шаруа
     if (this.plagueT > 0) m *= 0.6;              // поветрие: работа идёт туго
     return m;
+  }
+
+  // ── ПОСМЕННАЯ РАБОТА ──
+  // Личный множитель добычи: отдохнувший работает быстрее, вымотанный — медленнее.
+  // gatherMult() остаётся глобальным (техи/поветрие), а этот — про конкретного шаруа.
+  workMult(u: Unit): number {
+    let m = this.gatherMult();
+    if (u.owner !== 'player') return m;
+    if ((u.freshT ?? 0) > 0) m *= this.FRESH_BONUS;              // вернулся с отдыха — бодр
+    else if ((u.fatigue ?? 0) > 0.7) m *= 1 - ((u.fatigue ?? 0) - 0.7) * 0.8; // вымотан — вяло
+    return m;
+  }
+  readonly FRESH_BONUS = 1.35;   // насколько быстрее работает отдохнувший
+  readonly REST_TIME = 26;       // длительность отдыха, сек
+  readonly FRESH_TIME = 70;      // сколько держится бодрость после отдыха
+  readonly TIRE_RATE = 1 / 150;  // за 150 с непрерывной работы — полная усталость
+
+  // Фаза суток 0..1. Договорённость наследуется от старого визуала освещения:
+  // фаза 0 — ПОЛДЕНЬ (светло), 0.5 — ПОЛНОЧЬ. Темнота = 0.5*(1-cos(2πφ)).
+  dayPhase(): number { return this.dayT / this.DAY_LEN; }
+  darkness(): number { return 0.5 * (1 - Math.cos(this.dayPhase() * Math.PI * 2)); }
+  dayName(): string {
+    const p = this.dayPhase();
+    if (p < 0.125 || p >= 0.875) return 'Күндіз (полдень)';
+    if (p < 0.375) return 'Кеш (вечер)';
+    if (p < 0.625) return 'Түн (ночь)';
+    return 'Таң (утро)';
+  }
+  dayIcon(): string {
+    const p = this.dayPhase();
+    if (p < 0.125 || p >= 0.875) return '☀️';
+    if (p < 0.375) return '🌇';
+    if (p < 0.625) return '🌙';
+    return '🌅';
+  }
+  isNight(): boolean { return this.darkness() > 0.62; }
+
+  // точка отдыха у ближайшей юрты (или ставки, если юрт ещё нет)
+  restSpotFor(u: Unit): { x: number; y: number; b: Bld } | null {
+    let best: Bld | null = null; let bd = Infinity;
+    for (const b of this.blds) {
+      if (b.owner !== 'player' || b.done < 1) continue;
+      if (b.key !== 'house' && b.key !== 'towncenter') continue;
+      const d = dist2(u.x, u.y, b.x, b.y);
+      // юрты предпочтительнее ставки — искусственно «приближаем» их
+      const w = b.key === 'house' ? d : d * 2.4;
+      if (w < bd) { bd = w; best = b; }
+    }
+    if (!best) return null;
+    // рассаживаем вокруг юрты по кругу, чтобы не слипались в одну точку
+    const a = (u.id * 2.399) % (Math.PI * 2);
+    const r = best.size * 0.62 + 24;
+    return { x: best.x + Math.cos(a) * r, y: best.y + Math.sin(a) * r * 0.6, b: best };
+  }
+
+  // отправить работника на отдых
+  sendToRest(u: Unit) {
+    const spot = this.restSpotFor(u);
+    if (!spot) return false;                     // некуда идти — работает дальше
+    // запомним, к какому ресурсу вернуть после смены
+    u.shiftBack = u.nodeId >= 0 ? { nodeId: u.nodeId, kind: u.wkind } : null;
+    // работница уходит с дойки — освобождаем загон, иначе он останется «занят»
+    // ушедшей дояркой и к нему больше никто не подойдёт
+    if (u.penId != null) {
+      const pen = this.blds.find(b => b.id === u.penId);
+      if (pen && pen.milkWid === u.id) pen.milkWid = undefined;
+      u.penId = undefined;
+    }
+    u.resting = true; u.restT = this.REST_TIME + rand(-4, 6);
+    u.restX = spot.x; u.restY = spot.y;
+    u.state = 'move'; u.tx = spot.x; u.ty = spot.y;
+    u.nodeId = -1; u.buildId = -1; u.wkind = undefined; u.targetU = -1;
+    // чем занять на отдыхе: женщины — казан, мужчины — асыки, кто-то на алтыбакане
+    const r = Math.random();
+    u.restKind = u.female ? (r < 0.55 ? 'kazan' : 'swing') : (r < 0.6 ? 'asyk' : 'swing');
+    return true;
+  }
+
+  // тик отдыха конкретного работника: дойти до юрты, отдохнуть, вернуться бодрым
+  updateResting(u: Unit, dt: number): boolean {
+    if (!u.resting) return false;
+    const rx = u.restX ?? u.x, ry = u.restY ?? u.y;
+    // ещё идём к месту отдыха
+    if (dist2(u.x, u.y, rx, ry) > 30 * 30) {
+      u.wkind = undefined;
+      this.moveTowardPath(u, rx, ry, dt);
+      return true;
+    }
+    // на месте: отдыхаем, усталость тает
+    u.state = 'idle';
+    u.restT = (u.restT ?? 0) - dt;
+    u.fatigue = Math.max(0, (u.fatigue ?? 0) - dt / this.REST_TIME);
+    u.anim += dt * 2.2;                       // фаза качелей/помешивания
+    if (Math.random() < dt * 0.5) {
+      // над отдыхающими изредка всплывают тёплые искры (уют стойбища)
+      this.spark(u.x + rand(-10, 10), u.y - rand(18, 30), u.restKind === 'kazan' ? '#fdba74' : '#fde68a');
+    }
+    if ((u.restT ?? 0) <= 0) {
+      // смена окончена: работник свеж и возвращается к делу
+      u.resting = false; u.restT = 0; u.restKind = undefined;
+      u.fatigue = 0; u.freshT = this.FRESH_TIME;
+      this.restedTotal++;
+      this.floater(u.x, u.y - 34, '✨ Отдохнул!', '#86efac', 13);
+      const back = u.shiftBack; u.shiftBack = null;
+      if (back && back.nodeId >= 0) {
+        const n = this.nodes.find(nn => nn.id === back.nodeId && nn.amount > 0);
+        if (n) { this.orderGather(u, n.id); return true; }
+      }
+      u.state = 'idle'; u.idleT = 0;
+    }
+    return true;
+  }
+
+  // общий тик смен: копим усталость, отправляем вымотанных отдыхать посменно
+  updateShifts(dt: number) {
+    // бодрость тает у всех
+    for (const u of this.units) {
+      if (u.owner !== 'player' || u.key !== 'villager') continue;
+      if ((u.freshT ?? 0) > 0) u.freshT = Math.max(0, (u.freshT ?? 0) - dt);
+      // усталость копится только за настоящей работой
+      const working = !u.resting && (u.state === 'gather' || u.state === 'return' || u.state === 'build');
+      if (working) u.fatigue = Math.min(1, (u.fatigue ?? 0) + dt * this.TIRE_RATE * (this.isNight() ? 1.6 : 1));
+    }
+    // раз в 2 с решаем, кого отпустить на отдых
+    this.restCycleT += dt;
+    if (this.restCycleT < 2) return;
+    this.restCycleT = 0;
+    const vills = this.units.filter(u => u.owner === 'player' && u.key === 'villager');
+    if (vills.length < 2) return;              // единственного работника не отпускаем
+    const resting = vills.filter(u => u.resting).length;
+    // ПОСМЕННОСТЬ: одновременно отдыхает не больше трети артели —
+    // иначе добыча встанет колом, и «выходные» будут наказанием, а не бонусом
+    const cap = Math.max(1, Math.floor(vills.length / 3));
+    if (resting >= cap) return;
+    // ночью отпускаем охотнее: порог усталости ниже
+    const need = this.isNight() ? 0.55 : 0.8;
+    const tired = vills
+      .filter(u => !u.resting && !u.herder && (u.fatigue ?? 0) >= need && (u.freshT ?? 0) <= 0)
+      .sort((a, b) => (b.fatigue ?? 0) - (a.fatigue ?? 0));
+    for (const u of tired.slice(0, cap - resting)) this.sendToRest(u);
   }
   // итоговая цена постройки с учётом союза с ремесленниками (скидка на дерево)
   bldCost(key: BuildingKey): { wood: number; food: number; gold: number } {
@@ -2522,7 +2686,7 @@ export class Game {
   villsSelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && u.key === 'villager') this.selected.add(u.id); this.sound.ack('villager'); this.voiceSel('select'); this.pushHud(); }
   idleSelect() {
     this.clearSel();
-    for (const u of this.units) if (u.owner === 'player' && u.key === 'villager' && (u.state === 'idle' || u.state === 'move')) this.selected.add(u.id);
+    for (const u of this.units) if (u.owner === 'player' && u.key === 'villager' && !u.resting && (u.state === 'idle' || u.state === 'move')) this.selected.add(u.id);
     const us = this.selUnits();
     if (us.length) { this.centerOn(us[0].x, us[0].y); this.sound.ack('villager'); }
     this.pushHud();
@@ -2531,6 +2695,7 @@ export class Game {
     let n = 0;
     for (const u of this.units) {
       if (u.owner !== 'player' || u.key !== 'villager') continue;
+      if (u.resting) continue;                 // отдыхающих не трогаем: они в смене
       if (u.state !== 'idle' && u.state !== 'move') continue;
       const nd = this.nearestNode(u.x, u.y, n % 3 === 0 ? 'wood' : n % 3 === 1 ? 'food' : 'gold');
       if (nd) { this.orderGather(u, nd.id); n++; }
@@ -2714,6 +2879,13 @@ export class Game {
     this.updateUnits(dt);
     this.updateBuildings(dt);
     if (this.alert) { this.alert.t += dt; if (this.alert.t > 20) this.alert = null; } // маркер тревоги гаснет
+    // ── СУТКИ: фаза времени и посменная работа ──
+    this.dayT += dt;
+    if (this.dayT >= this.DAY_LEN) {
+      this.dayT -= this.DAY_LEN; this.dayNum++;
+      this.pushBanner(`🌅 День ${this.dayNum}`, 'Новый день над степью', 2.4);
+    }
+    this.updateShifts(dt);         // усталость, смены, отдых у юрт
     this.updateEvents(dt);         // случайные события степи
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
@@ -3384,6 +3556,8 @@ export class Game {
   }
 
   updateVillager(u: Unit, dt: number) {
+    // ОТДЫХ (посменная работа) — выше всех дел, кроме прямого приказа игрока
+    if (u.resting && this.updateResting(u, dt)) return;
     // пастух: цикл выпаса. В ручном перемещении (move/attackmove/build) слушается приказа,
     // а по прибытии (idle) и в фазе gather — пасёт скот и НЕ уходит на авто-добычу.
     if (u.herder && u.penId != null && (u.state === 'gather' || u.state === 'idle' || u.state === 'return')) {
@@ -3434,11 +3608,11 @@ export class Game {
       if (dist2(u.x, u.y, pen.x, pen.y) > 62 * 62) { u.wkind = undefined; this.moveTowardPath(u, u.tx, u.ty, dt); return; }
       // доим: молоко капает
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
-      const cyc = 0.9 / this.gatherMult();
+      const cyc = 0.9 / this.workMult(u);
       u.wphase = u.gatherT / cyc;
       if (u.gatherT >= cyc) {
         u.gatherT = 0; u.wphase = 0;
-        u.carry = { type: 'food', amt: u.carry.amt + 3 * this.gatherMult() * this.farmMult() };
+        u.carry = { type: 'food', amt: u.carry.amt + 3 * this.workMult(u) * this.farmMult() };
         if (Math.random() < 0.7) this.burst(u.x + 14, u.y - 6, 2, ['#fef3c7', '#fde68a', '#fff'], 46, 0.5);
         // молоко идёт в казну ВЛАДЕЛЬЦА (deposit), а не всегда игроку — тот же баг, что
         // чинили у фермы в 1.0.062
@@ -3487,11 +3661,11 @@ export class Game {
         if (dist2(u.x, u.y, fb.x, fb.y) > 60 * 60) { u.wkind = undefined; this.moveTowardPath(u, u.tx, u.ty, dt); return; }
         u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
         u.wkind = 'gather'; // сбор урожая на ферме — кадр сбора фруктов
-        const cyc = 0.55 / this.gatherMult();
+        const cyc = 0.55 / this.workMult(u);
         u.wphase = u.gatherT / cyc;
         if (u.gatherT > cyc) {
           u.gatherT = 0; u.wphase = 0;
-          u.carry = { type: 'food', amt: u.carry.amt + 2 * this.gatherMult() * this.farmMult() };
+          u.carry = { type: 'food', amt: u.carry.amt + 2 * this.workMult(u) * this.farmMult() };
           this.burst(u.x, u.y - 8, 2, ['#a3e635', '#65a30d'], 50, 0.5);
           // ферма отдаёт еду на месте (без похода на склад) — но в казну ВЛАДЕЛЬЦА
           if (u.carry.amt >= this.carryCap()) this.deposit(u);
@@ -3527,11 +3701,11 @@ export class Game {
       // вид работы: лес — топор, золото/руда — кирка, рыба — удочка (стоит на берегу), фрукты/ягоды — сбор
       u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : n.kind === 'fish' ? 'fish' : 'gather';
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
-      const cycN = 0.55 / this.gatherMult();
+      const cycN = 0.55 / this.workMult(u);
       u.wphase = u.gatherT / cycN;
       if (u.gatherT >= cycN) {
         u.gatherT = 0; u.wphase = 0;
-        const take = Math.min(2.5 * this.gatherMult(), n.amount);
+        const take = Math.min(2.5 * this.workMult(u), n.amount);
         n.amount -= take;
         u.carry.amt += take;
         if (n.kind === 'wood') { this.burst(n.x + rand(-10, 10), n.y - 6, 3, ['#a16207', '#65a30d', '#d6a45c'], 80, 0.55); if (Math.random() < 0.5) this.sound.chop(); }
@@ -5190,7 +5364,9 @@ export class Game {
     const banner = this.banners.length ? { title: this.banners[0].title, sub: this.banners[0].sub } : null;
     const ptc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
     const etc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
-    const idleVills = this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.state === 'idle' || u.state === 'move')).length;
+    // отдыхающие в смене НЕ простаивают — иначе счётчик простоя врал бы, а кнопка
+    // «Простой»/«За работу» срывала бы людей с законного отдыха
+    const idleVills = this.units.filter(u => u.owner === 'player' && u.key === 'villager' && !u.resting && (u.state === 'idle' || u.state === 'move')).length;
     const next = AGES[this.age + 1];
     this.onHud({
       wood: Math.floor(this.res.wood), food: Math.floor(this.res.food), gold: Math.floor(this.res.gold),
@@ -5236,6 +5412,11 @@ export class Game {
       alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
       unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
         archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
+      day: { num: this.dayNum, name: this.dayName(), icon: this.dayIcon(), phase: this.dayPhase(),
+        night: this.isNight(),
+        resting: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && u.resting).length,
+        fresh: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.freshT ?? 0) > 0).length,
+        tired: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.fatigue ?? 0) > 0.7 && !u.resting).length },
     });
   }
 
@@ -5714,9 +5895,11 @@ export class Game {
     v.addColorStop(0, 'rgba(0,0,0,0.3)'); v.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = v; ctx.fillRect(0, 0, this.vw, 46);
 
-    // ── время суток: мягкий цикл день→ночь (косинус, период 240с) ──
+    // ── время суток: мягкий цикл день→ночь ──
+    // Фаза берётся из dayT — ЕДИНЫХ игровых суток, по которым живут смены рабочих
+    // (раньше здесь был отдельный счётчик от this.time, и картинка расходилась с логикой).
     if (this.settings.dayNight) {
-      const ph = (this.time % 240) / 240;              // 0..1
+      const ph = this.dayPhase();                      // 0..1
       const darkness = 0.5 * (1 - Math.cos(ph * Math.PI * 2)); // 0 днём, ~1 ночью
       if (darkness > 0.08) {
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);

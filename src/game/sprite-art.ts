@@ -458,7 +458,19 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_scout_bw1": { "ax": 29.4, "ay": 148, "baseW": 72,  "w": 72,  "h": 150 },
   "kz_scout_bw2": { "ax": 38.5, "ay": 148, "baseW": 72,  "w": 72,  "h": 150 },
   "kz_scout_bw3": { "ax": 28.8, "ay": 148, "baseW": 72,  "w": 72,  "h": 150 },
-  "kz_scout_bw4": { "ax": 38.1, "ay": 148, "baseW": 71,  "w": 71,  "h": 150 }
+  "kz_scout_bw4": { "ax": 38.1, "ay": 148, "baseW": 71,  "w": 71,  "h": 150 },
+  // ── сценки отдыха (посменная работа): алтыбакан, казан, асыки ──
+  "kz_swing_0": { "ax": 51.7, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
+  "kz_swing_l": { "ax": 50.3, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
+  "kz_swing_c": { "ax": 52.1, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
+  "kz_swing_r": { "ax": 51.2, "ay": 150, "baseW": 83,  "w": 83,  "h": 150 },
+  "kz_kazan_0": { "ax": 45,   "ay": 149, "baseW": 92,  "w": 92,  "h": 150 },
+  "kz_kazan_a": { "ax": 63.2, "ay": 149, "baseW": 122, "w": 122, "h": 150 },
+  "kz_kazan_b": { "ax": 57,   "ay": 173, "baseW": 109, "w": 109, "h": 150 },
+  "kz_kazan_c": { "ax": 57.5, "ay": 152, "baseW": 121, "w": 121, "h": 150 },
+  "kz_asyk_a":  { "ax": 112.8,"ay": 150, "baseW": 171, "w": 171, "h": 150 },
+  "kz_asyk_b":  { "ax": 111.3,"ay": 151, "baseW": 169, "w": 169, "h": 150 },
+  "kz_asyk_c":  { "ax": 54.5, "ay": 231, "baseW": 122, "w": 122, "h": 150 }
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {

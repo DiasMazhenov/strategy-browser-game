@@ -184,6 +184,16 @@ import kzFemF from '../assets/sprites/units/kz/kz_fem_f.png';
 import kzFemB from '../assets/sprites/units/kz/kz_fem_b.png';
 import kzFemGather from '../assets/sprites/units/kz/kz_fem_gather.png';
 import kzFemMilk from '../assets/sprites/units/kz/kz_fem_milk.png';
+// ── сценки отдыха (посменная работа): алтыбакан, казан, асыки ──
+import kzSwingL from '../assets/sprites/units/kz/kz_swing_l.png';
+import kzSwingC from '../assets/sprites/units/kz/kz_swing_c.png';
+import kzSwingR from '../assets/sprites/units/kz/kz_swing_r.png';
+import kzKazanA from '../assets/sprites/units/kz/kz_kazan_a.png';
+import kzKazanB from '../assets/sprites/units/kz/kz_kazan_b.png';
+import kzKazanC from '../assets/sprites/units/kz/kz_kazan_c.png';
+import kzAsykA from '../assets/sprites/units/kz/kz_asyk_a.png';
+import kzAsykB from '../assets/sprites/units/kz/kz_asyk_b.png';
+import kzAsykC from '../assets/sprites/units/kz/kz_asyk_c.png';
 // казахский разведчик: статичный боковой кадр + 4-кадровая ходьба по изо-направлениям
 import kzScout from '../assets/sprites/units/kz/kz_scout.png';
 import kzScoutSW1 from '../assets/sprites/units/kz/kz_scout_sw1.png';
@@ -326,6 +336,20 @@ const KZ_FEM_FRONT: [HTMLImageElement, string] = [mk(kzFemF), 'kz_fem_f'];
 const KZ_FEM_BACK: [HTMLImageElement, string] = [mk(kzFemB), 'kz_fem_b'];
 const KZ_FEM_GATHER: [HTMLImageElement, string] = [mk(kzFemGather), 'kz_fem_gather'];
 const KZ_FEM_MILK: [HTMLImageElement, string] = [mk(kzFemMilk), 'kz_fem_milk'];
+// циклы сценок отдыха: качели качаются влево-центр-вправо, у казана помешивают,
+// в асыки бросают и радуются. Кадр выбирается по фазе u.anim.
+const KZ_SWING: [HTMLImageElement, string][] = [
+  [mk(kzSwingL), 'kz_swing_l'], [mk(kzSwingC), 'kz_swing_c'],
+  [mk(kzSwingR), 'kz_swing_r'], [mk(kzSwingC), 'kz_swing_c'],
+];
+const KZ_KAZAN: [HTMLImageElement, string][] = [
+  [mk(kzKazanA), 'kz_kazan_a'], [mk(kzKazanB), 'kz_kazan_b'],
+  [mk(kzKazanC), 'kz_kazan_c'], [mk(kzKazanB), 'kz_kazan_b'],
+];
+const KZ_ASYK: [HTMLImageElement, string][] = [
+  [mk(kzAsykA), 'kz_asyk_a'], [mk(kzAsykB), 'kz_asyk_b'],
+  [mk(kzAsykC), 'kz_asyk_c'], [mk(kzAsykB), 'kz_asyk_b'],
+];
 
 // ключ якоря для кадра шага (у мечника оба кадра шага — ходячие позы)
 const WALK_ANCHOR_A: Partial<Record<UnitKey, string>> = {
@@ -587,14 +611,24 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
       im = base!; anKey = u.key; // покой/готовность — боевой кадр
     }
   }
+  // ── ОТДЫХ У ЮРТЫ (посменная работа): алтыбакан / казан / асыки ──
+  // Сценка заменяет обычный кадр, пока шаруа стоит на месте и отдыхает.
+  const restK = (u as U & { restKind?: string }).restKind;
+  const restingNow = isKz && isVill && !!restK && !move;
+  if (restingNow) {
+    const cyc = restK === 'kazan' ? KZ_KAZAN : restK === 'asyk' ? KZ_ASYK : KZ_SWING;
+    const ri = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
+    const [rim, rkey] = cyc[ri];
+    if (ready(rim)) { im = rim; anKey = rkey; flip = 1; }   // сценки нарисованы «как есть»
+  }
   // казахский рабочий-пастух: всегда верхом на коне с кнутом (2 кадра рыси)
-  if (isKz && isVill && (u as U & { herder?: boolean }).herder) {
+  if (!restingNow && isKz && isVill && (u as U & { herder?: boolean }).herder) {
     const sh = move ? (Math.sin(u.anim) < 0 ? 1 : 0) : 0;
     const pair = KZ_SHEPHERD[sh];
     if (ready(pair[0])) { im = pair[0]; anKey = pair[1]; flip = f; }
   }
   // казашка-работница (не пастух): свои кадры — дойка/сбор/ходьба по направлению
-  if (isKz && isVill && (u as U & { female?: boolean }).female && !(u as U & { herder?: boolean }).herder) {
+  if (!restingNow && isKz && isVill && (u as U & { female?: boolean }).female && !(u as U & { herder?: boolean }).herder) {
     const milking = (u as U & { wkind?: string }).wkind === 'milk' && !move;
     const harvesting = (u as U & { wkind?: string }).wkind === 'gather' && !move &&
       (u.state === 'gather' || u.state === 'return');
@@ -607,13 +641,17 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   }
   const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
   const femMilking = isKz && isVill && (u as U & { female?: boolean }).female && anKey === 'kz_fem_milk';
-  const H = anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46);
+  // сценки отдыха крупнее обычного шаруа: алтыбакан — рама в полный рост,
+  // казан и асыки — фигура с утварью, иначе они выглядели бы игрушечными
+  const restH = anKey.startsWith('kz_swing') ? 72 : anKey.startsWith('kz_kazan') ? 54
+    : anKey.startsWith('kz_asyk') ? 50 : 0;
+  const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46));
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
   // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
   const mountFB = kzFB || kzScoutUnit || (fbUnit && move && (u.fmode === 1 || u.fmode === 2));
   // на готовых кадрах работы/рубки/стрельбы/направленной ходьбы боковой крен не накладываем (поза задана спрайтом)
-  const upright = working || slashing || loosing || aiming || mountFB || liveFB || isKz || (hasDirWalk && move) || isLivestock;
+  const upright = working || slashing || loosing || aiming || mountFB || liveFB || isKz || (hasDirWalk && move) || isLivestock || restingNow;
 
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
@@ -624,7 +662,11 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
   const gait = mounted || beast ? Math.sin(u.anim * 1.0) : step; // у галопа фаза та же, но выше амплитуда
   let bob: number, rock: number, lean: number, sway: number;
-  if (working || kzWorking) {
+  if (restingNow) {
+    // отдых: сценка сама несёт движение (качели/помешивание), рама и казан
+    // стоят на земле — никакого подскока и крена, иначе «поедет» вся композиция
+    bob = 0; rock = 0; lean = 0; sway = 0;
+  } else if (working || kzWorking) {
     // работа на месте: лёгкий присед/наклон в такт удару, без шага
     bob = workSwing * 2.2; rock = 0; lean = workSwing * 0.06; sway = 0;
   } else if (mountFB) {
@@ -642,7 +684,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     bob = Math.sin(time * 2 + u.anim) * 0.9; rock = 0; lean = 0; sway = 0;
   }
   // выпад: бой/удар инструментом — в сторону, куда смотрит (face); для анфас/спины — без сдвига
-  const lunge = (working || kzWorking) ? workSwing * 6 * f : (u.atkAnim > 0 ? u.atkAnim * 7 * f : 0);
+  const lunge = restingNow ? 0 : (working || kzWorking) ? workSwing * 6 * f : (u.atkAnim > 0 ? u.atkAnim * 7 * f : 0);
   const fx = ix + lunge + sway * 0.3, fy = iy + 8 + bob; // точка опоры (ноги/копыта)
   ctx.save();
   ctx.imageSmoothingEnabled = false;

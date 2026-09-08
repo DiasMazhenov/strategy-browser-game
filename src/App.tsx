@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.067';
+export const GAME_VERSION = '1.0.068';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -204,6 +204,17 @@ export default function App() {
                 </span>
               )}
             </button>
+            {hud?.day && (
+              <div
+                className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.day.night ? 'bg-indigo-500/25 text-indigo-100' : 'bg-amber-400/20 text-amber-100'}`}
+                title={`${hud.day.name} · День ${hud.day.num}\nОтдыхает: ${hud.day.resting} · Бодрых: ${hud.day.fresh} · Устали: ${hud.day.tired}\nШаруа сменяют друг друга у юрт и возвращаются отдохнувшими (+35% к добыче)`}
+              >
+                {hud.day.icon} День {hud.day.num}
+                {hud.day.resting > 0 && <span className="rounded-full bg-emerald-500/40 px-1 text-[9px] text-emerald-50">😴 {hud.day.resting}</span>}
+                {hud.day.fresh > 0 && <span className="rounded-full bg-lime-400/30 px-1 text-[9px] text-lime-100">✨ {hud.day.fresh}</span>}
+                {hud.day.tired > 0 && <span className="rounded-full bg-orange-500/30 px-1 text-[9px] text-orange-100">💤 {hud.day.tired}</span>}
+              </div>
+            )}
             {hud?.alertHud && (
               <button
                 onClick={() => gameRef.current?.jumpToAlert()}
