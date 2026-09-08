@@ -497,6 +497,9 @@ export class Game {
   edgeGlide = { dx: 0, dy: 0, t: 0 };
   curCursor: CursorKind | '' = '';            // текущий CSS-курсор канваса
   selNode = -1;                               // выбранный ресурс: плашка + полоска запаса
+  // Гекс под курсором: обводится контуром, по клику туда идёт выделенный отряд.
+  hoverHex: { q: number; r: number } | null = null;
+  hexPing = { x: 0, y: 0, t: 0 };             // вспышка на гексе после приказа
   minimap = { x: 0, y: 0, w: 0, h: 0 };
   grassTile: HTMLCanvasElement | null = null;
   muted = false;
@@ -1712,6 +1715,81 @@ export class Game {
     this.canvas.style.cursor = cursorCss(kind);
   }
 
+  // ── Гекс под курсором ─────────────────────────────────────────────────────
+  // Клетка = гекс. Наведение обводит её контуром, клик отправляет туда отряд.
+  // Гекс не подсвечиваем там, где клик значит другое: над HUD-стрелками края,
+  // в режиме постройки (там свой призрак здания) и на объектах (юнит/здание/
+  // ресурс) — по ним курсор и приказ уже свои.
+  updateHoverHex() {
+    if (this.over || this.paused || !this.mouse.in || this.mouse.isTouch
+      || this.box || this.panning || this.wallDrag || this.placement
+      || this.edgeArrowAt(this.mouse.x, this.mouse.y)) { this.hoverHex = null; return; }
+    const w = this.screenToWorld(this.mouse.x, this.mouse.y);
+    // над миникартой гекс не подсвечиваем — там свой обработчик
+    if (this.mouse.x >= this.minimap.x && this.mouse.x <= this.minimap.x + this.minimap.w
+      && this.mouse.y >= this.minimap.y && this.mouse.y <= this.minimap.y + this.minimap.h) {
+      this.hoverHex = null; return;
+    }
+    const [q, r] = worldToHex(w.x, w.y);
+    this.hoverHex = { q, r };
+  }
+
+  // Клик по гексу: отряд идёт в ЦЕНТР клетки, а не в произвольную точку.
+  // Возвращает false, если приказывать некому — тогда клик обрабатывается дальше.
+  orderToHex(wx: number, wy: number): boolean {
+    const us = this.selUnits();
+    if (!us.length) return false;
+    const [q, r] = worldToHex(wx, wy);
+    const [cx, cy] = hexCenterWorld(q, r);
+    this.hexPing = { x: cx, y: cy, t: 0.7 };
+    this.issueSmart(cx, cy);
+    // issueSmart раскидывает цели на rand(±24) — это БОЛЬШЕ радиуса гекса
+    // (вписанная окружность ≈17), и одиночный юнит мог встать в соседнюю клетку.
+    // Переставляем цели строем ВОКРУГ центра: один — ровно в центр, группа —
+    // кольцами, чтобы отряд не топтался в одной точке, но шёл именно на этот гекс.
+    const movers = us.filter(u => u.state === 'move' || u.state === 'attackmove');
+    if (movers.length === 1) { movers[0].tx = cx; movers[0].ty = cy; }
+    else {
+      movers.forEach((u, i) => {
+        if (i === 0) { u.tx = cx; u.ty = cy; return; }
+        const ring = Math.ceil(i / 6);              // 6 юнитов на кольцо
+        const idx = i - (ring - 1) * 6 - 1;
+        const a = (idx / 6) * Math.PI * 2 + ring * 0.5;
+        const rad = ring * HEX_CELL * 0.62;         // соседние клетки, без свалки
+        u.tx = cx + Math.cos(a) * rad;
+        u.ty = cy + Math.sin(a) * rad;
+      });
+    }
+    return true;
+  }
+
+  // Обводка гекса под курсором + вспышка на гексе, куда отдан приказ.
+  // Рисуется в мировой iso-трансформации, поэтому контур ложится ровно на плитку.
+  drawHexHover(ctx: CanvasRenderingContext2D) {
+    if (this.hexPing.t > 0) {
+      const [px, py] = toIso(this.hexPing.x, this.hexPing.y);
+      const k = this.hexPing.t / 0.7;
+      ctx.save();
+      ctx.globalAlpha = k * 0.85;
+      hexPath(ctx, px, py, 1 + (1 - k) * 0.25);
+      ctx.strokeStyle = '#a3e635'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.restore();
+    }
+    if (!this.hoverHex) return;
+    const { q, r } = this.hoverHex;
+    const [px, py] = hexCenter(q, r);
+    const armed = this.selUnits().length > 0;
+    ctx.save();
+    hexPath(ctx, px, py, 1);
+    // с выделением — зелёный «можно идти», без выделения — нейтральный контур
+    ctx.fillStyle = armed ? 'rgba(163,230,53,0.13)' : 'rgba(246,212,124,0.08)';
+    ctx.fill();
+    ctx.strokeStyle = armed ? 'rgba(163,230,53,0.9)' : 'rgba(246,212,124,0.55)';
+    ctx.lineWidth = armed ? 2 : 1.4;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // ── Стрелки прокрутки у краёв экрана ──────────────────────────────────────
   // Какая стрелка под точкой экрана. Углы отдаём вертикали: две стрелки разом
   // не рисуем, иначе они наезжают друг на друга.
@@ -1846,7 +1924,10 @@ export class Game {
       this.clearSel(); this.selBld = b.id;
       this.sound.select(); this.pushHud(); return;
     }
-    if (this.selected.size) { this.issueSmart(x, y); return; }
+    // КЛИК ПО ГЕКСУ: пустая земля — отряд идёт в ЦЕНТР клетки (клетка = гекс),
+    // а не в произвольную точку под курсором. Объекты (юниты/здания/ресурсы)
+    // разобраны выше и сюда не доходят.
+    if (this.selected.size) { this.orderToHex(x, y); return; }
     // Клик по ресурсу без выделения — осмотр: плашка с названием и остатком.
     if (n) { this.clearSel(); this.selNode = n.id; this.sound.select(); this.pushHud(); return; }
     if (this.selBld >= 0 || this.selNode >= 0) { this.clearSel(); this.pushHud(); }
@@ -3271,7 +3352,9 @@ export class Game {
     // подводим курсор → появляется стрелка → ПРОКРУТКА ТОЛЬКО ПО КЛИКУ.
     // См. edgeArrowAt() / nudgeCam() и отрисовку в drawEdgeArrows().
     this.updateEdgeArrows();
+    this.updateHoverHex();
     this.syncCursor();
+    if (this.hexPing.t > 0) this.hexPing.t = Math.max(0, this.hexPing.t - dt);
     // плавный докат после клика по стрелке
     if (this.edgeGlide.t > 0) {
       const k = Math.min(dt, this.edgeGlide.t);
@@ -6383,6 +6466,8 @@ export class Game {
     ctx.globalAlpha = 1;
     // ── туман войны (поверх мира, в той же iso-трансформации) ──
     if (this.settings.fogOfWar) this.drawFog();
+    // ── обводка гекса под курсором (в мировой iso-трансформации) ──
+    if (!this.paused) this.drawHexHover(ctx);
     // ── selection box (draw in iso too) ──
     if (this.box) {
       const bw = Math.abs(this.box.x1 - this.box.x0), bh = Math.abs(this.box.y1 - this.box.y0);
