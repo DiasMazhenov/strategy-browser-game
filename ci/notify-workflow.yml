@@ -8,6 +8,10 @@
 #   mkdir -p .github/workflows && cp ci/notify-workflow.yml .github/workflows/notify.yml
 #   git add .github/workflows/notify.yml && git commit -m "ci: уведомления ntfy" && git push
 #
+# ПРОВЕРКА СРАЗУ ПОСЛЕ УСТАНОВКИ (не дожидаясь следующей задачи):
+#   вкладка Actions → «Уведомление о завершении задачи» → Run workflow
+#   либо из консоли:  gh workflow run notify.yml
+#
 # Затем подпишитесь на тему ArenaAI в приложении ntfy или на https://ntfy.sh/ArenaAI
 # ---------------------------------------------------------------------------
 name: Уведомление о завершении задачи
@@ -42,7 +46,7 @@ jobs:
         id: info
         run: |
           echo "version=$(node -p "require('./package.json')._gameVersion || 'н/д'")" >> "$GITHUB_OUTPUT"
-          echo "subject=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
+          { echo "subject<<__EOF__"; git log -1 --pretty=%s; echo "__EOF__"; } >> "$GITHUB_OUTPUT"
           echo "author=$(git log -1 --pretty=%an)" >> "$GITHUB_OUTPUT"
           echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -54,17 +58,25 @@ jobs:
 
       - name: Отправить уведомление о завершённой задаче
         if: github.event_name == 'push' && steps.info.outputs.changed == 'yes'
+        # Данные коммита передаём через env, а не через ${{ }} прямо в shell:
+        # кавычки или $(...) в теме коммита иначе сломают команду.
+        env:
+          NTFY_VERSION: ${{ steps.info.outputs.version }}
+          NTFY_SUBJECT: ${{ steps.info.outputs.subject }}
+          NTFY_AUTHOR: ${{ steps.info.outputs.author }}
+          NTFY_SHORT: ${{ steps.info.outputs.short }}
+          NTFY_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
         run: |
           # Публикуем через JSON, а не через заголовки X-Title: так кириллица
           # уходит в UTF-8 без RFC 2047 и не превращается в кракозябры.
           jq -n \
             --arg topic   "$NTFY_TOPIC" \
-            --arg title   "Задача сдана — v${{ steps.info.outputs.version }}" \
-            --arg message "${{ steps.info.outputs.subject }}
+            --arg title   "Задача сдана — v$NTFY_VERSION" \
+            --arg message "$NTFY_SUBJECT
 
-          Версия: ${{ steps.info.outputs.version }}
-          Коммит: ${{ steps.info.outputs.short }} (${{ steps.info.outputs.author }})" \
-            --arg click   "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+          Версия: $NTFY_VERSION
+          Коммит: $NTFY_SHORT ($NTFY_AUTHOR)" \
+            --arg click   "$NTFY_URL" \
             '{topic:$topic, title:$title, message:$message, click:$click,
               tags:["white_check_mark","video_game"], priority:4}' \
           | curl -sS --fail-with-body --max-time 30 -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh/
@@ -72,11 +84,13 @@ jobs:
 
       - name: Проверочное уведомление (ручной запуск)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          NTFY_TEXT: ${{ inputs.text }}
         run: |
           jq -n \
             --arg topic   "$NTFY_TOPIC" \
             --arg title   "Казахское Ханство — проверка" \
-            --arg message "${{ inputs.text }}" \
+            --arg message "$NTFY_TEXT" \
             '{topic:$topic, title:$title, message:$message, tags:["satellite"], priority:3}' \
           | curl -sS --fail-with-body --max-time 30 -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh/
           echo "Проверочное уведомление отправлено в тему $NTFY_TOPIC"
