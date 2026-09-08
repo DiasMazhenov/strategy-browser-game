@@ -157,7 +157,8 @@ interface Unit {
   pastureId?: number;                  // [скот] id загона, к которому приписано стадо
   herdState?: 'graze' | 'home' | 'pen' | 'back'; // фаза пастушего цикла
   herdStateT?: number;                 // таймер текущей фазы
-  herdStuckT?: number;                 // сколько пастух стоит на месте (сторож застревания)
+  herdStuckT?: number;
+  herdProbeT?: number; herdProbeX?: number; herdProbeY?: number;                 // сколько пастух стоит на месте (сторож застревания)
   wphase?: number;                                // фаза рабочего цикла 0..1
   aiming?: boolean;                               // лучник в зоне выстрела (держит/натягивает лук)
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
@@ -3361,6 +3362,26 @@ export class Game {
       u.x = clamp(u.x, 14, WORLD.w - 14); u.y = clamp(u.y, 14, WORLD.h - 14);
       // реальное перемещение за кадр (в бою на месте шаг не играем)
       const distMoved = Math.hypot(u.x - px0, u.y - py0);
+      // ── СТОРОЖ ЗАСТРЕВАНИЯ ПАСТУХА ──
+      // Замер обязан быть ЗДЕСЬ, после отталкивания от зданий. Внутри herdMove
+      // он бесполезен: moveToward честно сдвигает юнита на 3.9 ед., а коллизия
+      // со стеной тут же возвращает его назад — смещение «есть», а координата
+      // не меняется. Именно так пастух часами тёрся о дуал вокруг базы, и
+      // herdStuckT при этом оставался нулём.
+      if (u.herder && u.penId != null && u.state === 'gather') {
+        // Мерим ПРОГРЕСС ЗА 2 СЕКУНДЫ, а не смещение за кадр. Покадровая проверка
+        // бесполезна: юнит, упёршийся в стену, всё время мелко дёргается (в том
+        // числе от наших же попыток объехать), счётчик обнуляется и порог
+        // никогда не достигается — «дёрг-стоп-дёрг» до бесконечности.
+        u.herdProbeT = (u.herdProbeT ?? 0) + dt;
+        if (u.herdProbeT >= 2) {
+          const adv = Math.hypot(u.x - (u.herdProbeX ?? u.x), u.y - (u.herdProbeY ?? u.y));
+          // за 2 с на скорости 175 юнит проходит ~350 ед.; 60 — заведомый затык
+          if (adv < 60) u.herdStuckT = (u.herdStuckT ?? 0) + u.herdProbeT;
+          else u.herdStuckT = 0;
+          u.herdProbeT = 0; u.herdProbeX = u.x; u.herdProbeY = u.y;
+        }
+      } else if (u.herder) { u.herdStuckT = 0; u.herdProbeT = 0; }
       const walk = distMoved > 1.5;
       (u as Unit & { walk?: boolean }).walk = walk;
       // изо-направление корпуса крестьянина: мир-дельта → экранная дельта (toIso).
@@ -3433,7 +3454,11 @@ export class Game {
       const gatePass = b.key === 'gate' && b.owner === owner;
       const blocking = isWall ? !gatePass : b.done >= 0.6;
       if (!blocking) continue;
-      const r = isWall ? 15 : b.size / 2 + 8;
+      // ВАЖНО: радиус обязан совпадать с физической коллизией из update().
+      // Там стена — бокс b.size/2 с отступом 13, то есть эффективно ~28 ед.
+      // Пока здесь стояло 15, A* видел «щели» между секциями сплошного дуала,
+      // прокладывал маршрут сквозь стену, а юнит упирался в неё телом и стоял.
+      const r = isWall ? b.size / 2 + 12 : b.size / 2 + 8;
       (isWall ? blockWalls : blockBlds).push({ x: b.x, y: b.y, r });
     }
     const blocked = (wx: number, wy: number): boolean => {
@@ -3530,7 +3555,7 @@ export class Game {
         for (const b of this.blds) {
           const isWall = b.key === 'wall' || b.key === 'gate';
           const gatePass = b.key === 'gate' && b.owner === u.owner;
-          if (isWall) { if (!gatePass) { const ddx = wx - b.x, ddy = wy - b.y; if (ddx * ddx + ddy * ddy < 15 * 15) return true; } }
+          if (isWall) { if (!gatePass) { const rr = b.size / 2 + 12; const ddx = wx - b.x, ddy = wy - b.y; if (ddx * ddx + ddy * ddy < rr * rr) return true; } }
           else if (b.done >= 0.6) { const h2 = b.size / 2 + 4; if (Math.abs(wx - b.x) < h2 && Math.abs(wy - b.y) < h2) return true; }
         }
       }
@@ -3610,9 +3635,23 @@ export class Game {
 
   // ── ПАСТУХ: полцикла на выпас (ищет скот в поле), затем пригоняет его в загон ──
   // найти дальнее ровное пастбище: ≥50 клеток (≈1700 мир.ед.) от базы игрока, ровное поле
-  private findPasture(pen: Bld): [number, number] {
+  // Пастбище. Если передан пастух (u), выбираем только ДОСТИЖИМОЕ место: иначе
+  // при базе, обнесённой дуалом, пастбище оказывается за стеной и пастух вечно
+  // трётся о неё. Радиус в этом случае сжимаем, пока не найдём доступную точку.
+  private findPasture(pen: Bld, u?: Unit): [number, number] {
     const base = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
     const bx = base ? base.x : pen.x, by = base ? base.y : pen.y;
+    // Достижимо ли место. Критерий один — A* находит маршрут.
+    // Fallback «прямая свободна» здесь был ОШИБКОЙ: он шагает по отрезку редкими
+    // точками, проскакивает между секциями дуала и объявляет достижимым место за
+    // стеной. Если A* пути не нашёл — значит, пройти нельзя, точка.
+    // Слишком далёкие цели (A* сдаётся по размеру области) тоже считаем
+    // недостижимыми: лучше пастбище поближе, чем зависший пастух.
+    const reachable = (x: number, y: number): boolean => {
+      if (!u) return true;
+      const p = this.computePath(u.x, u.y, x, y, u.owner);
+      return !!(p && p.length);
+    };
     const flatOpen = (x: number, y: number): boolean => {
       const c = this.terrain.classAt(x, y);
       if (c === 'water' || c === 'deep' || c === 'mountain' || c === 'forest') return false;
@@ -3623,13 +3662,25 @@ export class Game {
       }
       return true;
     };
-    // ищем по кольцам радиуса 1700..2600 (≈50-75 гексов от базы)
+    // ищем по кольцам радиуса 1700..2700 (≈50-75 гексов от базы)
     for (let r = 1700; r <= 2700; r += 90) {
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * Math.PI * 2 + pen.id * 1.7 + r * 0.01;
         const x = bx + Math.cos(a) * r, y = by + Math.sin(a) * r;
         if (x < 120 || y < 120 || x > WORLD.w - 120 || y > WORLD.h - 120) continue;
-        if (flatOpen(x, y)) return [x, y];
+        if (flatOpen(x, y) && reachable(x, y)) return [x, y];
+      }
+    }
+    // Ничего не нашли — база заперта стенами. Поджимаемся ближе кольцами
+    // 1400 → 300: пусть пастбище будет маленьким и рядом, но пастух до него дойдёт.
+    for (let r = 1400; r >= 300; r -= 100) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + pen.id * 0.9;
+        const x = bx + Math.cos(a) * r, y = by + Math.sin(a) * r;
+        if (x < 120 || y < 120 || x > WORLD.w - 120 || y > WORLD.h - 120) continue;
+        const c = this.terrain.classAt(x, y);
+        if (c === 'water' || c === 'deep' || c === 'mountain') continue;
+        if (reachable(x, y)) return [x, y];
       }
     }
     // запасной вариант — просто дальняя суша
@@ -3666,7 +3717,7 @@ export class Game {
     const pen = this.blds.find(b => b.id === u.penId && b.done >= 1);
     if (!pen) { this.releaseShepherd(u); return; }
     // пастбище загона — дальнее ровное поле со стадом (создаётся при назначении)
-    if (pen.pastureX == null) { const [px, py] = this.findPasture(pen); pen.pastureX = px; pen.pastureY = py; }
+    if (pen.pastureX == null) { const [px, py] = this.findPasture(pen, u); pen.pastureX = px; pen.pastureY = py; }
     if (!pen.pastureStocked) { this.stockPasture(pen.pastureX!, pen.pastureY!, pen.id); pen.pastureStocked = true; }
     const cx = pen.pastureX!, cy = pen.pastureY!;
     const GRAZE_T = 270;   // выпас на пастбище — 4.5 минуты
@@ -3802,34 +3853,70 @@ export class Game {
   // Здесь: обход препятствий через A*, плюс сторож — если пастух долго никуда
   // не сместился, дёргаем его в обход и, в крайнем случае, перезапускаем цикл.
   herdMove(u: Unit, tx: number, ty: number, dt: number, arrive = 6): boolean {
-    const px = u.x, py = u.y;
     const done = this.moveTowardPath(u, tx, ty, dt, arrive);
     if (done) { u.herdStuckT = 0; return true; }
-    // сместился ли заметно за кадр (порог — четверть ожидаемого шага)
-    const moved = Math.hypot(u.x - px, u.y - py);
-    if (moved > u.speed * dt * 0.25) { u.herdStuckT = 0; return false; }
-    u.herdStuckT = (u.herdStuckT ?? 0) + dt;
-    // 1.5 с без движения — сбрасываем маршрут, пусть A* проложит заново.
-    // Пересчитываем НЕ каждый кадр (это был бы A* по 30 раз в секунду на юнита),
-    // а раз в 0.75 с: шаг таймера пересекает границу интервала лишь однажды.
-    const beat = Math.floor(u.herdStuckT / 0.75) !== Math.floor(((u.herdStuckT ?? 0) - dt) / 0.75);
-    if (u.herdStuckT > 1.5 && beat) {
+    // Счётчик застревания копится в общем цикле update (после коллизий) — здесь
+    // мы только реагируем на него. Считать смещение тут нельзя: отталкивание от
+    // стены происходит позже и «съедает» весь шаг.
+    // Счётчик растёт шагами по 2 с (одна неудачная проба). Реагируем на переходы.
+    const stuck = u.herdStuckT ?? 0;
+    const fresh = u.herdProbeT != null && u.herdProbeT < dt * 1.5;  // проба только что закрылась
+    if (stuck >= 2 && fresh) {
+      // первая неудачная проба — перепроложить маршрут и попробовать обойти сбоку
       u.path = undefined; u.pathGoal = undefined; u.noPathT = 0;
-      // объезд: шаг вбок от направления на цель
       const dx = tx - u.x, dy = ty - u.y, d = Math.max(1, Math.hypot(dx, dy));
       const sx = -dy / d, sy = dx / d, side = (u.id % 2) ? 1 : -1;
       const bx = u.x + sx * side * 90, by = u.y + sy * side * 90;
       if (!this.terrainBlocked(bx, by)) this.moveToward(u, bx, by, dt, 6);
     }
-    // 6 с — совсем безнадёжно: телепорта нет, но цикл перезапускаем, чтобы
-    // пастух выбрал новую фазу и новую цель вместо вечного упора в стену
-    if (u.herdStuckT > 6) {
-      u.herdStuckT = 0;
-      u.herdState = u.herdState === 'graze' ? 'home' : 'graze';
-      u.herdStateT = 0;
+    // 4 с без прогресса — почти всегда «база обнесена дуалом, пастбище снаружи».
+    // Ведём пастуха через собственные ворота.
+    if (stuck >= 4 && fresh) this.routeThroughGate(u, tx, ty);
+    // 8 с — выхода нет вовсе (ворот не построили): переносим пастбище в доступную
+    // зону вместе со стадом, иначе цикл выпаса встанет насовсем.
+    if (stuck >= 8) {
+      u.herdStuckT = 0; u.herdProbeT = 0;
+      const pen = this.blds.find(b => b.id === u.penId);
+      if (pen) {
+        const [nx, ny] = this.findPasture(pen, u);
+        pen.pastureX = nx; pen.pastureY = ny;
+        // стадо осталось за стеной — перегоняем его к новому пастбищу, иначе
+        // скот недостижим и цикл «пригнать в загон» никогда не завершится
+        for (const a of this.units) {
+          if (a.pastureId !== pen.id || a.hp <= 0) continue;
+          if (dist2(a.x, a.y, nx, ny) < 900 * 900) continue;
+          a.x = nx + rand(-70, 70); a.y = ny + rand(-70, 70);
+          a.wx = nx; a.wy = ny; a.path = undefined; a.pathGoal = undefined;
+        }
+        this.burst(nx, ny - 20, 14, ['#d1fae5', '#a7f3d0', '#fff'], 130, 0.8);
+        this.pushBanner('🐑 Новое пастбище', 'Старое осталось за дуалом — стадо перегнали ближе', 3);
+      }
+      u.herdState = 'graze'; u.herdStateT = 0;
       u.path = undefined; u.pathGoal = undefined;
     }
     return false;
+  }
+
+  // ── ПРОХОД ЧЕРЕЗ СВОИ ВОРОТА ────────────────────────────────────────────────
+  // Пастух упёрся в собственную стену: A* внутри кольца пути наружу не находит,
+  // потому что ворота — единственная щель. Ведём его сначала к ближайшим к цели
+  // воротам, а уже оттуда он пойдёт дальше обычным маршрутом.
+  private routeThroughGate(u: Unit, tx: number, ty: number) {
+    let best: Bld | null = null, bd = Infinity;
+    for (const b of this.blds) {
+      if (b.key !== 'gate' || b.owner !== u.owner || b.done < 1) continue;
+      // ворота полезны, если они «по пути»: ближе к цели, чем сам юнит
+      const dGoal = dist2(b.x, b.y, tx, ty);
+      if (dGoal > dist2(u.x, u.y, tx, ty)) continue;
+      const w = dist2(u.x, u.y, b.x, b.y) + dGoal * 0.35;
+      if (w < bd) { bd = w; best = b; }
+    }
+    if (!best) return;
+    u.path = undefined; u.pathGoal = undefined; u.noPathT = 0;
+    // точка чуть ЗА воротами со стороны цели — иначе юнит встанет в проёме
+    const gx = best.x, gy = best.y;
+    const dx = tx - gx, dy = ty - gy, d = Math.max(1, Math.hypot(dx, dy));
+    u.tx = gx + (dx / d) * 40; u.ty = gy + (dy / d) * 40;
   }
 
   // кнопка «Пасти скот»: выбранные рабочие по одному назначаются к ближайшим/свободным загонам
