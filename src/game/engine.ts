@@ -338,6 +338,13 @@ export interface AudienceHud {
   kind: 'rival' | 'tribe'; rel: string; atWar: boolean; gold: number;
 }
 
+// ── ЕДИНАЯ РУЧКА ВРЕМЕНИ ─────────────────────────────────────────────────────
+// Длительность условных суток в секундах при скорости 1x. Всё, что должно
+// происходить «раз в день» или «за смену», считается ОТ НЕЁ в долях, а не
+// хардкодится в секундах — иначе при смене длины суток механики молча
+// разъезжаются (так и было, пока сутки были 240 с).
+export const DAY_LEN_SEC = 1800;   // 30 минут
+
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => v < a ? a : v > b ? b : v;
 const dist2 = (ax: number, ay: number, bx: number, by: number) => { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
@@ -422,22 +429,31 @@ export class Game {
   droughtT = 0;                  // засуха: пашни дают меньше, пока тикает
   plagueT = 0;                   // эпидемия: шаруа работают медленнее
   // ── СУТКИ И ПОСМЕННАЯ РАБОТА ──
-  // Условные сутки — 240 с. Шаруа устают за смену, уходят к юртам отдыхать
+  // Условные сутки — 30 минут. Шаруа устают за смену, уходят к юртам отдыхать
   // (алтыбакан / казан / асыки), возвращаются отдохнувшими и работают быстрее.
   // ── АЗАН И НАМАЗ ──
   // Мирные жители по призыву с минарета идут к мечети, молятся и расходятся,
   // получая «Береке» — благодать общины. Воины не отвлекаются: азан во время
   // штурма не должен оголять оборону.
   readonly AZAN_LEN = 47;        // длительность записи азана, сек (public/voices/azan.mp3)
-  readonly PRAYER_LEN = 20;      // сколько длится сам намаз у мечети
-  readonly BEREKE_LEN = 90;      // сколько держится благодать после намаза
+  // Намаз должен длиться дольше самой записи азана (46.6 с), иначе люди
+  // расходились бы под ещё звучащий призыв, и при этом оставлять запас
+  // времени на дорогу до мечети через полкарты.
+  readonly PRAYER_LEN = DAY_LEN_SEC * 0.045;  // ~81 с при 30-минутных сутках
+  readonly BEREKE_LEN = DAY_LEN_SEC * 0.2;    // благодать держится 1/5 суток (~360 с)
   prayT = 0;                     // сколько ещё идёт намаз (0 — не идёт)
   berekeT = 0;                   // остаток благодати
   berekePower = 0;               // сила благодати 0..1 (зависит от явки)
   azanPhase: number[] = [];      // фазы суток, на которых звучит азан
   azanDone: number[] = [];       // какие намазы уже прозвучали в этих сутках
   prayerCount = 0;               // сколько намазов совершено за партию
-  readonly DAY_LEN = 240;        // длительность условных суток, сек
+  // ── ДЛИТЕЛЬНОСТЬ СУТОК ──
+  // ЕДИНСТВЕННАЯ ручка времени: всё, что должно случаться «раз в день» или
+  // «за смену», считается ОТ НЕЁ, а не забито в секундах. Раньше сутки были
+  // 240 с, и константы отдыха (150/26/70) подбирались под них вручную —
+  // при смене длины суток они молча разъезжались: рабочий выматывался
+  // 12 раз за день, а «бодрость после отдыха» покрывала 1/26 суток.
+  readonly DAY_LEN = DAY_LEN_SEC;// длительность условных суток, сек (30 мин при 1x)
   dayT = 0;                      // фаза суток 0..DAY_LEN (0 = полдень, стартуем днём)
   dayNum = 1;                    // номер дня (для «после выходных»)
   restCycleT = 0;                // накопитель проверки смен
@@ -2028,7 +2044,7 @@ export class Game {
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
-      day: { dayT: this.dayT, dayNum: this.dayNum, restedTotal: this.restedTotal },
+      day: { dayT: this.dayT, dayF: this.dayPhase(), dayNum: this.dayNum, restedTotal: this.restedTotal },
       pray: { azanDone: this.azanDone, berekeT: this.berekeT, berekePower: this.berekePower, prayerCount: this.prayerCount },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
     };
@@ -2089,8 +2105,18 @@ export class Game {
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
-      if (d.day) { this.dayT = d.day.dayT ?? 0; this.dayNum = d.day.dayNum ?? 1; this.restedTotal = d.day.restedTotal ?? 0; }
-      if (d.pray) { this.azanDone = d.pray.azanDone || []; this.berekeT = d.pray.berekeT ?? 0; this.berekePower = d.pray.berekePower ?? 0; this.prayerCount = d.pray.prayerCount ?? 0; }
+      if (d.day) {
+        // Старые сейвы писали dayT в пределах прежних 240-секундных суток. Если
+        // подставить это число в 30-минутные сутки, часы застрянут около полудня,
+        // поэтому храним и долю суток: она переносится между любыми длинами.
+        const frac = d.day.dayF;
+        this.dayT = typeof frac === 'number' ? clamp(frac, 0, 0.999) * this.DAY_LEN
+          : clamp(d.day.dayT ?? 0, 0, this.DAY_LEN);
+        this.dayNum = d.day.dayNum ?? 1; this.restedTotal = d.day.restedTotal ?? 0;
+      }
+      // благодать из старого сейва могла быть записана в прежнем масштабе —
+      // подрезаем до текущего максимума, чтобы таймер не показывал лишнего
+      if (d.pray) { this.azanDone = d.pray.azanDone || []; this.berekeT = clamp(d.pray.berekeT ?? 0, 0, this.BEREKE_LEN); this.berekePower = clamp(d.pray.berekePower ?? 0, 0, 1); this.prayerCount = d.pray.prayerCount ?? 0; }
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
@@ -2297,9 +2323,14 @@ export class Game {
     return m;
   }
   readonly FRESH_BONUS = 1.35;   // насколько быстрее работает отдохнувший
-  readonly REST_TIME = 26;       // длительность отдыха, сек
-  readonly FRESH_TIME = 70;      // сколько держится бодрость после отдыха
-  readonly TIRE_RATE = 1 / 150;  // за 150 с непрерывной работы — полная усталость
+  // Пропорции смены заданы В ДОЛЯХ СУТОК, поэтому длину суток можно менять
+  // одной строкой: ритм «работа → отдых у юрты → бодрая смена» сохранится.
+  // Доли взяты РОВНО те, что сложились при 240-секундных сутках (150/26/70),
+  // чтобы удлинение суток не превратилось в тихий ребаланс: работник по-прежнему
+  // отдыхает ~1.6 раза за сутки, а не втрое чаще.
+  readonly REST_TIME = DAY_LEN_SEC * 0.108;   // отдых ≈ 10.8% суток (~194 с при 30 мин)
+  readonly FRESH_TIME = DAY_LEN_SEC * 0.292;  // бодрость держится ≈ 29% суток (~525 с)
+  readonly TIRE_RATE = 1 / (DAY_LEN_SEC * 0.625); // полная усталость за 5/8 суток работы
 
   // Фаза суток 0..1. Договорённость наследуется от старого визуала освещения:
   // фаза 0 — ПОЛДЕНЬ (светло), 0.5 — ПОЛНОЧЬ. Темнота = 0.5*(1-cos(2πφ)).
@@ -2352,7 +2383,8 @@ export class Game {
       if (pen && pen.milkWid === u.id) pen.milkWid = undefined;
       u.penId = undefined;
     }
-    u.resting = true; u.restT = this.REST_TIME + rand(-4, 6);
+    // разброс ±20% — чтобы артель не уходила и не возвращалась строем
+    u.resting = true; u.restT = this.REST_TIME * rand(0.85, 1.2);
     u.restX = spot.x; u.restY = spot.y;
     u.state = 'move'; u.tx = spot.x; u.ty = spot.y;
     u.nodeId = -1; u.buildId = -1; u.wkind = undefined; u.targetU = -1;
@@ -2399,8 +2431,9 @@ export class Game {
 
   // ── АЗАН И НАМАЗ ──
   // Азан звучит с минарета Мешіт-медресе три раза в сутки (таң, бесін, ақшам).
-  // Пять намазов при 240-секундных сутках означали бы призыв каждые 48 с —
-  // город не успевал бы работать, поэтому взяты три ключевых времени.
+  // Пять намазов подряд превращали бы город в непрерывную молитву, поэтому
+  // взяты три ключевых времени. При 30-минутных сутках это призыв примерно
+  // раз в 7-11 минут — достаточно редко, чтобы не мешать работе.
   mosqueOf(): Bld | null {
     return this.blds.find(b => b.owner === 'player' && b.key === 'mosque' && b.done >= 1) ?? null;
   }
@@ -2420,13 +2453,21 @@ export class Game {
     }
     const mosque = this.mosqueOf();
     // новые сутки — расписание намазов сбрасывается
-    if (!this.azanPhase.length) this.azanPhase = [0.78, 0.02, 0.40]; // таң, бесін, ақшам
+    // Фаза: 0 = полдень, 0.5 = полночь, значит закат ≈ 0.25, рассвет ≈ 0.75.
+    // Прежнее значение ақшам (0.40) приходилось на темноту 0.90 — «закатный»
+    // намаз звучал глухой ночью; при получасовых сутках это стало очевидно.
+    if (!this.azanPhase.length) this.azanPhase = [0.75, 0.02, 0.25]; // таң, бесін, ақшам
     const ph = this.dayPhase();
     if (mosque && !this.prayT) {
       for (let i = 0; i < this.azanPhase.length; i++) {
         const target = this.azanPhase[i];
-        // окно срабатывания — узкая полоса вокруг фазы
-        const near = Math.abs(ph - target) < 0.012 || Math.abs(ph - target) > 0.988;
+        // Окно срабатывания задано в СЕКУНДАХ реального времени, а не в долях
+        // суток: доля 0.012 при 240-секундных сутках давала 5.8 с, а при
+        // 30-минутных растянулась бы до 43 с. Ширина берётся с запасом на
+        // медленный кадр и ускорение игры до 2x, но остаётся точечной.
+        const win = 4 / this.DAY_LEN;
+        const d = Math.abs(ph - target);
+        const near = d < win || d > 1 - win;
         if (!near || this.azanDone.includes(i)) continue;
         // враг у ворот — намаз откладывается: оборона важнее
         if (this.enemyNearHome()) { this.azanDone.push(i); continue; }
@@ -6074,8 +6115,10 @@ export class Game {
       const darkness = 0.5 * (1 - Math.cos(ph * Math.PI * 2)); // 0 днём, ~1 ночью
       if (darkness > 0.08) {
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-        // ночь — синеватая, закат — тёплый (фаза 0.45-0.55)
-        const sunset = Math.max(0, 1 - Math.abs(ph - 0.5) * 8);
+        // Ночь синеватая, а закат и рассвет — тёплые. Закат при фазе 0.25,
+        // рассвет при 0.75 (0 — полдень, 0.5 — полночь). Прежняя формула брала
+        // |ph − 0.5| и подсвечивала тёплым саму ПОЛНОЧЬ.
+        const sunset = Math.max(0, 1 - Math.min(Math.abs(ph - 0.25), Math.abs(ph - 0.75)) * 8);
         ctx.fillStyle = `rgba(${20 + sunset * 60},${26 + sunset * 10},${60 - sunset * 30},${(darkness * 0.42).toFixed(3)})`;
         ctx.fillRect(0, 0, this.vw, this.vh);
       }

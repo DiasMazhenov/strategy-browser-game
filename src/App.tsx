@@ -17,7 +17,13 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.070';
+export const GAME_VERSION = '1.0.071';
+// Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
+// читается плохо — переводим в м:сс, секунды оставляем как есть.
+const mmss = (sec: number) => {
+  const s = Math.max(0, Math.ceil(sec));
+  return s < 60 ? `${s}с` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -207,9 +213,11 @@ export default function App() {
             {hud?.day && (
               <div
                 className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.day.night ? 'bg-indigo-500/25 text-indigo-100' : 'bg-amber-400/20 text-amber-100'}`}
-                title={`${hud.day.name} · День ${hud.day.num}\nОтдыхает: ${hud.day.resting} · Бодрых: ${hud.day.fresh} · Устали: ${hud.day.tired}\nШаруа сменяют друг друга у юрт и возвращаются отдохнувшими (+35% к добыче)`}
+                title={`${hud.day.name} · День ${hud.day.num}\nСутки длятся 30 минут при скорости 1x\nОтдыхает: ${hud.day.resting} · Бодрых: ${hud.day.fresh} · Устали: ${hud.day.tired}\nШаруа сменяют друг друга у юрт и возвращаются отдохнувшими (+35% к добыче)`}
               >
                 {hud.day.icon} День {hud.day.num}
+                {/* при получасовых сутках время дня важнее номера дня: показываем фазу */}
+                <span className="opacity-80">{hud.day.name.replace(/ \(.*\)/, '')}</span>
                 {hud.day.resting > 0 && <span className="rounded-full bg-emerald-500/40 px-1 text-[9px] text-emerald-50">😴 {hud.day.resting}</span>}
                 {hud.day.fresh > 0 && <span className="rounded-full bg-lime-400/30 px-1 text-[9px] text-lime-100">✨ {hud.day.fresh}</span>}
                 {hud.day.tired > 0 && <span className="rounded-full bg-orange-500/30 px-1 text-[9px] text-orange-100">💤 {hud.day.tired}</span>}
@@ -218,14 +226,14 @@ export default function App() {
             {hud?.pray?.active && (
               <div className="pointer-events-auto flex animate-pulse items-center gap-1.5 rounded-full bg-teal-500/25 px-2 py-0.5 text-[11px] font-black text-teal-100"
                 title={`Азан с минарета: жители идут на намаз (${hud.pray.praying} чел.)\nВоины не отвлекаются от обороны`}>
-                🕌 Намаз: {hud.pray.t}с
+                🕌 Намаз: {mmss(hud.pray.t)}
                 {hud.pray.praying > 0 && <span className="rounded-full bg-teal-400/40 px-1 text-[9px]">🤲 {hud.pray.praying}</span>}
               </div>
             )}
             {!hud?.pray?.active && (hud?.pray?.bereke ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-black text-emerald-100"
                 title={`Береке — благодать общины после намаза: +${hud!.pray.berekePct}% к добыче и мораль войска`}>
-                🤲 Береке: {hud!.pray.bereke}с <span className="opacity-80">+{hud!.pray.berekePct}%</span>
+                🤲 Береке: {mmss(hud!.pray.bereke)} <span className="opacity-80">+{hud!.pray.berekePct}%</span>
               </div>
             )}
             {hud?.alertHud && (

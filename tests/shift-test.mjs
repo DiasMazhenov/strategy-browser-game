@@ -4,7 +4,29 @@ let pass=0,fail=0;
 const ok=(n,c,x='')=>{c?(pass++,console.log('PASS',n)):(fail++,console.log('FAIL',n,x))};
 const near=(a,b,e=1e-9)=>Math.abs(a-b)<e;
 
-const DAY_LEN=240, REST_TIME=26, FRESH_TIME=70, FRESH_BONUS=1.35, TIRE_RATE=1/150;
+// Константы читаем ИЗ engine.ts, чтобы тест не разъехался с кодом при
+// смене длины суток (сутки — единственная ручка, остальное её доли).
+import fs from 'node:fs';
+const eng=fs.readFileSync('src/game/engine.ts','utf8');
+const cfg=(re,what)=>{const m=eng.match(re);if(!m){console.log('FAIL: не нашёл',what);process.exit(1);}return m;};
+const DAY_LEN=parseFloat(cfg(/DAY_LEN_SEC = ([\d.]+)/,'DAY_LEN_SEC')[1]);
+const REST_TIME=DAY_LEN*parseFloat(cfg(/REST_TIME = DAY_LEN_SEC \* ([\d.]+)/,'REST_TIME')[1]);
+const FRESH_TIME=DAY_LEN*parseFloat(cfg(/FRESH_TIME = DAY_LEN_SEC \* ([\d.]+)/,'FRESH_TIME')[1]);
+const TIRE_FULL=DAY_LEN*parseFloat(cfg(/TIRE_RATE = 1 \/ \(DAY_LEN_SEC \* ([\d.]+)\)/,'TIRE_RATE')[1]);
+const FRESH_BONUS=parseFloat(cfg(/FRESH_BONUS = ([\d.]+)/,'FRESH_BONUS')[1]);
+const TIRE_RATE=1/TIRE_FULL;
+
+// ── длина суток: заявленные 30 минут и вменяемый ритм смен ──
+ok(`сутки длятся 30 минут (${DAY_LEN} с)`, DAY_LEN===1800, DAY_LEN);
+ok('отдых заметно короче рабочей смены', REST_TIME < TIRE_FULL*0.5, `${REST_TIME.toFixed(0)} vs ${TIRE_FULL.toFixed(0)}`);
+ok('бодрости хватает надолго, но не на все сутки', FRESH_TIME>REST_TIME && FRESH_TIME<DAY_LEN*0.5,
+  FRESH_TIME.toFixed(0));
+// цикл «работа до порога 0.8 + отдых» должен укладываться примерно раз в смену,
+// иначе удлинение суток тихо превратится в ребаланс
+const cycle=0.8*TIRE_FULL+REST_TIME;
+const restsPerDay=DAY_LEN/cycle;
+ok(`работник отдыхает ~1.6 раза за сутки (${restsPerDay.toFixed(1)})`,
+  restsPerDay>1.2 && restsPerDay<2.2, restsPerDay.toFixed(2));
 
 // ── сутки: фаза 0 = полдень, 0.5 = полночь (унаследовано от старого освещения) ──
 const phase=t=>(t%DAY_LEN)/DAY_LEN;
@@ -17,6 +39,12 @@ ok('полночь — ночь', isNight(DAY_LEN/2));
 ok('вечер темнее полудня', darkness(DAY_LEN*0.35)>darkness(DAY_LEN*0.1));
 ok('утро светлеет к полудню', darkness(DAY_LEN*0.9)<darkness(DAY_LEN*0.7));
 ok('цикл замкнут', near(darkness(0),darkness(DAY_LEN)));
+// тёплая подсветка обязана приходиться на закат/рассвет, а не на полночь
+const sunset=p=>Math.max(0,1-Math.min(Math.abs(p-0.25),Math.abs(p-0.75))*8);
+ok('тёплый свет на закате', sunset(0.25)===1);
+ok('тёплый свет на рассвете', sunset(0.75)===1);
+ok('в полночь тёплого света нет', sunset(0.5)===0);
+ok('в полдень тёплого света нет', sunset(0)===0);
 
 const dayName=t=>{const p=phase(t);
   if(p<0.125||p>=0.875)return 'Күндіз (полдень)';
@@ -35,11 +63,28 @@ for(let i=0;i<DAY_LEN*10;i++) tickDay(1);
 ok('за 10 суток счётчик дошёл до 11-го дня', dayNum===11, dayNum);
 ok('фаза после полных суток обнулилась', near(dayT,0));
 
+// ── совместимость сейвов при смене длины суток ──
+// Старые сейвы писали dayT в пределах прежних 240-секундных суток; если
+// подставить это число как есть, часы застрянут около полудня.
+const loadDay=(saved,DAY)=>{
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  return typeof saved.dayF==='number' ? clamp(saved.dayF,0,0.999)*DAY
+    : clamp(saved.dayT??0,0,DAY);
+};
+ok('новый сейв переносит фазу суток как долю',
+  near(loadDay({dayF:0.5,dayT:120},DAY_LEN), DAY_LEN*0.5));
+ok('доля суток переживает смену длины суток',
+  near(loadDay({dayF:0.25},1800),450) && near(loadDay({dayF:0.25},240),60));
+ok('старый сейв без доли не ломает часы',
+  loadDay({dayT:120},DAY_LEN)===120 && loadDay({dayT:120},DAY_LEN)<DAY_LEN);
+ok('мусор из сейва подрезается по длине суток',
+  loadDay({dayT:99999},DAY_LEN)===DAY_LEN && loadDay({dayF:5},DAY_LEN)<DAY_LEN);
+
 // ── усталость копится только за работой ──
 const tire=(f,dt,working,night)=>working?Math.min(1,f+dt*TIRE_RATE*(night?1.6:1)):f;
-let f=0; for(let i=0;i<150;i++) f=tire(f,1,true,false);
-ok('за 150 с работы — полная усталость', near(f,1), f);
-let f2=0; for(let i=0;i<150;i++) f2=tire(f2,1,false,false);
+let f=0; for(let i=0;i<Math.round(TIRE_FULL);i++) f=tire(f,1,true,false);
+ok(`за ${TIRE_FULL.toFixed(0)} с работы — полная усталость`, near(f,1,1e-6), f);
+let f2=0; for(let i=0;i<Math.round(TIRE_FULL);i++) f2=tire(f2,1,false,false);
 ok('без работы усталость не растёт', f2===0);
 let fn=0; for(let i=0;i<100;i++) fn=tire(fn,1,true,true);
 ok('ночью устают быстрее', fn>100*TIRE_RATE, fn);
@@ -61,17 +106,17 @@ ok('глобальные множители сохраняются', near(workMu
 const rest=(u,dt)=>{u.restT-=dt;u.fatigue=Math.max(0,u.fatigue-dt/REST_TIME);
   if(u.restT<=0){u.resting=false;u.fatigue=0;u.freshT=FRESH_TIME;}return u;};
 let w={resting:true,restT:REST_TIME,fatigue:1,freshT:0};
-for(let i=0;i<REST_TIME;i++) rest(w,1);
+for(let i=0;i<Math.ceil(REST_TIME);i++) rest(w,1);
 ok('после отдыха усталость обнулена', w.fatigue===0);
 ok('после отдыха работник не отдыхает', w.resting===false);
 ok('после отдыха выдана бодрость', w.freshT===FRESH_TIME);
 let half={resting:true,restT:REST_TIME,fatigue:1,freshT:0};
-for(let i=0;i<13;i++) rest(half,1);
-ok('на середине отдыха усталость упала вдвое', near(half.fatigue,0.5));
+rest(half,REST_TIME/2);            // ровно половина отдыха, какой бы длины он ни был
+ok('на середине отдыха усталость упала вдвое', near(half.fatigue,0.5,1e-9), half.fatigue);
 ok('на середине отдыха бодрости ещё нет', half.freshT===0);
 
 // бодрость тает
-let fresh=FRESH_TIME; for(let i=0;i<FRESH_TIME;i++) fresh=Math.max(0,fresh-1);
+let fresh=FRESH_TIME; for(let i=0;i<Math.ceil(FRESH_TIME);i++) fresh=Math.max(0,fresh-1);
 ok('бодрость иссякает за FRESH_TIME', fresh===0);
 
 // ── ПОСМЕННОСТЬ: одновременно отдыхает не больше трети ──

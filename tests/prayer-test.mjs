@@ -18,11 +18,21 @@ const body = (src, sig) => {
   return '';
 };
 const num = (re, what) => { const m = eng.match(re); if (!m) { fail++; console.log('FAIL: не нашёл', what); return NaN; } return parseFloat(m[1]); };
+// длительности заданы долями суток (DAY_LEN_SEC * k) — считаем произведение
+const frac = (name) => {
+  const m = eng.match(new RegExp('readonly ' + name + ' = DAY_LEN_SEC \\* ([\\d.]+)'));
+  if (!m) { fail++; console.log('FAIL: не нашёл', name); return NaN; }
+  return DAY_LEN * parseFloat(m[1]);
+};
 
+const DAY_LEN = num(/DAY_LEN_SEC = ([\d.]+)/, 'DAY_LEN_SEC');
 const AZAN_LEN = num(/readonly AZAN_LEN = ([\d.]+)/, 'AZAN_LEN');
-const PRAYER_LEN = num(/readonly PRAYER_LEN = ([\d.]+)/, 'PRAYER_LEN');
-const BEREKE_LEN = num(/readonly BEREKE_LEN = ([\d.]+)/, 'BEREKE_LEN');
-const DAY_LEN = num(/readonly DAY_LEN = ([\d.]+)/, 'DAY_LEN');
+const PRAYER_LEN = frac('PRAYER_LEN');
+const BEREKE_LEN = frac('BEREKE_LEN');
+
+ok(`сутки длятся 30 минут (${DAY_LEN} с)`, DAY_LEN === 1800, DAY_LEN);
+ok(`намаз (${PRAYER_LEN.toFixed(0)}с) длиннее записи азана (${AZAN_LEN}с)`, PRAYER_LEN > AZAN_LEN,
+  PRAYER_LEN.toFixed(0));
 
 // ── 1. Звук: файл на месте и длится не дольше объявленного AZAN_LEN ──────────
 const F = 'public/voices/azan.mp3';
@@ -71,9 +81,12 @@ if (phM) {
   const ph = phM[1].split(',').map(x => parseFloat(x));
   ok(`три намаза в сутки (${ph.join(', ')})`, ph.length === 3, ph.length);
   ok('все фазы в пределах суток 0..1', ph.every(p => p >= 0 && p < 1));
-  const winM = eng.match(/Math\.abs\(ph - target\) < ([\d.]+)/);
-  const win = winM ? parseFloat(winM[1]) : NaN;
-  ok('окно срабатывания задано', !!winM, win);
+  // окно задано в секундах реального времени: win = <сек> / DAY_LEN
+  const winM = eng.match(/const win = ([\d.]+) \/ this\.DAY_LEN/);
+  const winSecRaw = winM ? parseFloat(winM[1]) : NaN;
+  const win = winSecRaw / DAY_LEN;
+  ok('окно срабатывания задано в секундах', !!winM, winSecRaw);
+  ok(`окно ${winSecRaw}с не растягивается с сутками`, winSecRaw >= 2 && winSecRaw <= 10, winSecRaw);
   // окна не должны накладываться друг на друга
   let overlap = false;
   for (let a = 0; a < ph.length; a++) for (let c = a + 1; c < ph.length; c++) {
@@ -81,9 +94,22 @@ if (phM) {
     if (d <= win * 2) overlap = true;
   }
   ok('намазы не накладываются друг на друга', !overlap);
+  // Фаза: 0 = полдень, 0.5 = полночь. Азан не должен звучать в глухую ночь —
+  // «закатный» ақшам когда-то стоял на 0.40, где темнота уже 0.90.
+  const darkAt = p => 0.5 * (1 - Math.cos(p * Math.PI * 2));
+  const phName = p => (p < 0.125 || p >= 0.875) ? 'Күндіз' : p < 0.375 ? 'Кеш' : p < 0.625 ? 'Түн' : 'Таң';
+  ph.forEach((p, i) => {
+    const nm = ['таң', 'бесін', 'ақшам'][i] ?? `намаз ${i}`;
+    ok(`${nm} (фаза ${p}) не приходится на глухую ночь — ${phName(p)}, темнота ${darkAt(p).toFixed(2)}`,
+      darkAt(p) <= 0.62, darkAt(p).toFixed(2));
+  });
+  ok('бесін — полуденный намаз', Math.min(ph[1], 1 - ph[1]) < 0.1, ph[1]);
+  ok('ақшам — закатный, таң — рассветный (по разные стороны полуночи)',
+    ph[2] > 0 && ph[2] < 0.5 && ph[0] > 0.5 && ph[0] < 1, `${ph[2]} / ${ph[0]}`);
   // окно должно быть шире одного тика на максимальной скорости игры
   const winSec = win * 2 * DAY_LEN;
-  ok(`окно ${winSec.toFixed(1)}с шире игрового тика`, winSec > 1.5, winSec.toFixed(2));
+  // на 2x ускорении кадр съедает вдвое больше игровых секунд — окно обязано пережить это
+  ok(`окно ${winSec.toFixed(1)}с шире игрового тика даже на 2x`, winSec > 1.5, winSec.toFixed(2));
   // намаз обязан успевать закончиться до следующего азана
   const gaps = ph.map((p, k) => { const q = ph[(k + 1) % ph.length]; let d = q - p; if (d < 0) d += 1; return d * DAY_LEN; });
   ok(`между намазами (${gaps.map(g => g.toFixed(0)).join('/')}с) хватает на PRAYER_LEN=${PRAYER_LEN}с`,
