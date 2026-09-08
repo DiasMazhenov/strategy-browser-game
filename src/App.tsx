@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.060';
+export const GAME_VERSION = '1.0.061';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -39,9 +39,9 @@ function costStr(c: { wood: number; food: number; gold: number }) {
 const clampPct = (v: number) => Math.max(0, Math.min(1, isFinite(v) ? v : 0));
 
 const DIFFS: { id: Difficulty; name: string; desc: string; icon: string }[] = [
-  { id: 'easy', name: 'Поселенец', desc: 'Спокойные набеги. Для обучения.', icon: '🌱' },
-  { id: 'normal', name: 'Воевода', desc: 'Классический напор AoE. Баланс.', icon: '⚔️' },
-  { id: 'hard', name: 'Завоеватель', desc: 'Беспощадные волны. Без пощады.', icon: '🔥' },
+  { id: 'easy', name: 'Кочевник', desc: 'Спокойные набеги. Для обучения.', icon: '🌱' },
+  { id: 'normal', name: 'Батыр', desc: 'Классический напор степной войны. Баланс.', icon: '⚔️' },
+  { id: 'hard', name: 'Великий хан', desc: 'Беспощадные джунгарские набеги.', icon: '🔥' },
 ];
 
 export default function App() {
@@ -203,8 +203,8 @@ export default function App() {
               )}
             </button>
             {(hud?.wonderT ?? 0) > 0 && (
-              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Чудо света до конца отсчёта — это победа">
-                ⭐ Чудо: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Мавзолей хана до конца отсчёта — это победа">
+                ⭐ Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
               </div>
             )}
           </div>
@@ -212,9 +212,9 @@ export default function App() {
           {/* buttons */}
           <div className="pointer-events-auto flex items-center gap-1.5">
             <div className="panel-iron hidden items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-bold text-amber-200 sm:flex">
-              <Crown className="h-4 w-4" />{hud?.ageName ?? 'Тёмный век'}
+              <Crown className="h-4 w-4" />{hud?.ageName ?? 'Заря степи'}
             </div>
-            <IconBtn onClick={() => g()?.jumpToIdleVillager()} label="Свободные крестьяне (.)">
+            <IconBtn onClick={() => g()?.jumpToIdleVillager()} label="Свободные шаруа (.)">
               <span className="relative text-sm leading-none">🧑‍🌾{(hud?.idleVills ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-400 px-0.5 text-[8px] font-black text-black">{hud?.idleVills}</span>}</span>
             </IconBtn>
             <IconBtn onClick={() => g()?.toggleMute()} label="Звук">
@@ -438,7 +438,7 @@ export default function App() {
                   )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {(hud.sel.done ?? 1) >= 1 && (hud.sel.hp ?? 0) < (hud.sel.bmax ?? 1) - 1 && (
-                      <MiniBtn onClick={() => g()?.repairBuilding(hud.sel.bid!)} title="Отправить крестьян чинить (тратит дерево)">🔧 Чинить</MiniBtn>
+                      <MiniBtn onClick={() => g()?.repairBuilding(hud.sel.bid!)} title="Отправить шаруа чинить (тратит дерево)">🔧 Чинить</MiniBtn>
                     )}
                     {(hud.sel.garrisonCap ?? 0) > 0 && (
                       <>
@@ -447,14 +447,14 @@ export default function App() {
                       </>
                     )}
                     {['towncenter', 'barracks', 'stable', 'blacksmith', 'market'].includes(hud.sel.bkey ?? '') && (
-                      <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.rallyArmed = true; gm.pushHud(); } }} active={hud.rallyArmed} title="Кликните по точке сбора; если это ресурс — новые крестьяне сразу идут на работу"><Flag className="h-3 w-3" />Сбор</MiniBtn>
+                      <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.rallyArmed = true; gm.pushHud(); } }} active={hud.rallyArmed} title="Кликните по точке сбора; если это ресурс — новые шаруа сразу идут на работу"><Flag className="h-3 w-3" />Сбор</MiniBtn>
                     )}
                     {hud.sel.bkey === 'wall' && (
                       <MiniBtn onClick={() => g()?.buildGateOnWall(hud.sel.bid!)} title="Вставить ворота вместо этого участка стены (стоимость ворот)">🚪 Ворота</MiniBtn>
                     )}
                     <MiniBtn
                       onClick={() => { const gm = g(); if (gm) gm.demolish(hud.sel.bid!); }}
-                      title={hud.sel.bkey === 'towncenter' ? 'Городской центр снести нельзя' : 'Снести строение (Delete) — возврат части ресурсов'}
+                      title={hud.sel.bkey === 'towncenter' ? 'Ханскую ставку снести нельзя' : 'Снести строение (Delete) — возврат части ресурсов'}
                     >⛏ Снести</MiniBtn>
                     <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕</MiniBtn>
                   </div>
@@ -507,37 +507,37 @@ export default function App() {
             <div className="scroll-thin flex items-stretch gap-1.5 overflow-x-auto">
               {dockTab === 'units' ? (
                 <>
-                  <TrainBtn label="Крестьянин" icon="🧑‍🌾" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
-                  <TrainBtn label="Ополченец" icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
-                  <TrainBtn label="Лучник" icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
-                  <TrainBtn label="Рыцарь" icon="🐎" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
-                  <TrainBtn label="Копейщик" icon="🔱" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
-                  <TrainBtn label="Всадник" icon="🏇" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
+                  <TrainBtn label="Шаруа" icon="🧑‍🌾" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
+                  <TrainBtn label="Сарбаз" icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
+                  <TrainBtn label="Мерген" icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
+                  <TrainBtn label="Батыр" icon="🐎" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
+                  <TrainBtn label="Найзагер" icon="🔱" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
+                  <TrainBtn label="Жасауыл" icon="🏇" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
                   <TrainBtn label="Катапульта" icon="🪨" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
-                  <TrainBtn label="Монах" icon="✝️" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk')} onClick={() => g()?.train('monk')} />
-                  <TrainBtn label="Разведчик" icon="🧭" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
+                  <TrainBtn label="Баксы" icon="🪶" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk')} onClick={() => g()?.train('monk')} />
+                  <TrainBtn label="Барлаушы" icon="🧭" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
                 </>
               ) : (
                 <>
-                  <TrainBtn label="Дом" icon="🏠" key_="Q" cost={BUILDING_DEFS.house.cost} ok={canAfford(BUILDING_DEFS.house.cost)} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
+                  <TrainBtn label="Юрта" icon="⛺" key_="Q" cost={BUILDING_DEFS.house.cost} ok={canAfford(BUILDING_DEFS.house.cost)} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
                   <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={BUILDING_DEFS.barracks.cost} ok={canAfford(BUILDING_DEFS.barracks.cost)} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
                   <TrainBtn label="Башня" icon="🗼" key_="R" cost={BUILDING_DEFS.tower.cost} ok={canAfford(BUILDING_DEFS.tower.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
-                  <TrainBtn label="Ферма" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
+                  <TrainBtn label="Пашня" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
                   <TrainBtn label="Загон" icon="🐑" key_="H" cost={BUILDING_DEFS.pen.cost} ok={canAfford(BUILDING_DEFS.pen.cost)} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
                   <TrainBtn label="Конюшня" icon="🐴" key_="Z" cost={BUILDING_DEFS.stable.cost} ok={canAfford(BUILDING_DEFS.stable.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
                   <TrainBtn label="Кузница" icon="🔨" key_="X" cost={BUILDING_DEFS.blacksmith.cost} ok={canAfford(BUILDING_DEFS.blacksmith.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
-                  <TrainBtn label="Рынок" icon="🏪" key_="C" cost={BUILDING_DEFS.market.cost} ok={canAfford(BUILDING_DEFS.market.cost)} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
+                  <TrainBtn label="Базар" icon="🏪" key_="C" cost={BUILDING_DEFS.market.cost} ok={canAfford(BUILDING_DEFS.market.cost)} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
                   <div className="mx-0.5 w-px shrink-0 bg-white/10" />
                   <TrainBtn label="Стена" icon="🧱" key_="B" cost={BUILDING_DEFS.wall.cost} ok={canAfford(BUILDING_DEFS.wall.cost)} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
                   <TrainBtn label="Ворота" icon="🚪" key_="V" cost={BUILDING_DEFS.gate.cost} ok={canAfford(BUILDING_DEFS.gate.cost)} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
-                  <TrainBtn label="Чудо света" icon="⭐" key_="W" cost={BUILDING_DEFS.wonder.cost} ok={canAfford(BUILDING_DEFS.wonder.cost) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
+                  <TrainBtn label="Мавзолей" icon="⭐" key_="W" cost={BUILDING_DEFS.wonder.cost} ok={canAfford(BUILDING_DEFS.wonder.cost) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
                 </>
               )}
             </div>
             {!isMobile && (
               <div className="mt-1 hidden items-center justify-center gap-3 text-[10px] font-semibold text-slate-400 sm:flex">
                 <span className="flex items-center gap-1"><MousePointer2 className="h-3 w-3" />Рамка — выбор • ПКМ — приказ • Колесо — зум • камера к краю</span>
-                <span className="flex items-center gap-1"><Keyboard className="h-3 w-3" />WASD камера • B/V стена (тянуть) • Ctrl+1..5 группа • G атака • «.» крестьянин • Space пауза</span>
+                <span className="flex items-center gap-1"><Keyboard className="h-3 w-3" />WASD камера • B/V стена (тянуть) • Ctrl+1..5 группа • G атака • «.» шаруа • Space пауза</span>
               </div>
             )}
           </div>
@@ -591,9 +591,9 @@ export default function App() {
                   { key: 'peace', label: '🕊 Предложить мир', desc: '120🪙' },
                 ] : [
                   { key: 'gift', label: '🎁 Послать дары', desc: '75🪙 · снизить неприязнь', gold: 75 },
-                  { key: 'trade', label: `🐪 Торговый договор`, desc: hud.tradeRoute ? 'действует' : hud.hasMarket ? '60🪙 · нужен Рынок' : 'нужен Рынок', disabled: hud.tradeRoute || !hud.hasMarket },
+                  { key: 'trade', label: `🐪 Торговый договор`, desc: hud.tradeRoute ? 'действует' : hud.hasMarket ? '60🪙 · нужен Базар' : 'нужен Базар', disabled: hud.tradeRoute || !hud.hasMarket },
                   { key: 'nap', label: '📜 Пакт о ненападении', desc: hud.napT ? `действует ${hud.napT}с` : '120🪙', disabled: hud.napT > 0 },
-                  { key: 'condemn', label: '📢 Осуждение', desc: hud.condemned ? 'сосед осуждён' : 'лишить повода к войне', disabled: hud.condemned },
+                  { key: 'condemn', label: '📢 Осуждение', desc: hud.condemned ? 'джунгары осуждены' : 'лишить повода к войне', disabled: hud.condemned },
                   { key: 'tribute', label: '💰 Потребовать дань', desc: 'нужно превосходство в силе' },
                   { key: 'war', label: '⚔ Объявить войну', danger: true },
                 ])
@@ -891,8 +891,8 @@ function ControlsRecap() {
       <div className="rounded-lg bg-white/5 p-2">⚔️ <b className="text-slate-200">Приказ:</b> правый клик / касание цели</div>
       <div className="rounded-lg bg-white/5 p-2">⌨️ <b className="text-slate-200">Клавиши:</b> 1-8 тренировка • Q/E/R/F/Z/X/C стройка • B/V стена/ворота (зажмите и тяните — протяжка) • W Чудо • L дерево технологий • G атака-мув • Y патруль • Ctrl/Alt+1..5 группы</div>
       <div className="rounded-lg bg-white/5 p-2">🐑 <b className="text-slate-200">Скот и дичь:</b> овцы, коровы и олени пасутся стадами и дают еду; волки и воины их вспугивают</div>
-      <div className="rounded-lg bg-white/5 p-2">📿 <b className="text-slate-200">Реликвии:</b> отправьте монаха (или любого юнита) правым кликом на сияющий сундук — +золото и пассивный доход</div>
-      <div className="rounded-lg bg-white/5 p-2">📷 <b className="text-slate-200">Камера:</b> WASD • колесо • мини-карта • «.» прыжок к свободному крестьянину</div>
+      <div className="rounded-lg bg-white/5 p-2">📿 <b className="text-slate-200">Реликвии:</b> отправьте баксы (или любого юнита) правым кликом на сияющий сундук — +золото и пассивный доход</div>
+      <div className="rounded-lg bg-white/5 p-2">📷 <b className="text-slate-200">Камера:</b> WASD • колесо • мини-карта • «.» прыжок к свободному шаруа</div>
     </div>
   );
 }
@@ -904,7 +904,7 @@ function unitIcon(k: string) {
   if (k === 'spearman') return '🔱';
   if (k === 'cavalry') return '🏇';
   if (k === 'catapult') return '🪨';
-  if (k === 'monk') return '✝️';
+  if (k === 'monk') return '🪶';
   if (k === 'scout') return '🧭';
   if (k === 'sheep') return '🐑';
   if (k === 'cow') return '🐄';
@@ -913,7 +913,7 @@ function unitIcon(k: string) {
 }
 function bldIcon(k: BuildingKey) {
   if (k === 'towncenter') return '🏰';
-  if (k === 'house') return '🏠';
+  if (k === 'house') return '⛺';
   if (k === 'barracks') return '⚒️';
   if (k === 'tower') return '🗼';
   if (k === 'stable') return '🐴';
@@ -968,7 +968,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
           </h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-300 sm:text-[15px]">
             Паси 🐑 скот в степи, дои коров в загонах, добывай 🪵🍖🪙 и собирай конницу батыров.
-            Развивай эпохи, веди дипломатию с народами и <b className="text-amber-200">сотри вражеский стан</b>, пока не пала твоя орда.
+            Развивай эпохи, веди дипломатию с народами и <b className="text-amber-200">сотри джунгарский стан</b>, пока не пала твоя орда.
           </p>
         </div>
 
@@ -1029,11 +1029,11 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
           <div className="panel-iron rounded-2xl p-4">
             <div className="font-display text-sm font-black tracking-widest text-amber-200">📜 УСТАВ КОЧЕВНИКА</div>
             <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-300">
-              <HowRow n="1" t="Ополчение уже выбрано — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
-              <HowRow n="2" t="Казаки и казашки добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
-              <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Ферма (F) = бесконечная еда." />
-              <HowRow n="4" t="Дом (Q) для населения → Казармы (E) → Ополченцы (2) и Лучники (3). Конюшня (Z) даёт конницу, кузница (X) — катапульты, рынок (C) — монахов-лекарей." />
-              <HowRow n="5" t="Новая эпоха (T) даёт +силу. Разведчик (G) идёт на связь с народами. Победа — разрушить вражеский Городской центр!" />
+              <HowRow n="1" t="Сарбазы уже выбраны — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
+              <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
+              <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда." />
+              <HowRow n="4" t="Юрта (Q) для населения → Казармы (E) → Сарбазы (2) и Мергены (3). Конюшня (Z) даёт жасауылов, кузница (X) — катапульты, базар (C) — баксы-лекарей." />
+              <HowRow n="5" t="Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами. Победа — сжечь ставку джунгарского хунтайджи!" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
               <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 1-8 / QERFZXC / G / H / Space</div>
@@ -1193,7 +1193,7 @@ function DiplomacyModal({ hud, onClose, onAudience }: {
           <button onClick={onClose} className="rounded-full bg-white/10 p-1.5 text-slate-300 hover:bg-white/20 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         </div>
         <p className="mb-3 text-[11.5px] text-slate-400">
-          Народы не знают о существовании друг друга, пока не встретятся на карте — отправляйте разведчиков 🧭 открывать земли. Соперника видно лишь после контакта.
+          Народы не знают о существовании друг друга, пока не встретятся в степи — отправляйте барлаушы 🧭 открывать земли. Джунгар видно лишь после первого контакта.
         </p>
         {/* наш хан */}
         <div className="mb-2.5 flex items-center gap-3 rounded-2xl border border-amber-300/30 bg-gradient-to-r from-amber-500/15 via-amber-400/5 to-transparent p-2.5">
@@ -1272,7 +1272,7 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
           {win ? <span className="gold-text">ПОБЕДА!</span> : 'ПОРАЖЕНИЕ'}
         </div>
         <p className="mt-1 text-xs font-semibold text-slate-400">
-          {win ? 'Вражеский Городской центр лежит в руинах. Барды будут слагать песни об этом дне.' : 'Ваш Городской центр пал... но легенды возрождаются. Мгновенный реванш?'}
+          {win ? 'Ставка джунгарского хунтайджи лежит в руинах. Жырау будут слагать песни об этом дне.' : 'Ваша ханская ставка пала... но легенды возрождаются. Мгновенный реванш?'}
         </p>
         <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-amber-400/15 px-4 py-1.5 text-sm font-black text-amber-200">
           <Trophy className="h-4 w-4" />{over.score} очков

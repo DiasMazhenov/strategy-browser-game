@@ -344,7 +344,7 @@ export class Game {
   wonderT = 0;                   // таймер удержания Чуда света (0 = нет активного Чуда)
   readonly WONDER_HOLD = 180;    // сколько секунд нужно удержать Чудо до победы
   // ── знакомства с народами (дипломатия Civilization): изначально мы никого не знаем ──
-  rivalMet = false;              // контакт со славянским княжеством установлен
+  rivalMet = false;              // контакт с Джунгарским ханством (главный соперник) установлен
   tribeMet: Record<string, boolean> = {};   // встреченные племена (nationId → true)
   tribeRel: Record<string, FacRel> = {};    // отношение племени: neutral/friend/hostile
   greeting: { nationId: string } | null = null; // всплывшее приветствие правителя (для UI)
@@ -398,7 +398,7 @@ export class Game {
     const isMobile = matchMedia('(pointer: coarse)').matches;
     this.cam.zoom = isMobile ? 0.7 : 0.9;
     this.hint = isMobile ? 'Касание — выбор • Касание земли — приказ • Потяните — рамка выбора' : 'ЛКМ-рамка — выделение • ПКМ — приказ • WASD камера • 1-8 тренировка';
-    this.pushBanner('⚔️ К оружию!', 'Ведите ополчение — охотьтесь на волков на северо-востоке', 3.4);
+    this.pushBanner('⚔️ Аттан!', 'Ведите сарбазов — охотьтесь на волков на северо-востоке', 3.4);
     this.last = performance.now();
     const loop = (t: number) => { if (this.destroyed) return; this.raf = requestAnimationFrame(loop); this.frame(t); };
     this.raf = requestAnimationFrame(loop);
@@ -754,7 +754,7 @@ export class Game {
     this.contactT = 0.8;
     if (!this.settings.fogOfWar) { this.rivalMet = true; for (const n of NATIONS) if (n.kind === 'tribe') this.tribeMet[n.id] = true; }
     else {
-      // встреча со славянским княжеством
+      // встреча с джунгарами (главный соперник)
       if (!this.rivalMet) {
         for (const b of this.blds) {
           if (b.owner !== 'enemy') continue;
@@ -805,9 +805,9 @@ export class Game {
     const nid = g.nationId; this.greeting = null;
     const def = NATION_BY_ID[nid];
     if (nid === 'rival') {
-      if (act === 'warm') { this.grievance = Math.max(0, this.grievance - 10); this.pushBanner('🕊 Дипломатия', 'Князь Ратибор принял вас учтиво — отношения тёплые', 3.5); }
-      else if (act === 'giftBig') { if (this.res.gold >= 75) { this.res.gold -= 75; this.grievance = Math.max(0, this.grievance - 28); this.pushBanner('🎁 Дары князю', 'Ратибор доволен богатыми дарами — неприязнь отступила', 3.5); } else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 75 🪙', '#f87171', 15); } }
-      else if (act === 'cold') { this.grievance = Math.min(100, this.grievance + 14); this.casusBelli = Math.max(this.casusBelli, 0.35); this.pushBanner('⚔️ Холодный приём', 'Князь нахмурился: эту дерзость он запомнит', 3.5); }
+      if (act === 'warm') { this.grievance = Math.max(0, this.grievance - 10); this.pushBanner('🕊 Дипломатия', `${def.title} ${def.ruler} принял вас учтиво — отношения тёплые`, 3.5); }
+      else if (act === 'giftBig') { if (this.res.gold >= 75) { this.res.gold -= 75; this.grievance = Math.max(0, this.grievance - 28); this.pushBanner('🎁 Дары хунтайджи', `${def.ruler} доволен богатыми дарами — неприязнь отступила`, 3.5); } else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 75 🪙', '#f87171', 15); } }
+      else if (act === 'cold') { this.grievance = Math.min(100, this.grievance + 14); this.casusBelli = Math.max(this.casusBelli, 0.35); this.pushBanner('⚔️ Холодный приём', `${def.title} нахмурился: эту дерзость он запомнит`, 3.5); }
     } else {
       // племя
       if (act === 'gift') {
@@ -1290,7 +1290,7 @@ export class Game {
         b.rallyX = node ? node.x : x; b.rallyY = node ? node.y : y;
         this.spawnRing(b.rallyX, b.rallyY, node ? '#a3e635' : '#f6d47c');
         this.sound.move();
-        if (node) this.floater(node.x, node.y - 30, 'Крестьяне пойдут на ресурс', '#a3e635', 13);
+        if (node) this.floater(node.x, node.y - 30, 'Шаруа пойдут на добычу', '#a3e635', 13);
       }
       this.rallyArmed = false; this.pushHud(); return;
     }
@@ -1519,9 +1519,9 @@ export class Game {
 
   enterPlacement(key: BuildingKey) {
     if (this.paused || this.over) return;
-    if (key === 'tower' && this.age < 1) { this.floater(this.cam.x, this.cam.y - 100, 'Башням нужен Феодальный век!', '#f87171', 18); this.sound.error(); return; }
-    if (key === 'stable' && this.age < 1) { this.floater(this.cam.x, this.cam.y - 100, 'Конюшне нужен Феодальный век!', '#f87171', 18); this.sound.error(); return; }
-    if (key === 'blacksmith' && this.age < 2) { this.floater(this.cam.x, this.cam.y - 100, 'Кузнице нужен Замковый век!', '#f87171', 18); this.sound.error(); return; }
+    if (key === 'tower' && this.age < 1) { this.floater(this.cam.x, this.cam.y - 100, 'Башням нужен Век жузов!', '#f87171', 18); this.sound.error(); return; }
+    if (key === 'stable' && this.age < 1) { this.floater(this.cam.x, this.cam.y - 100, 'Конюшне нужен Век жузов!', '#f87171', 18); this.sound.error(); return; }
+    if (key === 'blacksmith' && this.age < 2) { this.floater(this.cam.x, this.cam.y - 100, 'Кузнице нужен Век батыров!', '#f87171', 18); this.sound.error(); return; }
     const areq = (BUILDING_DEFS[key] as unknown as { ageReq?: number }).ageReq;
     if (areq != null && this.age < areq) { this.floater(this.cam.x, this.cam.y - 100, `Нужен: ${AGES[areq].name}!`, '#f87171', 18); this.sound.error(); return; }
     const c = BUILDING_DEFS[key].cost;
@@ -1820,7 +1820,7 @@ export class Game {
     if (!vills.length) vills = this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.state === 'idle' || u.state === 'move'));
     vills.sort((a, c) => dist2(a.x, a.y, b.x, b.y) - dist2(c.x, c.y, b.x, b.y));
     const crew = vills.slice(0, 4);
-    if (!crew.length) { this.floater(b.x, b.y - 60, 'Нет свободных крестьян', '#f87171', 14); this.sound.error(); return; }
+    if (!crew.length) { this.floater(b.x, b.y - 60, 'Нет свободных шаруа', '#f87171', 14); this.sound.error(); return; }
     for (const v of crew) { v.state = 'build'; v.buildId = b.id; v.tx = b.x + rand(-50, 50); v.ty = b.y + rand(-46, 46); }
     this.sound.move(); this.sound.playPhrase('за работу');
     this.floater(b.x, b.y - 60, `🔧 Ремонт: ${crew.length} кр.`, '#7dd3fc', 15);
@@ -1839,7 +1839,7 @@ export class Game {
   marketCount(): number { return this.blds.filter(b => b.owner === 'player' && b.key === 'market' && b.done >= 1).length; }
   tradeRate(): number { return this.hasTech('coinage') ? 60 : 100; } // сколько ресурса за 10 золота
   trade(from: 'wood' | 'food'): boolean {
-    if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен: Рынок!', '#f87171', 16); this.sound.error(); return false; }
+    if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен: Базар!', '#f87171', 16); this.sound.error(); return false; }
     const rate = this.tradeRate();
     if (this.res[from] < rate) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${rate} ${from === 'wood' ? '🪵' : '🍖'}`, '#f87171', 16); this.sound.error(); return false; }
     this.res[from] -= rate;
@@ -1868,7 +1868,7 @@ export class Game {
   demolish(buildId: number) {
     const b = this.blds.find(bl => bl.id === buildId);
     if (!b || b.owner !== 'player') return;
-    if (b.key === 'towncenter') { this.floater(b.x, b.y - 50, 'Городской центр снести нельзя', '#f87171', 15); this.sound.error(); return; }
+    if (b.key === 'towncenter') { this.floater(b.x, b.y - 50, 'Ханскую ставку снести нельзя', '#f87171', 15); this.sound.error(); return; }
     // выпустить гарнизон и освободить строителей до удаления
     this.ungarrisonUnits(buildId, false);
     const c = BUILDING_DEFS[b.key].cost;
@@ -2002,9 +2002,9 @@ export class Game {
     this.score += SCORE.ageUp * this.age;
     this.sound.ageup();
     const ageNews: Record<number, string> = {
-      1: 'Войска крепче! Открыты: башни 🗼 и конюшня 🐴 (рыцари/всадники)',
+      1: 'Войско крепче! Открыты: башни 🗼 и конюшня 🐴 (батыры/жасауылы)',
       2: 'Армия сильнее! Открыты: кузница 🔨 и катапульты 🪨',
-      3: 'Имперская мощь! Открыто Чудо света ⭐ — постройте его для победы',
+      3: 'Мощь ханства! Открыт Мавзолей хана ⭐ — постройте его для победы',
     };
     this.pushBanner(`${next.icon} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
     this.burst(HOME.x, HOME.y, 40, ['#f6d47c', '#fff'], 160);
@@ -2036,7 +2036,7 @@ export class Game {
       const nd = this.nearestNode(u.x, u.y, n % 3 === 0 ? 'wood' : n % 3 === 1 ? 'food' : 'gold');
       if (nd) { this.orderGather(u, nd.id); n++; }
     }
-    if (n) { this.sound.move(); this.voiceSel('gather'); this.floater(this.cam.x, this.cam.y - 80, `${n} крестьян отправлено на работу!`, '#a3e635', 17); }
+    if (n) { this.sound.move(); this.voiceSel('gather'); this.floater(this.cam.x, this.cam.y - 80, `${n} шаруа отправлено на работу!`, '#a3e635', 17); }
     this.pushHud();
   }
   nearestNode(x: number, y: number, kind: 'wood' | 'food' | 'gold' | 'fish'): Node | null {
@@ -2076,7 +2076,7 @@ export class Game {
   // циклический прыжок по свободным крестьянам (как клавиша «.» в AoE)
   jumpToIdleVillager() {
     const vills = this.units.filter(u => u.owner === 'player' && u.key === 'villager' && (u.state === 'idle' || u.state === 'move'));
-    if (!vills.length) { this.floater(this.cam.x, this.cam.y - 80, 'Все крестьяне заняты', '#94a3b8', 13); return; }
+    if (!vills.length) { this.floater(this.cam.x, this.cam.y - 80, 'Все шаруа заняты', '#94a3b8', 13); return; }
     const u = vills[this.idleIdx % vills.length];
     this.idleIdx++;
     this.clearSel(); this.selected.add(u.id);
@@ -2297,11 +2297,11 @@ export class Game {
       this.hintT = 0;
       if (this.time < 90) {
         const hints = [
-          'Выберите ополченцев → ПКМ по волкам для охоты (+🍖 +очки)',
-          'Крестьяне: ПКМ по дереву / ягодам / золоту — добыча',
-          'Клавиши 2-8 — армия • Q дом • E казармы • Z конюшня • X кузница • C рынок',
-          'Стройте фермы (F) — бесконечная еда • Башни (R) — оборона',
-          'Кузница строит катапульты (7) • Рынок — монахов-лекарей (8)!',
+          'Выберите сарбазов → ПКМ по волкам для охоты (+🍖 +очки)',
+          'Шаруа: ПКМ по дереву / ягодам / золоту — добыча',
+          'Клавиши 2-8 — войско • Q юрта • E казармы • Z конюшня • X кузница • C базар',
+          'Стройте пашни (F) — бесконечная еда • Башни (R) — оборона',
+          'Кузница строит катапульты (7) • Базар — баксы-лекарей (8)!',
           'Жмите T для перехода в новую эпоху, когда хватает ресурсов!',
         ];
         this.hint = hints[((this.time / 6) | 0) % hints.length];
@@ -3790,7 +3790,7 @@ export class Game {
     this.trauma = Math.min(1, this.trauma + (b.key === 'towncenter' ? 1 : 0.55));
     this.burst(b.x, b.y - 20, 46, ['#f59e0b', '#78716c', '#44403c', '#fde68a'], 220, 1.1);
     this.burst(b.x, b.y - 30, 20, ['#ef4444', '#f97316'], 160, 0.9);
-    this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '💥 ГОРОДСКОЙ ЦЕНТР УНИЧТОЖЕН!' : `💥 ${BUILDING_DEFS[b.key].name} разрушен(о)!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
+    this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '💥 ХАНСКАЯ СТАВКА УНИЧТОЖЕНА!' : `💥 ${BUILDING_DEFS[b.key].name} разрушен(о)!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
     if (byOwner === 'player' && b.owner === 'enemy') {
       this.razed++;
       const pts = b.key === 'towncenter' ? SCORE.tc : SCORE.building;
@@ -3834,7 +3834,7 @@ export class Game {
               this.wonderT = this.WONDER_HOLD;
               this.atWar = true; this.casusBelli = 1.1; this.morale = 1.12;
               this.sound.ageup();
-              this.pushBanner('⭐ ЧУДО СВЕТА ВОЗВЕДЕНО!', `Защитите монумент ${Math.round(this.WONDER_HOLD / 60)} мин — и империя победит! Сосед идёт на штурм!`, 6);
+              this.pushBanner('⭐ МАВЗОЛЕЙ ХАНА ВОЗВЕДЁН!', `Защитите монумент ${Math.round(this.WONDER_HOLD / 60)} мин — и ханство победит! Джунгары идут на штурм!`, 6);
               this.waveT = Math.min(this.waveT, 10);
               this.trauma = Math.min(1, this.trauma + 0.3);
             }
@@ -4126,13 +4126,13 @@ export class Game {
     // объявление войны: высокая неприязнь + достаточно повода + мы не сильно слабее.
     // Пакт о ненападении полностью запрещает ИИ объявлять войну, пока действует.
     // ВАЖНО (Civilization-стиль): пока народы НЕ встретились, войны быть не может —
-    // набеги стартуют только после контакта с княжеством.
+    // набеги стартуют только после контакта с джунгарами.
     const wantsWar = this.rivalMet && this.napT <= 0 && this.grievance >= 62 && this.casusBelli >= 0.5 && em >= pm * 0.7;
     if (wantsWar) {
       let reason = 'вам объявили войну';
-      if (wonder) reason = 'ваше Чудо света угрожает их господству';
+      if (wonder) reason = 'ваш Мавзолей хана угрожает их господству';
       else if (this.age > this.eage) reason = 'вы обогнали их в развитии';
-      else if (pm > em * 1.6) reason = 'вы слишком сильны — сосед нападает на упреждение';
+      else if (pm > em * 1.6) reason = 'вы слишком сильны — джунгары бьют на упреждение';
       else reason = 'накопились территориальные споры';
       this.declareWar(reason, this.casusBelli);
     }
@@ -4153,7 +4153,7 @@ export class Game {
     const just = cb >= 0.85;
     this.pushBanner(
       just ? '⚔️ ВОЙНА ОБЪЯВЛЕНА!' : '⚠️ ВЕРОЛОМНОЕ НАПАДЕНИЕ!',
-      `Соперник напал: ${reason}. ${just ? 'Их армия сражается с полным боевым духом.' : 'Повод надуман — их войска неуверенны (−боевая мощь).'}`,
+      `Джунгары напали: ${reason}. ${just ? 'Их армия сражается с полным боевым духом.' : 'Повод надуман — их войска неуверенны (−боевая мощь).'}`,
       5
     );
     this.trauma = Math.min(1, this.trauma + 0.3);
@@ -4171,7 +4171,7 @@ export class Game {
     this.grievance = Math.max(0, this.grievance - 28);
     this.casusBelli = Math.max(0, this.casusBelli - 0.2);
     this.sound.coin();
-    this.pushBanner('🤝 Дары отправлены', 'Сосед доволен — неприязнь снижена, война отсрочена', 3);
+    this.pushBanner('🤝 Дары отправлены', 'Хунтайджи доволен — неприязнь снижена, война отсрочена', 3);
     this.pushHud();
     return true;
   }
@@ -4180,7 +4180,7 @@ export class Game {
   openTradeRoute(): boolean {
     if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Нельзя торговать во время войны', '#f87171', 15); this.sound.error(); return false; }
     if (this.tradeRoute) { this.floater(this.cam.x, this.cam.y - 100, 'Торговля уже идёт', '#94a3b8', 14); return false; }
-    if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен Рынок для торговли!', '#f87171', 15); this.sound.error(); return false; }
+    if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен Базар для торговли!', '#f87171', 15); this.sound.error(); return false; }
     const cost = 60;
     if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙 на караван`, '#f87171', 15); this.sound.error(); return false; }
     this.res.gold -= cost;
@@ -4202,7 +4202,7 @@ export class Game {
     this.napT = 120; // 2 минуты гарантированного мира
     this.grievance = Math.max(0, this.grievance - 6);
     this.sound.quest();
-    this.pushBanner('📜 Пакт о ненападении подписан', 'Сосед не нападёт ~2 минуты. Если он всё же нарушит слово — у вас будет полное право на войну', 4.5);
+    this.pushBanner('📜 Пакт о ненападении подписан', 'Джунгары не нападут ~2 минуты. Если хунтайджи нарушит слово — у вас будет полное право на войну', 4.5);
     this.pushHud();
     return true;
   }
@@ -4211,12 +4211,12 @@ export class Game {
   //    агрессия несправедлива → низкий боевой дух), но слегка поднимает неприязнь ──
   condemnNeighbor(): boolean {
     if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Осуждение имеет смысл в мирное время', '#94a3b8', 14); return false; }
-    if (this.condemned) { this.floater(this.cam.x, this.cam.y - 100, 'Сосед уже осуждён', '#94a3b8', 14); return false; }
+    if (this.condemned) { this.floater(this.cam.x, this.cam.y - 100, 'Джунгары уже осуждены', '#94a3b8', 14); return false; }
     this.condemned = true;
     this.grievance = Math.min(100, this.grievance + 12);
     this.casusBelli = Math.min(this.casusBelli, 0.5);
     this.sound.ack('soldier');
-    this.pushBanner('📢 Сосед ОСУЖДЁН', 'Ваше порицание озвучено публично: теперь у соседа нет «чистого повода» для войны (его атака будет вероломной → низкий боевой дух), но он раздражён', 4.5);
+    this.pushBanner('📢 ДЖУНГАРЫ ОСУЖДЕНЫ', 'Ваше порицание озвучено на всю степь: теперь у хунтайджи нет «чистого повода» для войны (его атака будет вероломной → низкий боевой дух), но он раздражён', 4.5);
     this.pushHud();
     return true;
   }
@@ -4226,14 +4226,14 @@ export class Game {
   demandTribute(): boolean {
     if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Дань требуют с позиции силы в мирное время', '#94a3b8', 14); return false; }
     const pm = this.milStrength('player'), em = this.milStrength('enemy');
-    if (pm < em * 1.25) { this.floater(this.cam.x, this.cam.y - 100, 'Сосед не считает вас сильнее — наберите армию', '#f87171', 15); this.sound.error(); return false; }
+    if (pm < em * 1.25) { this.floater(this.cam.x, this.cam.y - 100, 'Хунтайджи не считает вас сильнее — наберите войско', '#f87171', 15); this.sound.error(); return false; }
     const immediate = 80 + Math.min(120, Math.round((pm - em) / 25));
     this.res.gold += immediate;
     this.tributeT = 30; this.tributeGold = Math.round(immediate * 0.6);
     this.grievance = Math.min(100, this.grievance + 14);
     this.casusBelli = Math.max(this.casusBelli, 0.4);
     this.sound.coin();
-    this.pushBanner('💰 Дань получена', `Сосед выплачивает +${immediate}🪙 сразу и будет платить ещё. Но унижение не забыто — копится обида`, 4);
+    this.pushBanner('💰 Дань получена', `Джунгары выплачивают +${immediate}🪙 сразу и будут платить ещё. Но унижение не забыто — копится обида`, 4);
     this.pushHud();
     return true;
   }
@@ -4253,7 +4253,7 @@ export class Game {
     // мир обнуляет взаимные претензии: осуждение снимается, пакт/дань/торговля сброшены
     this.condemned = false; this.napT = 0; this.tributeT = 0; this.tradeRoute = false;
     this.sound.quest();
-    this.pushBanner('🕊️ Мир заключён', auto ? 'Соперник сам предложил мир — война была несправедливой' : 'Переговоры успешны — у вас снова мир', 4);
+    this.pushBanner('🕊️ Мир заключён', auto ? 'Хунтайджи сам запросил мир — война была несправедливой' : 'Переговоры успешны — у вас снова мир', 4);
     // вражеские войска возвращаются к обороне
     for (const u of this.units) if (u.owner === 'enemy' && u.key !== 'villager') { u.state = 'idle'; u.targetU = -1; u.targetB = -1; }
     this.waveT = DIFF[this.difficulty].waveInterval;
@@ -4269,7 +4269,7 @@ export class Game {
     if (!this.atWar) {
       this.declareWar('вы первыми нарушили мир', 1.1);
       // мы агрессоры — у ИИ ополчение обороняется решительно
-      this.pushBanner('Вы начали войну', 'Теперь соперник сражается за свою землю с высоким боевым духом', 4);
+      this.pushBanner('Вы начали войну', 'Теперь джунгары сражаются за свою землю с высоким боевым духом', 4);
     }
   }
 
@@ -4407,10 +4407,10 @@ export class Game {
       banner,
       quests: [
         { id: 'wood', label: 'Нарубить 60 🪵', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
-        { id: 'army', label: 'Обучить 3 воинов', done: !!this.questsDone.army, progress: `${Math.min(3, this.soldiersTrained)}/3` },
+        { id: 'army', label: 'Собрать 3 сарбазов', done: !!this.questsDone.army, progress: `${Math.min(3, this.soldiersTrained)}/3` },
         { id: 'rax', label: 'Построить казармы (E)', done: !!this.questsDone.rax, progress: this.barracksBuilt ? '1/1' : '0/1' },
         { id: 'wolf', label: 'Убить 4 волка', done: !!this.questsDone.wolf, progress: `${Math.min(4, this.wolvesSlain)}/4` },
-        { id: 'age', label: 'Дойти до Феодализма (T)', done: !!this.questsDone.age, progress: this.age >= 1 ? '1/1' : '0/1' },
+        { id: 'age', label: 'Открыть Век жузов (T)', done: !!this.questsDone.age, progress: this.age >= 1 ? '1/1' : '0/1' },
       ],
       muted: this.muted, idleVills, relics: this.relicsHeld,
       pTc: ptc ? Math.max(0, Math.ceil(ptc.hp)) : 0, pTcMax: ptc ? ptc.maxHp : 1,
