@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.061';
+export const GAME_VERSION = '1.0.062';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -523,6 +523,7 @@ export default function App() {
                   <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={BUILDING_DEFS.barracks.cost} ok={canAfford(BUILDING_DEFS.barracks.cost)} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
                   <TrainBtn label="Башня" icon="🗼" key_="R" cost={BUILDING_DEFS.tower.cost} ok={canAfford(BUILDING_DEFS.tower.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
                   <TrainBtn label="Пашня" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
+                  <TrainBtn label="Склад" icon="📦" key_="K" cost={BUILDING_DEFS.storehouse.cost} ok={canAfford(BUILDING_DEFS.storehouse.cost)} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
                   <TrainBtn label="Загон" icon="🐑" key_="H" cost={BUILDING_DEFS.pen.cost} ok={canAfford(BUILDING_DEFS.pen.cost)} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
                   <TrainBtn label="Конюшня" icon="🐴" key_="Z" cost={BUILDING_DEFS.stable.cost} ok={canAfford(BUILDING_DEFS.stable.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
                   <TrainBtn label="Кузница" icon="🔨" key_="X" cost={BUILDING_DEFS.blacksmith.cost} ok={canAfford(BUILDING_DEFS.blacksmith.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
@@ -889,7 +890,7 @@ function ControlsRecap() {
     <div className="mt-4 grid grid-cols-2 gap-1.5 text-left text-[10.5px] font-semibold text-slate-400">
       <div className="rounded-lg bg-white/5 p-2">🖱️ <b className="text-slate-200">Выбор:</b> рамка / двойной клик по типу</div>
       <div className="rounded-lg bg-white/5 p-2">⚔️ <b className="text-slate-200">Приказ:</b> правый клик / касание цели</div>
-      <div className="rounded-lg bg-white/5 p-2">⌨️ <b className="text-slate-200">Клавиши:</b> 1-8 тренировка • Q/E/R/F/Z/X/C стройка • B/V стена/ворота (зажмите и тяните — протяжка) • W Чудо • L дерево технологий • G атака-мув • Y патруль • Ctrl/Alt+1..5 группы</div>
+      <div className="rounded-lg bg-white/5 p-2">⌨️ <b className="text-slate-200">Клавиши:</b> 1-8 тренировка • Q/E/R/F/K/Z/X/C стройка • B/V стена/ворота (зажмите и тяните — протяжка) • W Чудо • L дерево технологий • G атака-мув • Y патруль • Ctrl/Alt+1..5 группы</div>
       <div className="rounded-lg bg-white/5 p-2">🐑 <b className="text-slate-200">Скот и дичь:</b> овцы, коровы и олени пасутся стадами и дают еду; волки и воины их вспугивают</div>
       <div className="rounded-lg bg-white/5 p-2">📿 <b className="text-slate-200">Реликвии:</b> отправьте баксы (или любого юнита) правым кликом на сияющий сундук — +золото и пассивный доход</div>
       <div className="rounded-lg bg-white/5 p-2">📷 <b className="text-slate-200">Камера:</b> WASD • колесо • мини-карта • «.» прыжок к свободному шаруа</div>
@@ -920,6 +921,7 @@ function bldIcon(k: BuildingKey) {
   if (k === 'blacksmith') return '🔨';
   if (k === 'market') return '🏪';
   if (k === 'pen') return '🐑';
+  if (k === 'storehouse') return '📦';
   if (k === 'wonder') return '⭐';
   if (k === 'wall') return '🧱';
   if (k === 'gate') return '🚪';
@@ -1031,12 +1033,12 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
             <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-300">
               <HowRow n="1" t="Сарбазы уже выбраны — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
               <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
-              <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда." />
+              <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда. Склад (K) у дальней рощи — шаруа сдают добычу туда, а не в ставку." />
               <HowRow n="4" t="Юрта (Q) для населения → Казармы (E) → Сарбазы (2) и Мергены (3). Конюшня (Z) даёт жасауылов, кузница (X) — катапульты, базар (C) — баксы-лекарей." />
               <HowRow n="5" t="Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами. Победа — сжечь ставку джунгарского хунтайджи!" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
-              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 1-8 / QERFZXC / G / H / Space</div>
+              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 1-9 / QERFKZXC / G / H / Space</div>
               <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>Касание — выбор • касание земли — приказ • Рамка/Камера • щипковый зум • прыжок по мини-карте</div>
             </div>
           </div>

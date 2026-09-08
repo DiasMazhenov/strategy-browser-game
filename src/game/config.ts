@@ -54,6 +54,7 @@ export const BUILDING_DEFS = {
   stable:     { name: 'Конюшня',       hp: 650,  size: 92,  cost: { wood: 180, food: 0, gold: 0 }, buildTime: 15, sight: 200, attack: null, desc: 'Растит боевых коней для жасауылов' },
   blacksmith: { name: 'Кузница',       hp: 600,  size: 80,  cost: { wood: 160, food: 0, gold: 60 }, buildTime: 15, sight: 180, attack: null, desc: 'Кует оружие и осадные орудия' },
   market:     { name: 'Базар',         hp: 400,  size: 72,  cost: { wood: 150, food: 0, gold: 0 }, buildTime: 12, sight: 160, attack: null, desc: 'Караванная торговля: +золото и баксы' },
+  storehouse: { name: 'Қойма (склад)', hp: 420,  size: 68,  cost: { wood: 100, food: 0, gold: 0 }, buildTime: 10, sight: 180, attack: null, desc: 'Шаруа сдают добычу сюда, а не в ставку — ставьте у дальних рощ и жил' },
   tower:      { name: 'Сторожевая башня', hp: 550, size: 56, cost: { wood: 120, food: 0, gold: 80 }, buildTime: 14, sight: 300, attack: { dmg: 12, range: 215, cd: 1.1 }, desc: 'Мергены на башне бьют по врагам' },
   farm:       { name: 'Пашня',         hp: 220,  size: 72,  cost: { wood: 90, food: 0, gold: 0 }, buildTime: 8,  sight: 140, attack: null, desc: 'Бесконечная еда' },
   pen:        { name: 'Загон для скота', hp: 380, size: 110, cost: { wood: 160, food: 0, gold: 0 }, buildTime: 12, sight: 170, attack: null, desc: 'Пастух пригоняет сюда овец и коров' },

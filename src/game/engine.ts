@@ -29,6 +29,7 @@ import kzImgFarm from '../assets/sprites/kz/kz_farm.png';
 import kzImgPen from '../assets/sprites/kz/kz_pen.png';
 import kzImgStable from '../assets/sprites/kz/kz_stable.png';
 import kzImgMarket from '../assets/sprites/kz/kz_market.png';
+import kzImgStorehouse from '../assets/sprites/kz/kz_storehouse.png';
 import kzImgBlacksmith from '../assets/sprites/kz/kz_blacksmith.png';
 import kzImgWall from '../assets/sprites/kz/kz_wall.png';
 import kzImgGate from '../assets/sprites/kz/kz_gate.png';
@@ -48,6 +49,7 @@ const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
 const KZ_SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
   towncenter: kzImgTowncenter, house: kzImgHouse, barracks: kzImgBarracks, tower: kzImgTower, farm: kzImgFarm, pen: kzImgPen,
   stable: kzImgStable, market: kzImgMarket, blacksmith: kzImgBlacksmith, wall: kzImgWall, gate: kzImgGate,
+  storehouse: kzImgStorehouse,
 };
 interface BldSprite { img: HTMLImageElement; flash: HTMLCanvasElement | null; ax: number; ay: number; baseW: number }
 const BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
@@ -84,7 +86,9 @@ for (const k of Object.keys(KZ_SPRITE_URLS) as BuildingKey[]) {
 // игрок (казахская раса) получает восточные здания, прочие — штатные.
 function placeBld(b: Bld, S: number) {
   const kz = b.owner === 'player' && KZ_BLD_SPRITES[b.key];
-  const sp = (kz ? KZ_BLD_SPRITES[b.key]! : BLD_SPRITES[b.key]!) || BLD_SPRITES[b.key]!;
+  // у некоторых построек (склад) европейского аналога нет — падаем на казахский спрайт,
+  // иначе неигроковый владелец получил бы undefined и рендер бы упал
+  const sp = (kz ? KZ_BLD_SPRITES[b.key]! : BLD_SPRITES[b.key]!) || BLD_SPRITES[b.key]! || KZ_BLD_SPRITES[b.key]!;
   const fit = 1.02;
   const scale = (2 * S * fit) / sp.baseW;
   return sp.img.complete && sp.img.naturalWidth ? { sp, scale, ready: true } : { sp, scale, ready: false };
@@ -901,13 +905,13 @@ export class Game {
     else if (k === 'z') this.enterPlacement('stable');
     else if (k === 'x') this.enterPlacement('blacksmith');
     else if (k === 'c') this.enterPlacement('market');
+    else if (k === 'k') this.enterPlacement('storehouse');
     else if (k === 'b') this.enterPlacement('wall');
     else if (k === 'v') this.enterPlacement('gate');
     else if (k === 'w') this.enterPlacement('wonder');
     else if (k === 't') this.ageUp();
     else if (k === 'g') { if (this.selUnits().length) { this.attackArmed = !this.attackArmed; this.rallyArmed = false; this.patrolArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === 'y') { if (this.selUnits().some(u => u.key !== 'villager')) { this.patrolArmed = !this.patrolArmed; this.attackArmed = false; this.sound.select(); this.pushHud(); } }
-    else if (k === 'h') this.centerOn(HOME.x, HOME.y);
     else if (k === '.' || k === 'ю') this.jumpToIdleVillager();
     else if (k === 'm') this.toggleMute();
     else if (k === '+' || k === '=') this.zoomBy(0.15);
@@ -2119,17 +2123,23 @@ export class Game {
   deposit(v: Unit) {
     if (v.carry.amt <= 0) return;
     const amt = Math.floor(v.carry.amt);
-    if (v.carry.type === 'wood') { this.res.wood += amt; this.woodGathered += amt; }
-    else if (v.carry.type === 'food') this.res.food += amt;
-    else this.res.gold += amt;
-    this.gatheredTotal += amt;
-    this.score += amt * 0.35;
-    const cols: Record<string, string> = { wood: '#d6a45c', food: '#fda4af', gold: '#fde047' };
-    const icons: Record<string, string> = { wood: '🪵', food: '🍖', gold: '🪙' };
-    this.floater(v.x, v.y - 26, `+${amt} ${icons[v.carry.type]}`, cols[v.carry.type], 14);
-    if (Math.random() < 0.4) { if (v.carry.type === 'gold') this.sound.coin(); }
+    // ФИКС: сдача идёт в казну ВЛАДЕЛЬЦА. Раньше добыча вражеских шаруа капала игроку
+    // (updateVillager крутится для обеих сторон, а deposit писал только в this.res).
+    const bank = v.owner === 'enemy' ? this.eres : this.res;
+    if (v.carry.type === 'wood') bank.wood += amt;
+    else if (v.carry.type === 'food') bank.food += amt;
+    else bank.gold += amt;
+    if (v.owner === 'player') {
+      if (v.carry.type === 'wood') this.woodGathered += amt;
+      this.gatheredTotal += amt;
+      this.score += amt * 0.35;
+      const cols: Record<string, string> = { wood: '#d6a45c', food: '#fda4af', gold: '#fde047' };
+      const icons: Record<string, string> = { wood: '🪵', food: '🍖', gold: '🪙' };
+      this.floater(v.x, v.y - 26, `+${amt} ${icons[v.carry.type]}`, cols[v.carry.type], 14);
+      if (Math.random() < 0.4) { if (v.carry.type === 'gold') this.sound.coin(); }
+    }
     v.carry.amt = 0;
-    this.checkQuests();
+    if (v.owner === 'player') this.checkQuests();
   }
 
   checkQuests() {
@@ -2144,7 +2154,7 @@ export class Game {
     q('army', this.soldiersTrained >= 3, () => { this.res.wood += 60; this.res.gold += 40; }, '+60 🪵 +40 🪙 — время набега!');
     q('rax', this.barracksBuilt >= 1, () => { this.res.food += 80; }, '+80 🍖 — обучайте орду!');
     q('wolf', this.wolvesSlain >= 4, () => { this.res.gold += 100; }, '+100 🪙 — грозный хищник!');
-    q('age', this.age >= 1, () => { this.res.wood += 120; }, '+120 🪵 — мощь феодализма!');
+    q('age', this.age >= 1, () => { this.res.wood += 120; }, '+120 🪵 — мощь Века жузов!');
   }
 
   // ---------- update ----------
@@ -2935,7 +2945,8 @@ export class Game {
           u.gatherT = 0; u.wphase = 0;
           u.carry = { type: 'food', amt: u.carry.amt + 2 * this.gatherMult() };
           this.burst(u.x, u.y - 8, 2, ['#a3e635', '#65a30d'], 50, 0.5);
-          if (u.carry.amt >= this.carryCap()) { this.res.food += Math.floor(u.carry.amt); this.gatheredTotal += u.carry.amt; this.score += u.carry.amt * 0.35; this.floater(u.x, u.y - 24, `+${Math.floor(u.carry.amt)} 🍖`, '#fda4af', 13); u.carry.amt = 0; this.checkQuests(); }
+          // ферма отдаёт еду на месте (без похода на склад) — но в казну ВЛАДЕЛЬЦА
+          if (u.carry.amt >= this.carryCap()) this.deposit(u);
           if (Math.random() < 0.25) this.sound.gatherFood();
         }
         return;
@@ -3056,14 +3067,14 @@ export class Game {
     return best;
   }
 
+  // Точка сдачи ресурса: ханская ставка ИЛИ склад (Қойма). Как лесопилка/рудник в AoE —
+  // склад у дальней рощи резко срезает путь шаруа, поэтому берём БЛИЖАЙШУЮ из точек.
   nearestDrop(u: Unit): Bld | null {
-    void u;
     let best: Bld | null = null; let bd = 1e15;
-    // villagers drop at TC (farms trickle directly)
     for (const b of this.blds) {
-      if (b.owner !== 'player' && u.owner === 'player') continue;
-      if (b.owner !== 'enemy' && u.owner === 'enemy') continue;
-      if (b.key !== 'towncenter' || b.done < 1) continue;
+      if (b.owner !== u.owner) continue;
+      if (b.key !== 'towncenter' && b.key !== 'storehouse') continue;
+      if (b.done < 1) continue;
       const d = dist2(u.x, u.y, b.x, b.y);
       if (d < bd) { bd = d; best = b; }
     }

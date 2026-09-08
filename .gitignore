@@ -6,7 +6,7 @@ dist/
 raw/
 
 # scratch / dev tooling (не часть игры)
-plan.md
+# plan.md — ВЕРСИОНИРУЕТСЯ с 1.0.062: это дорожная карта улучшений (AoE/Civ), не скретч
 tile-test.png
 # одноразовые скретч-скрипты (рабочая версия обработчика спрайтов — scripts/process-art.cjs)
 scripts/proc.cjs
