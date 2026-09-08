@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.080';
+export const GAME_VERSION = '1.0.081';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -543,7 +543,7 @@ export default function App() {
 
       {/* placement / attack banners */}
       {hud?.placement && (
-        <div className="absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto flex items-center gap-2 rounded-full border border-lime-300/50 bg-lime-950/90 px-4 py-1.5 text-xs font-bold text-lime-200">
             🏗️ Строим: {BUILDING_DEFS[hud.placement].name} — кликните по карте
             <button onClick={() => g()?.cancelPlacement()} className="rounded-full bg-white/10 p-1"><X className="h-3.5 w-3.5" /></button>
@@ -551,7 +551,7 @@ export default function App() {
         </div>
       )}
       {hud?.attackArmed && !hud?.placement && (
-        <div className="absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto rounded-full border border-red-300/50 bg-red-950/90 px-4 py-1.5 text-xs font-bold text-red-200">
             🎯 Атака-мув готова — укажите точку набега! (Esc — отмена)
           </div>
@@ -559,7 +559,7 @@ export default function App() {
       )}
 
       {/* ===== BOTTOM DOCK ===== */}
-      <div className="absolute inset-x-0 bottom-0 z-20 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto max-w-3xl px-2">
           <div className="panel-iron pointer-events-auto rounded-2xl p-2">
             {/* вкладки: Войска / Стройка */}

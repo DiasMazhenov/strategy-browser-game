@@ -52,6 +52,26 @@ console.log('\n=== 2. Прокрутка только по клику ===');
   ok(/drawEdgeArrows/.test(eng), 'стрелки рисуются');
 }
 
+console.log('\n=== 2b. HUD не перехватывает мышь у краёв карты ===');
+{
+  const app = readFileSync(join(root, 'src/App.tsx'), 'utf8');
+  // Контейнеры-обёртки во всю ширину (inset-x-0) обязаны быть прозрачными для
+  // мыши, иначе стрелка прокрутки у нижнего края не появляется: див дока ловит
+  // события вместо канваса. Сами панели внутри помечены pointer-events-auto.
+  const bad = [];
+  const re = /<div className="([^"]*absolute[^"]*inset-x-0[^"]*)"/g;
+  let m;
+  while ((m = re.exec(app))) {
+    const cls = m[1];
+    if (/top-0/.test(cls)) continue;                 // верхняя панель уже прозрачна
+    if (!/pointer-events-none/.test(cls)) bad.push(cls.slice(0, 60));
+  }
+  ok(bad.length === 0,
+    `растянутые контейнеры HUD прозрачны для мыши${bad.length ? ': ' + bad.join(' | ') : ''}`);
+  const eng2 = eng.slice(eng.indexOf('edgeArrowAt(sx: number'), eng.indexOf('updateEdgeArrows()'));
+  ok(/minimap/.test(eng2), 'над миникартой стрелка прокрутки не показывается');
+}
+
 console.log('\n=== 3. Курсоры действий ===');
 {
   for (const n of ['attack', 'wood', 'gold', 'food', 'fish', 'build', 'move']) {

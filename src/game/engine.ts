@@ -1795,6 +1795,12 @@ export class Game {
   // не рисуем, иначе они наезжают друг на друга.
   edgeArrowAt(sx: number, sy: number): '' | 'l' | 'r' | 'u' | 'd' {
     if (this.mouse.isTouch) return '';           // на тач-экране жест панорамы удобнее
+    // Миникарта сидит в правом нижнем углу — прямо в зоне стрелок «вниз» и
+    // «вправо». Клик по ней перехватывается раньше, поэтому и стрелку там
+    // не показываем: иначе она обещала бы прокрутку, а карта прыгала бы.
+    const mm = this.minimap;
+    if (mm.w > 0 && sx >= mm.x - 6 && sx <= mm.x + mm.w + 6
+      && sy >= mm.y - 6 && sy <= mm.y + mm.h + 6) return '';
     if (sy < EDGE_ZONE) return 'u';
     if (sy > this.vh - EDGE_ZONE) return 'd';
     if (sx < EDGE_ZONE) return 'l';
@@ -6583,9 +6589,16 @@ export class Game {
     if (!this.edgeDir || this.over) return;
     const dir = this.edgeDir;
     const w = this.vw, h = this.vh;
-    // центр стрелки прижат к своему краю
-    const cx = dir === 'l' ? EDGE_ZONE * 0.55 : dir === 'r' ? w - EDGE_ZONE * 0.55 : w / 2;
-    const cy = dir === 'u' ? EDGE_ZONE * 0.55 : dir === 'd' ? h - EDGE_ZONE * 0.55 : h / 2;
+    // Стрелка ИДЁТ ЗА КУРСОРОМ вдоль своего края, а не висит в центре стороны:
+    // так кнопка всегда там, куда игрок уже подвёл мышь. Поперёк края позиция
+    // фиксирована (прижата к краю), вдоль края — следует за курсором и
+    // ограничивается полями, чтобы стрелка не вылезала за угол экрана.
+    const near = EDGE_ZONE * 0.55;      // отступ от края (поперёк)
+    const pad = EDGE_ZONE * 0.9;        // поля вдоль края
+    const cx = dir === 'l' ? near : dir === 'r' ? w - near
+      : clamp(this.mouse.x, pad, w - pad);
+    const cy = dir === 'u' ? near : dir === 'd' ? h - near
+      : clamp(this.mouse.y, pad, h - pad);
     const ang = dir === 'l' ? Math.PI : dir === 'r' ? 0 : dir === 'u' ? -Math.PI / 2 : Math.PI / 2;
     const pulse = 1 + Math.sin(this.time * 4) * 0.05 + this.edgeFlash * 0.35;
     const R = 21 * pulse;
