@@ -1,12 +1,13 @@
 // Проверка посадки сценок отдыха: экранная высота и ширина в пределах разумного.
 const fs=require('fs');
+// высоты соответствуют формулам pixelart.ts: swing ×1.9, kazan ×1.0, asyk ×0.65 от 46px
 const A={
-  kz_swing_l:{ax:50.3,ay:150,h:150,H:72}, kz_swing_c:{ax:52.1,ay:150,h:150,H:72},
-  kz_swing_r:{ax:51.2,ay:150,h:150,H:72},
-  kz_kazan_a:{ax:63.2,ay:149,h:150,H:54}, kz_kazan_b:{ax:57,ay:173,h:150,H:54},
-  kz_kazan_c:{ax:57.5,ay:152,h:150,H:54},
-  kz_asyk_a:{ax:112.8,ay:150,h:150,H:50}, kz_asyk_b:{ax:111.3,ay:151,h:150,H:50},
-  kz_asyk_c:{ax:54.5,ay:231,h:150,H:50},
+  kz_swing_l:{ax:50.3,ay:150,h:150,H:87}, kz_swing_c:{ax:52.1,ay:150,h:150,H:87},
+  kz_swing_r:{ax:51.2,ay:150,h:150,H:87},
+  kz_kazan_a:{ax:60.7,ay:151,h:150,H:46}, kz_kazan_b:{ax:60.7,ay:151,h:150,H:46},
+  kz_kazan_c:{ax:60.5,ay:151,h:150,H:46},
+  kz_asyk_a:{ax:112.8,ay:150,h:150,H:30}, kz_asyk_b:{ax:111.3,ay:151,h:150,H:30},
+  kz_asyk_c:{ax:54.5,ay:231,h:150,H:30},
 };
 const png=f=>{const b=fs.readFileSync(f);return{w:b.readUInt32BE(16),h:b.readUInt32BE(20)}};
 let bad=0;

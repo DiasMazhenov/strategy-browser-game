@@ -641,10 +641,19 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   }
   const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
   const femMilking = isKz && isVill && (u as U & { female?: boolean }).female && anKey === 'kz_fem_milk';
-  // сценки отдыха крупнее обычного шаруа: алтыбакан — рама в полный рост,
-  // казан и асыки — фигура с утварью, иначе они выглядели бы игрушечными
-  const restH = anKey.startsWith('kz_swing') ? 72 : anKey.startsWith('kz_kazan') ? 54
-    : anKey.startsWith('kz_asyk') ? 50 : 0;
+  // ── МАСШТАБ СЦЕНОК ОТДЫХА ──
+  // Считаем от роста шаруа (46px), а не «на глаз»: человек внутри сценки обязан быть
+  // ростом с обычного работника. Нарезчик нормирует САМУЮ НИЗКУЮ фигуру полосы в 150
+  // логических px, поэтому эталон у каждой сценки свой:
+  //   swing — эталоном стала вся РАМА алтыбакана (~3.2 м против роста 1.7 м) → ×1.9;
+  //   kazan — эталон женщина стоя → ровно рост шаруа;
+  //   asyk  — эталон мужчина НА КОРТОЧКАХ → 0.65 роста.
+  // Без этой поправки девушка на качелях выходила вдвое мельче шаруа, а женщина
+  // у казана — вдвое крупнее.
+  const VILL_H = UNIT_TARGET_H.villager ?? 46;
+  const restH = anKey.startsWith('kz_swing') ? Math.round(VILL_H * 1.9)
+    : anKey.startsWith('kz_kazan') ? VILL_H
+    : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 0.65) : 0;
   const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46));
   const scale = H / an.h;
   const w = im.naturalWidth * scale;
