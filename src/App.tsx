@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.064';
+export const GAME_VERSION = '1.0.065';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -204,6 +204,16 @@ export default function App() {
                 </span>
               )}
             </button>
+            {(hud?.drought ?? 0) > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-orange-500/20 px-2 py-0.5 text-[11px] font-black text-orange-200" title="Засуха: пашни дают меньше еды">
+                🌵 Засуха: {hud!.drought}с
+              </div>
+            )}
+            {(hud?.plague ?? 0) > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-lime-500/20 px-2 py-0.5 text-[11px] font-black text-lime-200" title="Поветрие: шаруа добывают медленнее">
+                🤒 Поветрие: {hud!.plague}с
+              </div>
+            )}
             {(hud?.wonderT ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Мавзолей хана до конца отсчёта — это победа">
                 ⭐ Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
@@ -571,6 +581,28 @@ export default function App() {
       {/* ===== TECH TREE DOSSIER ===== */}
       {showTech && hud && (
         <TechTreeModal hud={hud} onClose={() => setShowTech(false)} onResearch={(id) => gameRef.current?.research(id)} />
+      )}
+
+      {/* ===== СЛУЧАЙНОЕ СОБЫТИЕ СТЕПИ (выбор реакции, Civ-стиль) ===== */}
+      {hud?.event && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="panel-iron anim-banner w-full max-w-md rounded-3xl p-5">
+            <div className="mb-1 flex items-center gap-2.5">
+              <span className="text-3xl">{hud.event.icon}</span>
+              <div className="font-display text-lg font-black tracking-wide text-amber-200">{hud.event.title}</div>
+            </div>
+            <p className="mb-4 text-[12.5px] leading-relaxed text-slate-300">{hud.event.text}</p>
+            <div className="grid gap-2">
+              {hud.event.opts.map((o, i) => (
+                <button key={i} onClick={() => gameRef.current?.eventChoice(i)}
+                  className="rounded-2xl border border-white/10 bg-white/5 p-2.5 text-left transition hover:border-amber-300/40 hover:bg-amber-400/10">
+                  <div className="text-[13px] font-black text-slate-100">{o.label}</div>
+                  <div className="text-[11px] text-slate-400">{o.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ===== ЭКРАН ПЕРЕГОВОРОВ С ПРАВИТЕЛЕМ (Civilization-стиль) ===== */}

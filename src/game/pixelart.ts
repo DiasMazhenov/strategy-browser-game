@@ -589,7 +589,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // ── покадровая анимация: подскок на смену ноги, наклон/крен, раскачка.
   //    Амплитуды по типу: всадники/зверь галопируют с креном, пешие — шаг ──
   const isHerder = !!(u as U & { herder?: boolean }).herder && u.key === 'villager' && u.owner === 'player';
-  const mounted = isMounted || isHerder;
+  const mounted = isMounted || isHerder || u.key === 'trader';
   const beast = u.key === 'wolf';
   const siege = u.key === 'catapult';
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
@@ -1067,7 +1067,7 @@ const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.sta
 
 export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
   const herder = u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder;
-  const mounted = u.key === 'knight' || u.key === 'cavalry' || herder;
+  const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'trader' || herder;
   const shadowR = u.key === 'catapult' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
   diamondShadow(ctx, ix + 2, iy + 8, shadowR, shadowR / 2.2, 'rgba(0,0,0,0.28)');
@@ -1105,7 +1105,9 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
     if (u.key === 'wolf') drawWolf(ctx, u, x, y, sw, time);
     else if (u.key === 'sheep' || u.key === 'cow' || u.key === 'deer') drawLivestock(ctx, u, x, y, sw, bob);
     else if (u.key === 'catapult') drawCatapult(ctx, u, x, y, sw, time);
-    else if (mounted) { drawHorse(ctx, u, x, y, sw, time); drawRider(ctx, u, x, y, sw, atk, time, t); }
+    // торговец «верхом», но не на коне: пока спрайт верблюда не загрузился — рисуем
+    // купца пешим (drawHumanoid), а НЕ рыцарским конём из drawHorse
+    else if (mounted && u.key !== 'trader') { drawHorse(ctx, u, x, y, sw, time); drawRider(ctx, u, x, y, sw, atk, time, t); }
     else drawHumanoid(ctx, u, x, y, sw, atk, time, t);
   }
   if (sub) {

@@ -283,6 +283,9 @@ export interface HudSnapshot {
   audience: AudienceHud | null; // открытый экран переговоров с правителем
   greeting: { id: string; name: string; ruler: string; title: string; portrait: string; greet: string; choices: { id: string; label: string; desc?: string; gold?: number }[] } | null;
   scouts: number; // число разведчиков игрока
+  // активное событие степи (модалка с выбором) и тикающие последствия
+  event: { id: string; icon: string; title: string; text: string; opts: { label: string; desc: string }[] } | null;
+  drought: number; plague: number;
 }
 export interface NationHud {
   id: string; name: string; ruler: string; title: string; portrait: string; color: string; greet: string;
@@ -380,6 +383,12 @@ export class Game {
   giftT: Record<string, number> = {};       // таймеры даров военных племён (nationId → сек)
   tribeGoldT = 0;                           // таймер пассивного дохода от торговых союзников
   greeting: { nationId: string } | null = null; // всплывшее приветствие правителя (для UI)
+  // ── СЛУЧАЙНЫЕ СОБЫТИЯ СТЕПИ (Civ-стиль: выбор из нескольких реакций) ──
+  event: { id: string; opts: string[] } | null = null; // активное событие (ждёт решения игрока)
+  eventT = 0;                    // таймер до следующего события
+  eventSeen: string[] = [];      // уже выпадавшие (чтобы не повторяться подряд)
+  droughtT = 0;                  // засуха: пашни дают меньше, пока тикает
+  plagueT = 0;                   // эпидемия: шаруа работают медленнее
   audienceId: string | null = null;             // id народа на экране переговоров (открыт из модалки)
   greetQueue: string[] = [];     // очередь народов на приветствие
   greetShown = new Set<string>();// народы, приветствие которых уже показано
@@ -974,6 +983,168 @@ export class Game {
         if (Math.random() < 0.35) this.sound.coin();
       }
     }
+  }
+
+  // ── СЛУЧАЙНЫЕ СОБЫТИЯ СТЕПИ ──
+  // Событие всплывает раз в ~3-5 минут, ставит игру на выбор из 2-3 реакций с разными
+  // последствиями (Civ). Условия отбора не дают выпасть бессмысленному событию
+  // (джут без скота, находка кургана без разведчика и т.п.).
+  eventDefs(): { id: string; icon: string; title: string; text: string;
+    opts: { label: string; desc: string }[]; can: () => boolean }[] {
+    const herd = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null).length;
+    return [
+      {
+        id: 'jut', icon: '❄️', title: 'Джут — ледяная зима',
+        text: 'Степь сковало гололёдом, из-под наста не добыть траву. Скот слабеет на глазах, и старейшины ждут вашего слова.',
+        can: () => herd() >= 3,
+        opts: [
+          { label: '🔪 Зарезать часть стада', desc: '+еда сейчас, но поголовье уменьшится' },
+          { label: '🐎 Откочевать на юг', desc: 'Стадо цело, но шаруа теряют время (−дерево)' },
+        ],
+      },
+      {
+        id: 'birth', icon: '🐑', title: 'Богатый приплод',
+        text: 'Весна выдалась щедрой: в загонах прибавление, ягнята крепки и здоровы.',
+        can: () => this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1),
+        opts: [
+          { label: '🎉 Отпраздновать', desc: 'Прибавление в стаде и немного еды' },
+        ],
+      },
+      {
+        id: 'caravan', icon: '🐫', title: 'Караван Шёлкового пути',
+        text: 'К вашей ставке подошёл чужеземный караван. Купцы предлагают сделку: дерево и ткани в обмен на серебро.',
+        can: () => this.res.gold >= 90,
+        opts: [
+          { label: '🤝 Купить товар (90🪙)', desc: 'Много дерева и еды разом' },
+          { label: '🚫 Отказать', desc: 'Ничего не тратим' },
+        ],
+      },
+      {
+        id: 'plague', icon: '🤒', title: 'Поветрие в аулах',
+        text: 'Среди шаруа пошла хворь. Работа встала, люди слабы — но в мечети есть кому лечить.',
+        can: () => this.units.filter(u => u.owner === 'player' && u.key === 'villager').length >= 4,
+        opts: [
+          { label: '🕌 Просить имамов лечить (60🪙)', desc: 'Хворь отступит быстро' },
+          { label: '⏳ Перетерпеть', desc: 'Добыча замедлится на время' },
+        ],
+      },
+      {
+        id: 'drought', icon: '🌵', title: 'Засуха',
+        text: 'Реки обмелели, травы выгорели. Пашни родят скудно, пока не пройдут дожди.',
+        can: () => this.blds.some(b => b.owner === 'player' && b.key === 'farm' && b.done >= 1),
+        opts: [
+          { label: '💧 Рыть арыки (80🪵)', desc: 'Смягчить засуху трудом' },
+          { label: '🙏 Ждать дождя', desc: 'Пашни дают меньше еды долгое время' },
+        ],
+      },
+      {
+        id: 'kurgan', icon: '⚱️', title: 'Находка в кургане',
+        text: 'Барлаушы наткнулись на древний курган. Под каменной насыпью что-то блестит — но тревожить предков боязно.',
+        can: () => this.units.some(u => u.owner === 'player' && u.key === 'scout'),
+        opts: [
+          { label: '⛏️ Вскрыть курган', desc: 'Клад золота, но народ ропщет' },
+          { label: '🕯️ Почтить предков', desc: 'Немного очков и спокойствие' },
+        ],
+      },
+    ];
+  }
+  // планировщик: раз в 3–5 минут поднимаем подходящее событие
+  updateEvents(dt: number) {
+    // тикающие последствия
+    if (this.droughtT > 0) this.droughtT = Math.max(0, this.droughtT - dt);
+    if (this.plagueT > 0) this.plagueT = Math.max(0, this.plagueT - dt);
+    if (this.event || this.over || this.paused) return;
+    this.eventT += dt;
+    if (this.eventT < 210) return;            // не раньше 3.5 минут после прошлого
+    if (Math.random() > dt * 0.35) return;    // дальше — редкий случайный триггер
+    let pool = this.eventDefs().filter(e => e.can() && !this.eventSeen.includes(e.id));
+    if (!pool.length) { // все видены — начинаем круг заново
+      this.eventSeen = [];
+      pool = this.eventDefs().filter(e => e.can());
+    }
+    if (!pool.length) return;
+    const def = pool[(Math.random() * pool.length) | 0];
+    this.eventT = 0;
+    this.eventSeen.push(def.id);
+    this.event = { id: def.id, opts: def.opts.map(o => o.label) };
+    this.sound.quest();
+    this.pushHud();
+  }
+  // игрок выбрал реакцию (idx — номер варианта)
+  eventChoice(idx: number) {
+    const ev = this.event; if (!ev) return;
+    const def = this.eventDefs().find(e => e.id === ev.id);
+    this.event = null;
+    if (!def) { this.pushHud(); return; }
+    const herdUnits = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null);
+    switch (def.id) {
+      case 'jut':
+        if (idx === 0) {
+          const herd = herdUnits();
+          const kill = Math.max(1, Math.floor(herd.length / 3));
+          for (let i = 0; i < kill && i < herd.length; i++) { herd[i].hp = 0; this.burst(herd[i].x, herd[i].y, 8, ['#fb7185'], 70, 0.6); }
+          const food = kill * 45;
+          this.res.food += food;
+          this.pushBanner('🔪 Забой скота', `Кладовые полны: +${food}🍖, но стадо поредело на ${kill}`, 4);
+        } else {
+          const w = Math.min(this.res.wood, 90);
+          this.res.wood -= w;
+          this.pushBanner('🐎 Откочевали на юг', `Стадо спасено, но перекочёвка стоила ${Math.round(w)}🪵`, 4);
+        }
+        break;
+      case 'birth': {
+        const pen = this.blds.find(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1);
+        if (pen) {
+          for (let i = 0; i < 3; i++) {
+            const a = this.addUnit(Math.random() < 0.6 ? 'sheep' : 'cow', 'neutral', pen.x + rand(-50, 50), pen.y + rand(-40, 40));
+            a.pastureId = pen.id;
+            this.burst(a.x, a.y, 6, ['#fff', '#fde68a'], 60, 0.6);
+          }
+        }
+        this.res.food += 80;
+        this.pushBanner('🐑 Приплод', 'В загоне прибавление: +3 головы и +80🍖', 4);
+        break;
+      }
+      case 'caravan':
+        if (idx === 0 && this.res.gold >= 90) {
+          this.res.gold -= 90; this.res.wood += 260; this.res.food += 160;
+          this.sound.coin();
+          this.pushBanner('🐫 Сделка с караваном', '+260🪵 и +160🍖 за 90🪙', 4);
+        } else {
+          this.pushBanner('🚫 Караван ушёл', 'Купцы отправились дальше на запад', 3);
+        }
+        break;
+      case 'plague':
+        if (idx === 0 && this.res.gold >= 60) {
+          this.res.gold -= 60; this.plagueT = 25;
+          this.pushBanner('🕌 Имамы взялись лечить', 'Хворь скоро отступит', 4);
+        } else {
+          this.plagueT = 100;
+          this.pushBanner('🤒 Поветрие', 'Шаруа работают медленнее, пока хворь не пройдёт', 4);
+        }
+        break;
+      case 'drought':
+        if (idx === 0 && this.res.wood >= 80) {
+          this.res.wood -= 80; this.droughtT = 30;
+          this.pushBanner('💧 Арыки прорыты', 'Засуха почти не тронет пашни', 4);
+        } else {
+          this.droughtT = 150;
+          this.pushBanner('🌵 Засуха', 'Пашни родят скудно — переждите', 4);
+        }
+        break;
+      case 'kurgan':
+        if (idx === 0) {
+          this.res.gold += 220; this.grievance = Math.min(100, this.grievance + 6);
+          this.sound.coin();
+          this.pushBanner('⚱️ Курган вскрыт', '+220🪙, но народ шепчется о гневе предков', 4.5);
+        } else {
+          this.score += 350;
+          this.pushBanner('🕯️ Предки почтены', 'Народ спокоен, слава хана растёт (+350 очков)', 4.5);
+        }
+        break;
+    }
+    this.checkQuests();
+    this.pushHud();
   }
 
   // разозлить всё племя народа nid (для угрозы/шпионажа)
@@ -1780,6 +1951,7 @@ export class Game {
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT },
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
+      events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
     };
     return JSON.stringify(data);
@@ -1833,6 +2005,7 @@ export class Game {
       this.tech = d.tech || {}; this.questsDone = d.questsDone || {};
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
+      if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
@@ -1935,6 +2108,7 @@ export class Game {
   gatherMult(): number {
     let m = this.hasTech('ironTools') ? 1.3 : 1;
     if (this.bonusTier('craft', 3)) m *= 1.15;   // союз с ремесленниками ускоряет шаруа
+    if (this.plagueT > 0) m *= 0.6;              // поветрие: работа идёт туго
     return m;
   }
   // итоговая цена постройки с учётом союза с ремесленниками (скидка на дерево)
@@ -1945,9 +2119,11 @@ export class Game {
   }
   // прибавка еды от аграрных союзников (пашни/дойка): +15% / +35%
   farmMult(): number {
-    if (this.bonusTier('farm', 3)) return 1.35;
-    if (this.bonusTier('farm', 1)) return 1.15;
-    return 1;
+    let m = 1;
+    if (this.bonusTier('farm', 3)) m = 1.35;
+    else if (this.bonusTier('farm', 1)) m = 1.15;
+    if (this.droughtT > 0) m *= 0.55;   // засуха: пашни родят скудно
+    return m;
   }
   // скидка на дерево от ремесленных союзников (10% / 20%)
   woodDiscount(): number {
@@ -2412,6 +2588,7 @@ export class Game {
 
     this.updateUnits(dt);
     this.updateBuildings(dt);
+    this.updateEvents(dt);         // случайные события степи
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
     this.updateFog(dt);
@@ -4794,6 +4971,11 @@ export class Game {
           choices: d.choices.map(c => ({ id: c.id, label: c.label, desc: c.desc, gold: c.gold })) } : null;
       })() : null,
       scouts: this.units.filter(u => u.owner === 'player' && u.key === 'scout').length,
+      event: this.event ? (() => {
+        const d = this.eventDefs().find(e => e.id === this.event!.id);
+        return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;
+      })() : null,
+      drought: Math.ceil(this.droughtT), plague: Math.ceil(this.plagueT),
     });
   }
 
