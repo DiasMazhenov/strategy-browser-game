@@ -697,7 +697,25 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     : anKey.startsWith('kz_kazan') ? VILL_H
     : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 1.06) : 0;
   const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46));
-  const scale = H / an.h;
+  // ── ПОПРАВКА НА «НАДГОЛОВНЫЙ» ВЫНОС ─────────────────────────────────────────
+  // UNIT_TARGET_H задаёт высоту КАДРА, а не рост фигуры. У большинства юнитов
+  // это одно и то же (макушка у верхней кромки), но у мергена лук поднят над
+  // головой, у найзагера — наконечник пики. Кадр ужимался до 46px вместе с
+  // луком, и сам человек выходил на 13 % ниже сарбаза — мерген смотрелся
+  // подростком рядом с батыром.
+  //
+  // HEAD_TOP — доля кадра ВЫШЕ макушки, замерена по спрайтам: первая сверху
+  // строка со сплошным отрезком >= 12px (тонкие лук/пика такой отрезок не дают).
+  // Делим целевую высоту на «долю человека», чтобы фигура, а не кадр, была
+  // ростом с остальных. Значения покадровые: у мергена вынос гуляет 0.07…0.14,
+  // и один общий коэффициент заставлял бы его прыгать в росте при ходьбе.
+  const HEAD_TOP: Record<string, number> = {
+    kz_archer: 0.140, kz_archer_b: 0.067, kz_archer_f: 0.100,
+    kz_archer_wa: 0.073, kz_archer_wb: 0.073,
+    kz_spearman: 0.107, kz_spearman_wa: 0.080, kz_spearman_wb: 0.080,
+  };
+  const headCut = HEAD_TOP[anKey] ?? 0;
+  const scale = (H / an.h) / (1 - headCut);
   const w = im.naturalWidth * scale;
   // разворот на/от камеры (конница/монах/волк или раса игрока) — готовые кадры без бокового крена, но с вертикальным подскоком
   const mountFB = kzFB || kzScoutUnit || (fbUnit && move && (u.fmode === 1 || u.fmode === 2));
@@ -750,7 +768,11 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const drawIm: CanvasImageSource = tier > 0
     ? tintedFrame(im, anKey, tier >= 2 ? '#fbbf24' : '#e2e8f0', tier >= 2 ? 0.30 : 0.20)
     : im;
-  ctx.drawImage(drawIm, -an.ax * scale, -an.ay * scale, w, H);
+  // Высота отрисовки — an.h * scale, а НЕ H: при поправке на надголовный вынос
+  // (лук мергена, пика найзагера) кадр рисуется крупнее целевой H, чтобы рост
+  // самой фигуры совпал с остальными. Якорь ay задан от низа кадра и тоже
+  // умножен на scale, поэтому ноги остаются на земле.
+  ctx.drawImage(drawIm, -an.ax * scale, -an.ay * scale, w, an.h * scale);
   ctx.restore();
   void selected;
   return true;

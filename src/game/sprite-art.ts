@@ -476,6 +476,6 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {
-  villager: 46, swordsman: 48, archer: 46, spearman: 50, knight: 60, cavalry: 60, catapult: 46, monk: 44, wolf: 34, trader: 58,
+  villager: 46, swordsman: 48, archer: 46, spearman: 46, knight: 60, cavalry: 60, catapult: 46, monk: 44, wolf: 34, trader: 58,
   sheep: 30, cow: 36, deer: 40, scout: 46,
 };

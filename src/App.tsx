@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.081';
+export const GAME_VERSION = '1.0.082';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {

@@ -163,7 +163,7 @@ export const SPR_ANCHORS: Record<string, SprAnchor> = ${JSON.stringify(anchors, 
 export const UNIT_ANCHORS: Record<string, SprAnchor> = ${JSON.stringify(uanchors, null, 2)};
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {
-  villager: 46, swordsman: 48, archer: 46, spearman: 50, knight: 60, cavalry: 60, catapult: 46, monk: 44, wolf: 34,
+  villager: 46, swordsman: 48, archer: 46, spearman: 46, knight: 60, cavalry: 60, catapult: 46, monk: 44, wolf: 34,
 };
 `;
 fs.writeFileSync(path.join(__dirname, '..', 'src', 'game', 'sprite-art.ts'), ts);
