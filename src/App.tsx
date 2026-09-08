@@ -8,7 +8,7 @@ import {
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
 import { PLAYER_NATION } from './game/nations';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
-import heroBattle from './assets/hero-battle.jpg';
+import heroKhanate from './assets/hero-khanate.jpg';
 
 type Screen = 'menu' | 'game';
 interface ScoreEntry { name: string; score: number; result: string; difficulty: string; kills: number; time: number; date: string }
@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.059';
+export const GAME_VERSION = '1.0.060';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -950,35 +950,35 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
       <div className="relative mx-auto max-w-4xl px-4 pb-10 pt-8 sm:pt-12">
         {/* hero art */}
         <div className="relative overflow-hidden rounded-3xl border border-amber-200/25 shadow-[0_20px_80px_rgba(0,0,0,.55)]">
-          <img src={heroBattle} alt="Империи на рассвете" className="h-44 w-full object-cover sm:h-60" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/25 to-transparent" />
+          <img src={heroKhanate} alt="Казахское Ханство — степь, юрты и конница на рассвете" className="h-56 w-full object-cover sm:h-72" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/30 to-[#0c1410]/30" />
           <div className="absolute left-1/2 top-3 -translate-x-1/2">
-            <div className="anim-floaty flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-300/50 bg-black/50 text-3xl backdrop-blur">🏰</div>
+            <div className="anim-floaty flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-300/50 bg-black/50 text-3xl backdrop-blur">🐎</div>
           </div>
           <div className="absolute bottom-2 left-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-black tracking-widest text-amber-200 backdrop-blur">
             <span className="relative flex h-2 w-2"><span className="absolute h-full w-full animate-ping rounded-full bg-lime-400 opacity-75" /><span className="h-2 w-2 rounded-full bg-lime-400" /></span>
-            ЖИВОЕ ПОЛЕ БОЯ • 60 КАДРОВ/С
+            ВЕЛИКАЯ СТЕПЬ • ЖИВОЕ ПОЛЕ БОЯ • 60 КАДРОВ/С
           </div>
-          <div className="absolute bottom-2 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-slate-300 backdrop-blur">⚔️ Синие против Красных • Завоевание</div>
+          <div className="absolute bottom-2 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-slate-300 backdrop-blur">🐺 Набеги • 🐑 Скот • ⚔️ Батыры</div>
         </div>
         <div className="mt-3 text-center">
-          <div className="text-[11px] font-black tracking-[0.35em] text-amber-300/80">МИНИ-STRATEGY В ДУХЕ AGE OF EMPIRES</div>
+          <div className="text-[11px] font-black tracking-[0.35em] text-amber-300/80">СТРАТЕГИЯ ВЕЛИКОЙ СТЕПИ · ЭПОХА АБЫЛАЙ ХАНА</div>
           <h1 className="font-display mt-1 text-4xl font-black leading-tight sm:text-6xl">
-            <span className="gold-text">ИМПЕРИИ</span> <span className="text-emerald-100">РАССВЕТА</span>
+            <span className="gold-text">КАЗАХСКОЕ</span> <span className="text-sky-100">ХАНСТВО</span>
           </h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-300 sm:text-[15px]">
-            Добывай 🪵🍖🪙 • Собирай армию • Развивай эпохи • <b className="text-amber-200">Снеси вражеский Городской центр</b>, пока не снесли твой.
-            Волки, набеги и слава ждут — веселье с первых 10 секунд, гарантируем.
+            Паси 🐑 скот в степи, дои коров в загонах, добывай 🪵🍖🪙 и собирай конницу батыров.
+            Развивай эпохи, веди дипломатию с народами и <b className="text-amber-200">сотри вражеский стан</b>, пока не пала твоя орда.
           </p>
         </div>
 
         {/* feature strip */}
         <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
-            { i: <Axe className="h-4 w-4 text-lime-300" />, t: 'Добыча и рост' },
-            { i: <Swords className="h-4 w-4 text-red-300" />, t: 'Набеги и захват' },
-            { i: <Crown className="h-4 w-4 text-amber-300" />, t: '4 эпохи власти' },
-            { i: <Trophy className="h-4 w-4 text-yellow-300" />, t: 'Очки и легенды' },
+            { i: <span className="text-base leading-none">🐑</span>, t: 'Стада и загоны' },
+            { i: <Swords className="h-4 w-4 text-red-300" />, t: 'Конница батыров' },
+            { i: <Crown className="h-4 w-4 text-amber-300" />, t: '4 эпохи ханства' },
+            { i: <MessageCircle className="h-4 w-4 text-sky-300" />, t: 'Дипломатия народов' },
           ].map((f, i) => (
             <div key={i} className="panel-iron flex items-center justify-center gap-2 rounded-xl px-2 py-2.5 text-xs font-bold text-slate-200">{f.i}{f.t}</div>
           ))}
@@ -1027,13 +1027,13 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         <div className="mt-6 grid gap-3 md:grid-cols-2">
           {/* how to play */}
           <div className="panel-iron rounded-2xl p-4">
-            <div className="font-display text-sm font-black tracking-widest text-amber-200">⚔️ УСТАВ КОМАНДИРА</div>
+            <div className="font-display text-sm font-black tracking-widest text-amber-200">📜 УСТАВ КОЧЕВНИКА</div>
             <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-300">
-              <HowRow n="1" t="Ваше ополчение уже выбрано — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
-              <HowRow n="2" t="Крестьяне добывают: выбери крестьянина и коснись деревьев 🪵, ягод 🍖 или золота 🪙. Ресурсы носят в центр сами." />
-              <HowRow n="3" t="Развитие: Дом (Q) для населения → Казармы (E) → штампуй Ополченцев (2) и Лучников (3). Ферма (F) = бесконечная еда." />
-              <HowRow n="4" t="Конюшня (Z) даёт всадников, кузница (X) — катапульты против стен, рынок (C) — монахов-лекарей. Копейщики (5) страшны против конницы!" />
-              <HowRow n="5" t="Новая эпоха (T) даёт +силу. Башни (R) крошат набеги. Победа — разрушить красный Городской центр!" />
+              <HowRow n="1" t="Ополчение уже выбрано — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
+              <HowRow n="2" t="Казаки и казашки добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
+              <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Ферма (F) = бесконечная еда." />
+              <HowRow n="4" t="Дом (Q) для населения → Казармы (E) → Ополченцы (2) и Лучники (3). Конюшня (Z) даёт конницу, кузница (X) — катапульты, рынок (C) — монахов-лекарей." />
+              <HowRow n="5" t="Новая эпоха (T) даёт +силу. Разведчик (G) идёт на связь с народами. Победа — разрушить вражеский Городской центр!" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
               <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 1-8 / QERFZXC / G / H / Space</div>
@@ -1069,12 +1069,12 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         </div>
 
         <div className="mt-6 text-center text-[11px] font-semibold text-slate-600">
-          60 кадров/с • движок на Canvas • синтезированные звуки битвы • без ассетов, один сочный экшен 🎇
+          60 кадров/с • движок на Canvas • синтезированные звуки битвы • великая степь ждёт своего хана 🎇
         </div>
       </div>
       {/* версия — левый нижний угол меню */}
       <div className="pointer-events-none fixed bottom-2 left-3 z-10 select-none text-[10px] font-semibold tracking-wide text-white/40">
-        Империи Рассвета • v{GAME_VERSION}
+        Казахское Ханство • v{GAME_VERSION}
       </div>
     </div>
   );

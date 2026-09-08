@@ -16,3 +16,6 @@ src/assets/sprites/units/kz/raw/
 refs/
 
 image-search/
+
+# исходники AI-спрайтов скота/работниц на magenta-фоне (готовые кадры обработаны скриптами и лежат рядом)
+src/assets/sprites/units/_gen/
