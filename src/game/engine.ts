@@ -8,7 +8,8 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
-import { NATIONS, NATION_BY_ID, TRIBE_IDS, type FacRel } from './nations';
+import { NATIONS, NATION_BY_ID, TRIBE_IDS, TRIBE_KIND_BY_ID, TRIBE_TYPES, ENVOY_TIERS, envoyCost,
+  type FacRel, type TribeKind } from './nations';
 import imgTowncenter from '../assets/sprites/towncenter.png';
 import imgHouse from '../assets/sprites/house.png';
 import imgBarracks from '../assets/sprites/barracks.png';
@@ -274,6 +275,7 @@ export interface HudSnapshot {
   hint: string;
   atWar: boolean; grievance: number; casusBelli: number; morale: number;
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
+  woodDiscount: number;   // множитель цены дерева от союза с ремесленниками (1 = без скидки)
   playerPow: number; enemyPow: number; wonderT: number; wonderHold: number;
   techTree: TechTreeRow[];
   // ── дипломатия народов (Civilization-стиль) ──
@@ -287,6 +289,16 @@ export interface NationHud {
   kind: 'rival' | 'tribe';
   met: boolean; rel: string; atWar: boolean; power: number; camps: number; gift: number;
   canGreet: boolean; // можно ли открыть приветствие/переговоры (встречен)
+  // ── город-государство: посланники и влияние ──
+  envoys: number;        // посланники игрока
+  rivalEnvoys: number;   // посланники джунгар (конкуренция)
+  envoyLevel: number;    // 0..3 — достигнутый уровень влияния
+  envoyNext: number;     // сколько посланников до следующего уровня (0 = максимум)
+  envoyCost: number;     // цена следующего посланника
+  suzerain: 'player' | 'rival' | null;
+  typeLabel: string;     // «Военный» / «Торговый» …
+  typeIcon: string;
+  perks: string[];       // описания бонусов трёх уровней
 }
 // экран переговоров с правителем (Civ-стиль): открыт из модалки дипломатии
 export interface AudienceHud {
@@ -361,6 +373,12 @@ export class Game {
   rivalMet = false;              // контакт с Джунгарским ханством (главный соперник) установлен
   tribeMet: Record<string, boolean> = {};   // встреченные племена (nationId → true)
   tribeRel: Record<string, FacRel> = {};    // отношение племени: neutral/friend/hostile
+  // ── ПЛЕМЕНА КАК ГОРОДА-ГОСУДАРСТВА: влияние посланниками (Civ VI) ──
+  envoys: Record<string, number> = {};      // посланники ИГРОКА у племени (nationId → шт.)
+  rivalEnvoys: Record<string, number> = {}; // посланники ДЖУНГАР — конкуренция за сюзеренитет
+  envoyAiT = 0;                             // таймер вложений джунгар в племена
+  giftT: Record<string, number> = {};       // таймеры даров военных племён (nationId → сек)
+  tribeGoldT = 0;                           // таймер пассивного дохода от торговых союзников
   greeting: { nationId: string } | null = null; // всплывшее приветствие правителя (для UI)
   audienceId: string | null = null;             // id народа на экране переговоров (открыт из модалки)
   greetQueue: string[] = [];     // очередь народов на приветствие
@@ -435,7 +453,9 @@ export class Game {
   addUnit(key: UnitKey, owner: 'player' | 'enemy' | 'neutral', x: number, y: number): Unit {
     const d = UNIT_DEFS[key];
     const diff = DIFF[this.difficulty];
-    const ageMult = owner === 'player' ? AGES[this.age].mult : owner === 'enemy' ? AGES[this.eage].mult * diff.enemyHp : 1;
+    let ageMult = owner === 'player' ? AGES[this.age].mult : owner === 'enemy' ? AGES[this.eage].mult * diff.enemyHp : 1;
+    // союз с военными племенами (ур.1): войска игрока крепче на 10%
+    if (owner === 'player' && d.pop > 0 && key !== 'villager' && this.bonusTier('military', 1)) ageMult *= 1.1;
     const u: Unit = {
       id: this.nextId++, key, owner, x: clamp(x, 20, WORLD.w - 20), y: clamp(y, 20, WORLD.h - 20),
       hp: d.hp * ageMult, maxHp: d.hp * ageMult, atk: d.atk * (owner === 'neutral' ? 1 : ageMult),
@@ -833,6 +853,129 @@ export class Game {
     }
     this.pushHud();
   }
+  // ── ПЛЕМЕНА КАК ГОРОДА-ГОСУДАРСТВА (Civ VI): посланники, уровни влияния, сюзеренитет ──
+  // Уровень влияния игрока у племени: 0 (нет), 1/2/3 по порогам ENVOY_TIERS = 1/3/6.
+  envoyLevel(nid: string): number {
+    const n = this.envoys[nid] ?? 0;
+    let lv = 0;
+    for (let i = 0; i < ENVOY_TIERS.length; i++) if (n >= ENVOY_TIERS[i]) lv = i + 1;
+    return lv;
+  }
+  // сюзерен племени: у кого посланников больше (при равенстве — никто). Джунгары конкурируют.
+  suzerain(nid: string): 'player' | 'rival' | null {
+    const p = this.envoys[nid] ?? 0, r = this.rivalEnvoys[nid] ?? 0;
+    if (p === 0 && r === 0) return null;
+    if (p === r) return null;
+    return p > r ? 'player' : 'rival';
+  }
+  tribeKind(nid: string): TribeKind | null { return TRIBE_KIND_BY_ID[nid] ?? null; }
+  // действует ли у игрока бонус уровня lv (1..3) у племён типа kind — и сколько таких племён
+  bonusTier(kind: TribeKind, lv: number): boolean {
+    for (const nid of TRIBE_IDS) {
+      if (TRIBE_KIND_BY_ID[nid] !== kind) continue;
+      if (this.tribeRel[nid] === 'hostile') continue;      // враждебное племя бонусов не даёт
+      if (this.suzerain(nid) === 'rival') continue;         // сюзеренитет у джунгар — бонус их
+      if (this.envoyLevel(nid) >= lv) return true;
+    }
+    return false;
+  }
+  // отправить посланника: тратит золото, растит влияние, может отобрать сюзеренитет у джунгар
+  sendEnvoy(nid: string): boolean {
+    const def = NATION_BY_ID[nid];
+    if (!def || def.kind !== 'tribe' || this.over) return false;
+    if (!this.metNation(nid)) { this.floater(this.cam.x, this.cam.y - 100, 'Вы ещё не знакомы с этим народом', '#94a3b8', 15); return false; }
+    if (this.tribeRel[nid] === 'hostile') { this.floater(this.cam.x, this.cam.y - 100, 'Племя враждебно — сначала помиритесь', '#f87171', 15); this.sound.error(); return false; }
+    const have = this.envoys[nid] ?? 0;
+    const cost = envoyCost(have);
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙`, '#f87171', 15); this.sound.error(); return false; }
+    const wasSuz = this.suzerain(nid);
+    const wasLv = this.envoyLevel(nid);
+    this.res.gold -= cost;
+    this.envoys[nid] = have + 1;
+    // посланник — жест дружбы: нейтральное племя теплеет
+    if (this.tribeRel[nid] !== 'friend') this.tribeRel[nid] = 'friend';
+    this.sound.coin();
+    const lv = this.envoyLevel(nid);
+    const kind = this.tribeKind(nid);
+    const t = kind ? TRIBE_TYPES[kind] : null;
+    if (lv > wasLv && t) {
+      this.pushBanner(`${t.icon} Влияние у «${def.name}» — уровень ${lv}`, t.levels[lv - 1], 4.5);
+      this.sound.quest();
+    } else {
+      this.pushBanner(`🤝 Посланник к «${def.name}»`, `Посланников: ${this.envoys[nid]} · до следующего уровня ${this.envoysToNext(nid)}`, 3);
+    }
+    const nowSuz = this.suzerain(nid);
+    if (nowSuz === 'player' && wasSuz !== 'player') {
+      this.pushBanner(`👑 Сюзеренитет: «${def.name}»`, 'Народ признал ваше главенство — джунгары отступили', 4.5);
+      this.score += 250;
+    }
+    this.pushHud();
+    return true;
+  }
+  // сколько посланников до следующего порога (0 — максимум достигнут)
+  envoysToNext(nid: string): number {
+    const n = this.envoys[nid] ?? 0;
+    for (const t of ENVOY_TIERS) if (n < t) return t - n;
+    return 0;
+  }
+  // джунгары тоже вкладываются в племена — борьба за союзников
+  updateEnvoyAI(dt: number) {
+    this.envoyAiT += dt;
+    if (this.envoyAiT < 45) return;              // раз в 45 с соперник делает ход
+    this.envoyAiT = 0;
+    if (!this.rivalMet && Math.random() < 0.5) return;
+    const diff = DIFF[this.difficulty];
+    // соперник охотнее вкладывается на высокой сложности и когда богат
+    if (Math.random() > 0.35 + diff.aiAggression * 0.2) return;
+    // цель: племя, где игрок близок к сюзеренитету (перебить) либо просто знакомое
+    const cands = TRIBE_IDS.filter(nid => this.tribeRel[nid] !== 'hostile');
+    if (!cands.length) return;
+    cands.sort((a, b) => (this.envoys[b] ?? 0) - (this.envoys[a] ?? 0));
+    const nid = Math.random() < 0.7 ? cands[0] : cands[(Math.random() * cands.length) | 0];
+    const was = this.suzerain(nid);
+    this.rivalEnvoys[nid] = (this.rivalEnvoys[nid] ?? 0) + 1;
+    if (this.suzerain(nid) === 'rival' && was === 'player') {
+      const def = NATION_BY_ID[nid];
+      this.pushBanner(`⚠️ «${def?.name ?? nid}» под джунгарами`, 'Хунтайджи перекупил народ — бонусы утрачены. Шлите посланников!', 5);
+      this.sound.error();
+      this.pushHud();
+    }
+  }
+  // периодические эффекты союза: дары военных племён и доход торговых
+  updateTribeBonuses(dt: number) {
+    // ВОЕННЫЕ: раз в 3 мин (ур.2) дарят воина, на ур.3 — чаще и сильнее
+    for (const nid of TRIBE_IDS) {
+      if (TRIBE_KIND_BY_ID[nid] !== 'military') continue;
+      if (this.tribeRel[nid] === 'hostile' || this.suzerain(nid) === 'rival') continue;
+      const lv = this.envoyLevel(nid);
+      if (lv < 2) continue;
+      const period = lv >= 3 ? 120 : 180;
+      this.giftT[nid] = (this.giftT[nid] ?? 0) + dt;
+      if (this.giftT[nid] < period) continue;
+      this.giftT[nid] = 0;
+      if (this.popUsed('player') + 1 > this.popCap('player')) continue;
+      const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
+      if (!tc) continue;
+      const pool = lv >= 3 ? ['knight', 'cavalry', 'swordsman'] : ['swordsman', 'spearman'];
+      const key = pool[(Math.random() * pool.length) | 0] as UnitKey;
+      const u = this.addUnit(key, 'player', tc.x + rand(-40, 40), tc.y + 60 + rand(-20, 20));
+      u.state = 'idle';
+      const def = NATION_BY_ID[nid];
+      this.pushBanner(`🎁 Дар от «${def?.name ?? nid}»`, `Союзники прислали воина: ${UNIT_DEFS[key].name}`, 4);
+      this.burst(u.x, u.y, 12, ['#fde68a', '#fff'], 90, 0.7);
+      this.sound.train();
+    }
+    // ТОРГОВЫЕ: пассивный доход (ур.1+)
+    if (this.bonusTier('trade', 1)) {
+      this.tribeGoldT = (this.tribeGoldT ?? 0) + dt;
+      if (this.tribeGoldT >= 8) {
+        this.tribeGoldT = 0;
+        this.res.gold += 3;
+        if (Math.random() < 0.35) this.sound.coin();
+      }
+    }
+  }
+
   // разозлить всё племя народа nid (для угрозы/шпионажа)
   provokeTribeById(nid: string) {
     for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; this.provokeTribe(b.x, b.y, this.units.find(u => u.owner === 'player') ?? this.units[0]); }
@@ -1540,7 +1683,7 @@ export class Game {
     if (key === 'blacksmith' && this.age < 2) { this.floater(this.cam.x, this.cam.y - 100, 'Кузнице нужен Век батыров!', '#f87171', 18); this.sound.error(); return; }
     const areq = (BUILDING_DEFS[key] as unknown as { ageReq?: number }).ageReq;
     if (areq != null && this.age < areq) { this.floater(this.cam.x, this.cam.y - 100, `Нужен: ${AGES[areq].name}!`, '#f87171', 18); this.sound.error(); return; }
-    const c = BUILDING_DEFS[key].cost;
+    const c = this.bldCost(key);
     if (!this.afford(c)) { this.floater(this.cam.x, this.cam.y - 100, 'Не хватает дерева/золота!', '#f87171', 18); this.sound.error(); return; }
     this.placement = key; this.attackArmed = false; this.rallyArmed = false; this.wallDrag = null;
     this.sound.select(); this.pushHud();
@@ -1582,7 +1725,7 @@ export class Game {
   placeSingle(key: BuildingKey, x: number, y: number, axis?: 'x' | 'y'): boolean {
     if (key === 'wall' || key === 'gate') [x, y] = this.snapWall(x, y);
     if (!this.placementValid(x, y, key)) return false;
-    const c = BUILDING_DEFS[key].cost;
+    const c = this.bldCost(key);
     if (!this.afford(c)) return false;
     this.pay(c);
     const b = this.addBld(key, 'player', x, y, 0.15);
@@ -1635,7 +1778,8 @@ export class Game {
       relicsHeld: this.relicsHeld,
       dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT },
-      nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel },
+      nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
+        envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
     };
     return JSON.stringify(data);
@@ -1689,7 +1833,7 @@ export class Game {
       this.tech = d.tech || {}; this.questsDone = d.questsDone || {};
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
-      if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
+      if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
       return true;
@@ -1788,7 +1932,35 @@ export class Game {
     if (key === 'archer' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
     return 1;
   }
-  gatherMult(): number { return this.hasTech('ironTools') ? 1.3 : 1; }
+  gatherMult(): number {
+    let m = this.hasTech('ironTools') ? 1.3 : 1;
+    if (this.bonusTier('craft', 3)) m *= 1.15;   // союз с ремесленниками ускоряет шаруа
+    return m;
+  }
+  // итоговая цена постройки с учётом союза с ремесленниками (скидка на дерево)
+  bldCost(key: BuildingKey): { wood: number; food: number; gold: number } {
+    const c = BUILDING_DEFS[key].cost;
+    const d = this.woodDiscount();
+    return { wood: Math.round(c.wood * d), food: c.food, gold: c.gold };
+  }
+  // прибавка еды от аграрных союзников (пашни/дойка): +15% / +35%
+  farmMult(): number {
+    if (this.bonusTier('farm', 3)) return 1.35;
+    if (this.bonusTier('farm', 1)) return 1.15;
+    return 1;
+  }
+  // скидка на дерево от ремесленных союзников (10% / 20%)
+  woodDiscount(): number {
+    if (this.bonusTier('craft', 2)) return 0.8;
+    if (this.bonusTier('craft', 1)) return 0.9;
+    return 1;
+  }
+  // ускорение исследований от научных союзников (10% / 25%)
+  researchMult(): number {
+    if (this.bonusTier('science', 2)) return 1.25;
+    if (this.bonusTier('science', 1)) return 1.1;
+    return 1;
+  }
   carryCap(): number { return this.hasTech('wheelbarrow') ? 22 : 14; }
 
   // ── гарнизон: укрыть/выпустить юнитов ──
@@ -1859,7 +2031,11 @@ export class Game {
     return u.key !== 'villager' && u.key !== 'trader' && u.key !== 'wolf'
       && u.key !== 'sheep' && u.key !== 'cow' && u.key !== 'deer';
   }
-  tradeRate(): number { return this.hasTech('coinage') ? 60 : 100; } // сколько ресурса за 10 золота
+  tradeRate(): number {
+    let r = this.hasTech('coinage') ? 60 : 100;
+    if (this.bonusTier('trade', 2)) r = Math.round(r * 0.85); // торговые союзники — выгоднее обмен
+    return r;
+  } // сколько ресурса за 10 золота
   trade(from: 'wood' | 'food'): boolean {
     if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен: Базар!', '#f87171', 16); this.sound.error(); return false; }
     const rate = this.tradeRate();
@@ -1982,7 +2158,7 @@ export class Game {
     const key = this.placement; if (!key) return;
     [x, y] = this.snapBuild(key, x, y);
     if (!this.placementValid(x, y, key)) { this.sound.error(); this.trauma = Math.min(1, this.trauma + 0.08); return; }
-    const c = BUILDING_DEFS[key].cost;
+    const c = this.bldCost(key);
     if (!this.afford(c)) { this.sound.error(); return; }
     this.pay(c);
     const b = this.addBld(key, 'player', x, y, 0.15);
@@ -2236,6 +2412,8 @@ export class Game {
 
     this.updateUnits(dt);
     this.updateBuildings(dt);
+    this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
+    this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
     this.updateFog(dt);
     this.updateProjs(dt);
     // бесконечный мир: догенерировать чанки вокруг камеры при разведке
@@ -2957,7 +3135,7 @@ export class Game {
       u.wphase = u.gatherT / cyc;
       if (u.gatherT >= cyc) {
         u.gatherT = 0; u.wphase = 0;
-        u.carry = { type: 'food', amt: u.carry.amt + 3 * this.gatherMult() };
+        u.carry = { type: 'food', amt: u.carry.amt + 3 * this.gatherMult() * this.farmMult() };
         if (Math.random() < 0.7) this.burst(u.x + 14, u.y - 6, 2, ['#fef3c7', '#fde68a', '#fff'], 46, 0.5);
         // молоко идёт в казну ВЛАДЕЛЬЦА (deposit), а не всегда игроку — тот же баг, что
         // чинили у фермы в 1.0.062
@@ -3010,7 +3188,7 @@ export class Game {
         u.wphase = u.gatherT / cyc;
         if (u.gatherT > cyc) {
           u.gatherT = 0; u.wphase = 0;
-          u.carry = { type: 'food', amt: u.carry.amt + 2 * this.gatherMult() };
+          u.carry = { type: 'food', amt: u.carry.amt + 2 * this.gatherMult() * this.farmMult() };
           this.burst(u.x, u.y - 8, 2, ['#a3e635', '#65a30d'], 50, 0.5);
           // ферма отдаёт еду на месте (без похода на склад) — но в казну ВЛАДЕЛЬЦА
           if (u.carry.amt >= this.carryCap()) this.deposit(u);
@@ -3701,7 +3879,8 @@ export class Game {
       if (this.moveTowardPath(u, dest.x, dest.y, dt, dest.size / 2 + 20)) {
         // догрузились: выручка тем больше, чем дальше плечо (как торговые повозки в AoE)
         const leg = Math.hypot(dest.x - home.x, dest.y - home.y);
-        const bonus = this.hasTech('coinage') ? 1.35 : 1;
+        let bonus = this.hasTech('coinage') ? 1.35 : 1;
+        if (this.bonusTier('trade', 3)) bonus *= 1.5; // союз торговых народов: караваны богаче
         u.trGold = Math.round(Math.min(90, 14 + leg / 22) * bonus);
         u.trPhase = 'back'; u.trWaitT = 1.2;
         this.burst(u.x, u.y - 18, 6, ['#fde047', '#facc15', '#fff7cc'], 60, 0.6);
@@ -3987,6 +4166,8 @@ export class Game {
       if (b.done < 1) {
         const def = BUILDING_DEFS[b.key];
         let rate = b.owner === 'enemy' ? 1 / (def.buildTime * 0.8) : 1 / (def.buildTime * 2.2);
+        // союз с научными племенами (ур.3) ускоряет возведение построек
+        if (b.owner === 'player' && this.bonusTier('science', 3)) rate *= 1.2;
         let helpers = 0;
         for (const u of this.units) {
           if (u.owner !== b.owner || u.key !== 'villager') continue;
@@ -4050,7 +4231,7 @@ export class Game {
       }
       // research progress
       if (b.research && b.owner === 'player') {
-        b.research.t += dt;
+        b.research.t += dt * this.researchMult();
         if (Math.random() < dt * 2) this.spark(b.x + rand(-16, 16), b.y - 36, '#93c5fd');
         if (b.research.t >= b.research.total) { const id = b.research.id; b.research = null; this.applyTech(id); }
       }
@@ -4601,6 +4782,7 @@ export class Game {
       atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale,
       tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
       hasMarket: this.marketCount() > 0,
+      woodDiscount: this.woodDiscount(),
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
       techTree: this.techTreeData(),
@@ -4618,6 +4800,7 @@ export class Game {
   nationsHud(): NationHud[] {
     return NATIONS.map(d => {
       const met = this.metNation(d.id);
+      const tkind = d.kind === 'tribe' ? this.tribeKind(d.id) : null;
       return {
         id: d.id, name: d.name, ruler: d.ruler, title: d.title, portrait: d.portrait, color: d.color, greet: d.greet,
         kind: d.kind, met,
@@ -4627,6 +4810,15 @@ export class Game {
         camps: d.kind === 'tribe' ? this.nationCampCount(d.id) : 0,
         gift: d.choices.find(c => c.act === 'gift')?.gold ?? 40,
         canGreet: met,
+        envoys: this.envoys[d.id] ?? 0,
+        rivalEnvoys: this.rivalEnvoys[d.id] ?? 0,
+        envoyLevel: d.kind === 'tribe' ? this.envoyLevel(d.id) : 0,
+        envoyNext: d.kind === 'tribe' ? this.envoysToNext(d.id) : 0,
+        envoyCost: envoyCost(this.envoys[d.id] ?? 0),
+        suzerain: d.kind === 'tribe' ? this.suzerain(d.id) : null,
+        typeLabel: tkind ? TRIBE_TYPES[tkind].label : '',
+        typeIcon: tkind ? TRIBE_TYPES[tkind].icon : '',
+        perks: tkind ? [...TRIBE_TYPES[tkind].levels] : [],
       };
     });
   }

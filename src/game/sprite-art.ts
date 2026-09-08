@@ -398,6 +398,11 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
   "kz_archer_wb":    { "ax": 48.8, "ay": 149, "baseW": 102, "w": 102, "h": 150 },
   "kz_spearman_wa":  { "ax": 42.8, "ay": 149, "baseW": 76,  "w": 76,  "h": 150 },
   "kz_spearman_wb":  { "ax": 42.8, "ay": 149, "baseW": 75,  "w": 75,  "h": 150 },
+  "kz_trader":       { "ax": 44,   "ay": 151, "baseW": 68,  "w": 68,  "h": 150 },
+  "kz_trader_f":     { "ax": 36,   "ay": 151, "baseW": 74,  "w": 74,  "h": 150 },
+  "kz_trader_b":     { "ax": 37.4, "ay": 151, "baseW": 77,  "w": 77,  "h": 150 },
+  "kz_trader_wa":    { "ax": 41.4, "ay": 151, "baseW": 79,  "w": 79,  "h": 150 },
+  "kz_trader_wb":    { "ax": 47.9, "ay": 151, "baseW": 88,  "w": 88,  "h": 150 },
   "kz_monk_wa":      { "ax": 62.5, "ay": 150, "baseW": 106, "w": 106, "h": 150 },
   "kz_monk_wb":      { "ax": 57.3, "ay": 149, "baseW": 96,  "w": 96,  "h": 150 },
   "kz_knight_wa":    { "ax": 39.7, "ay": 128, "baseW": 129, "w": 129, "h": 128 },
@@ -457,6 +462,6 @@ export const UNIT_ANCHORS: Record<string, SprAnchor> = {
 };
 // целевая высота юнита на экране (iso px)
 export const UNIT_TARGET_H: Record<string, number> = {
-  villager: 46, swordsman: 48, archer: 46, spearman: 50, knight: 60, cavalry: 60, catapult: 46, monk: 44, wolf: 34,
+  villager: 46, swordsman: 48, archer: 46, spearman: 50, knight: 60, cavalry: 60, catapult: 46, monk: 44, wolf: 34, trader: 46,
   sheep: 30, cow: 36, deer: 40, scout: 46,
 };

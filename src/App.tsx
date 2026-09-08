@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.063';
+export const GAME_VERSION = '1.0.064';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -144,6 +144,8 @@ export default function App() {
   const g = () => gameRef.current;
   const canAfford = (c: { wood: number; food: number; gold: number }) =>
     hud ? hud.wood >= c.wood && hud.food >= c.food && hud.gold >= c.gold : false;
+  // союзная скидка на дерево (ремесленные народы): цены в доке показываем уже с ней
+  const wdisc = hud?.woodDiscount ?? 1;
 
   if (screen === 'menu') return (
     <MenuScreen
@@ -520,20 +522,20 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <TrainBtn label="Юрта" icon="⛺" key_="Q" cost={BUILDING_DEFS.house.cost} ok={canAfford(BUILDING_DEFS.house.cost)} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
-                  <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={BUILDING_DEFS.barracks.cost} ok={canAfford(BUILDING_DEFS.barracks.cost)} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
-                  <TrainBtn label="Башня" icon="🗼" key_="R" cost={BUILDING_DEFS.tower.cost} ok={canAfford(BUILDING_DEFS.tower.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
-                  <TrainBtn label="Пашня" icon="🌾" key_="F" cost={BUILDING_DEFS.farm.cost} ok={canAfford(BUILDING_DEFS.farm.cost)} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
-                  <TrainBtn label="Склад" icon="📦" key_="K" cost={BUILDING_DEFS.storehouse.cost} ok={canAfford(BUILDING_DEFS.storehouse.cost)} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
-                  <TrainBtn label="Загон" icon="🐑" key_="H" cost={BUILDING_DEFS.pen.cost} ok={canAfford(BUILDING_DEFS.pen.cost)} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
-                  <TrainBtn label="Конюшня" icon="🐴" key_="Z" cost={BUILDING_DEFS.stable.cost} ok={canAfford(BUILDING_DEFS.stable.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
-                  <TrainBtn label="Кузница" icon="🔨" key_="X" cost={BUILDING_DEFS.blacksmith.cost} ok={canAfford(BUILDING_DEFS.blacksmith.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
-                  <TrainBtn label="Базар" icon="🏪" key_="C" cost={BUILDING_DEFS.market.cost} ok={canAfford(BUILDING_DEFS.market.cost)} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
-                  <TrainBtn label="Мешіт" icon="🕌" key_="M" cost={BUILDING_DEFS.mosque.cost} ok={canAfford(BUILDING_DEFS.mosque.cost)} active={hud?.placement === 'mosque'} tip={bldStats('mosque')} onClick={() => g()?.enterPlacement('mosque')} />
+                  <TrainBtn label="Юрта" icon="⛺" key_="Q" cost={bldCostOf('house', wdisc)} ok={canAfford(bldCostOf('house', wdisc))} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
+                  <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={bldCostOf('barracks', wdisc)} ok={canAfford(bldCostOf('barracks', wdisc))} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
+                  <TrainBtn label="Башня" icon="🗼" key_="R" cost={bldCostOf('tower', wdisc)} ok={canAfford(bldCostOf('tower', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
+                  <TrainBtn label="Пашня" icon="🌾" key_="F" cost={bldCostOf('farm', wdisc)} ok={canAfford(bldCostOf('farm', wdisc))} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
+                  <TrainBtn label="Склад" icon="📦" key_="K" cost={bldCostOf('storehouse', wdisc)} ok={canAfford(bldCostOf('storehouse', wdisc))} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
+                  <TrainBtn label="Загон" icon="🐑" key_="H" cost={bldCostOf('pen', wdisc)} ok={canAfford(bldCostOf('pen', wdisc))} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
+                  <TrainBtn label="Конюшня" icon="🐴" key_="Z" cost={bldCostOf('stable', wdisc)} ok={canAfford(bldCostOf('stable', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
+                  <TrainBtn label="Кузница" icon="🔨" key_="X" cost={bldCostOf('blacksmith', wdisc)} ok={canAfford(bldCostOf('blacksmith', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
+                  <TrainBtn label="Базар" icon="🏪" key_="C" cost={bldCostOf('market', wdisc)} ok={canAfford(bldCostOf('market', wdisc))} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
+                  <TrainBtn label="Мешіт" icon="🕌" key_="M" cost={bldCostOf('mosque', wdisc)} ok={canAfford(bldCostOf('mosque', wdisc))} active={hud?.placement === 'mosque'} tip={bldStats('mosque')} onClick={() => g()?.enterPlacement('mosque')} />
                   <div className="mx-0.5 w-px shrink-0 bg-white/10" />
-                  <TrainBtn label="Стена" icon="🧱" key_="B" cost={BUILDING_DEFS.wall.cost} ok={canAfford(BUILDING_DEFS.wall.cost)} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
-                  <TrainBtn label="Ворота" icon="🚪" key_="V" cost={BUILDING_DEFS.gate.cost} ok={canAfford(BUILDING_DEFS.gate.cost)} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
-                  <TrainBtn label="Мавзолей" icon="⭐" key_="W" cost={BUILDING_DEFS.wonder.cost} ok={canAfford(BUILDING_DEFS.wonder.cost) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
+                  <TrainBtn label="Стена" icon="🧱" key_="B" cost={bldCostOf('wall', wdisc)} ok={canAfford(bldCostOf('wall', wdisc))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
+                  <TrainBtn label="Ворота" icon="🚪" key_="V" cost={bldCostOf('gate', wdisc)} ok={canAfford(bldCostOf('gate', wdisc))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
+                  <TrainBtn label="Мавзолей" icon="⭐" key_="W" cost={bldCostOf('wonder', wdisc)} ok={canAfford(bldCostOf('wonder', wdisc)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
                 </>
               )}
             </div>
@@ -615,7 +617,8 @@ export default function App() {
       {/* ===== ПАНЕЛЬ ДИПЛОМАТИИ ===== */}
       {showDip && hud && (
         <DiplomacyModal hud={hud} onClose={() => setShowDip(false)}
-          onAudience={(nid) => gameRef.current?.openAudience(nid)} />
+          onAudience={(nid) => gameRef.current?.openAudience(nid)}
+          onEnvoy={(nid) => gameRef.current?.sendEnvoy(nid)} />
       )}
 
       {/* ===== SETTINGS MODAL (в игре) ===== */}
@@ -659,6 +662,11 @@ function unitStats(k: string): string {
   if (!d) return '';
   const melee = d.range <= 60;
   return `${d.desc ? d.desc + '\n' : ''}❤ ${d.hp}  ⚔ ${d.atk}  ${melee ? 'ближний бой' : `🎯 дальность ${d.range}`}  👟 ${d.speed}`;
+}
+// цена постройки с учётом союзной скидки на дерево (ремесленные народы)
+function bldCostOf(k: keyof typeof BUILDING_DEFS, disc: number) {
+  const c = BUILDING_DEFS[k].cost;
+  return { wood: Math.round(c.wood * disc), food: c.food, gold: c.gold };
 }
 function bldStats(k: string): string {
   const d = BUILDING_DEFS[k as keyof typeof BUILDING_DEFS] as unknown as { hp: number; desc?: string };
@@ -1039,7 +1047,8 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
               <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
               <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда. Склад (K) у дальней рощи — шаруа сдают добычу туда, а не в ставку." />
               <HowRow n="4" t="Юрта (Q) для населения → Казармы (E) → Сарбазы (2) и Мергены (3). Конюшня (Z) даёт жасауылов, кузница (X) — катапульты. Мешіт-медресе (M) готовит имамов-лекарей (8)." />
-              <HowRow n="5" t="Базар (C) шлёт көпес-торговцев (0) в становища друзей — караван возит золото сам. Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами. Победа — сжечь ставку джунгарского хунтайджи!" />
+              <HowRow n="5" t="Базар (C) шлёт көпес-торговцев (0) в становища друзей — караван возит золото сам. Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами." />
+              <HowRow n="6" t="Дипломатия: шлите ✉️ посланников племенам — на 1/3/6 посланниках открываются бонусы (воины в дар, золото, скидки, урожай). Джунгары шлют своих: у кого больше — тот сюзерен. Победа — сжечь ставку хунтайджи!" />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-1.5">
               <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 0-9 / QERFKMZXC / G / H / Space</div>
@@ -1180,10 +1189,11 @@ function LeaderAudience({ name, ruler, title, portrait, color, mood, atWar, quot
   );
 }
 
-function DiplomacyModal({ hud, onClose, onAudience }: {
+function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
   hud: HudSnapshot;
   onClose: () => void;
   onAudience: (nid: string) => void;
+  onEnvoy: (nid: string) => void;
 }) {
   const relColor = (n: HudSnapshot['nations'][number]) =>
     n.atWar ? 'text-red-400' : n.rel === 'Дружба' ? 'text-emerald-300' : n.rel === 'Нейтралитет' ? 'text-slate-200' : 'text-slate-400';
@@ -1232,7 +1242,41 @@ function DiplomacyModal({ hud, onClose, onAudience }: {
                   </div>
                 </div>
               </div>
-              {n.met && (
+              {n.met && n.kind === 'tribe' && (
+                <div className="mt-2 rounded-xl border border-white/10 bg-black/25 p-2">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-[11px] font-black text-slate-200">{n.typeIcon} {n.typeLabel} народ</span>
+                    {n.suzerain === 'player' && <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-black text-amber-200">👑 вы сюзерен</span>}
+                    {n.suzerain === 'rival' && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-300">⚠️ под джунгарами</span>}
+                  </div>
+                  {/* шкала влияния: посланники игрока против джунгарских */}
+                  <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold">
+                    <span className="text-emerald-300">🤝 вы: {n.envoys}</span>
+                    <span className="text-slate-500">против</span>
+                    <span className="text-red-300">☾ джунгары: {n.rivalEnvoys}</span>
+                    {n.envoyNext > 0 && <span className="ml-auto text-slate-400">до ур.{n.envoyLevel + 1}: ещё {n.envoyNext}</span>}
+                  </div>
+                  {/* три уровня бонусов */}
+                  <div className="mb-2 grid gap-1">
+                    {n.perks.map((p, i) => {
+                      const active = n.envoyLevel >= i + 1 && n.suzerain !== 'rival';
+                      return (
+                        <div key={i} className={`flex items-start gap-1.5 text-[10.5px] ${active ? 'text-emerald-200' : 'text-slate-500'}`}>
+                          <span className="shrink-0 font-black">{active ? '✔' : `${[1, 3, 6][i]}·`}</span>
+                          <span>{p}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <DiplBtn onClick={() => onEnvoy(n.id)} title={`Отправить посланника (${n.envoyCost}🪙) — растит влияние`}>
+                      ✉️ Посланник ({n.envoyCost}🪙)
+                    </DiplBtn>
+                    <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем">💬 Переговоры</DiplBtn>
+                  </div>
+                </div>
+              )}
+              {n.met && n.kind !== 'tribe' && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем">💬 Переговоры с правителем</DiplBtn>
                 </div>

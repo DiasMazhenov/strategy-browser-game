@@ -163,6 +163,63 @@ export const NATIONS: NationDef[] = [
   },
 ];
 
+// ── ПЛЕМЕНА КАК ГОРОДА-ГОСУДАРСТВА (Civ VI) ──
+// Влияние копится посланниками (золото → посланник). На 1/3/6 посланниках открываются
+// нарастающие бонусы по типу народа. Сюзерен — тот, у кого посланников больше (игрок
+// или джунгары); сюзеренитет даёт верхний бонус и может перейти к сопернику.
+export type TribeKind = 'military' | 'trade' | 'science' | 'farm' | 'craft';
+
+export interface TribeTypeDef {
+  kind: TribeKind;
+  label: string;      // название типа для UI
+  icon: string;
+  levels: [string, string, string]; // описания бонусов на 1 / 3 / 6 посланников
+}
+
+export const TRIBE_TYPES: Record<TribeKind, TribeTypeDef> = {
+  military: { kind: 'military', label: 'Военный', icon: '⚔️', levels: [
+    '+10% HP вашим войскам',
+    'Раз в 3 мин племя присылает воина в дар',
+    'Дары чаще и сильнее (батыр/жасауыл)',
+  ] },
+  trade: { kind: 'trade', label: 'Торговый', icon: '🪙', levels: [
+    'Пассивный доход +3🪙 каждые 8 с',
+    'Обмен на базаре дешевле на 15%',
+    'Караваны көпес приносят +50% выручки',
+  ] },
+  science: { kind: 'science', label: 'Научный', icon: '📜', levels: [
+    'Исследования быстрее на 10%',
+    'Исследования быстрее на 25%',
+    'Постройки возводятся на 20% быстрее',
+  ] },
+  farm: { kind: 'farm', label: 'Аграрный', icon: '🌾', levels: [
+    'Пашни дают +15% еды',
+    'Стада в загонах растут быстрее',
+    'Пашни дают +35% еды, дойка щедрее',
+  ] },
+  craft: { kind: 'craft', label: 'Ремесленный', icon: '🪵', levels: [
+    'Постройки дешевле на 10% дерева',
+    'Постройки дешевле на 20% дерева',
+    'Шаруа добывают на 15% быстрее',
+  ] },
+};
+
+// тип каждого народа-племени (см. plan.md, пункт 7)
+export const TRIBE_KIND_BY_ID: Record<string, TribeKind> = {
+  pecheneg: 'military',
+  oghuz: 'military',
+  khwarezm: 'trade',
+  slav: 'craft',
+  kokand: 'farm',
+  bukhara: 'science',
+  russia: 'trade',
+};
+
+// пороги влияния: сколько посланников нужно для уровня 1 / 2 / 3
+export const ENVOY_TIERS = [1, 3, 6] as const;
+// цена одного посланника в золоте (растёт с числом уже вложенных)
+export const envoyCost = (have: number): number => 35 + have * 15;
+
 // id кочевых/оседлых народов, лагеря которых встречаются на карте
 export const TRIBE_IDS: string[] = NATIONS.filter(n => n.kind === 'tribe').map(n => n.id);
 

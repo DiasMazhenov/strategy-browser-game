@@ -125,6 +125,9 @@ import kzSpearmanF from '../assets/sprites/units/kz/kz_spearman_f.png';
 import kzSpearmanB from '../assets/sprites/units/kz/kz_spearman_b.png';
 import kzMonkF from '../assets/sprites/units/kz/kz_monk_f.png';
 import kzMonkB from '../assets/sprites/units/kz/kz_monk_b.png';
+import kzTrader from '../assets/sprites/units/kz/kz_trader.png';
+import kzTraderF from '../assets/sprites/units/kz/kz_trader_f.png';
+import kzTraderB from '../assets/sprites/units/kz/kz_trader_b.png';
 import kzKnightF from '../assets/sprites/units/kz/kz_knight_f.png';
 import kzKnightB from '../assets/sprites/units/kz/kz_knight_b.png';
 import kzCavalryF from '../assets/sprites/units/kz/kz_cavalry_f.png';
@@ -140,6 +143,8 @@ import kzSpearmanWA from '../assets/sprites/units/kz/kz_spearman_wa.png';
 import kzSpearmanWB from '../assets/sprites/units/kz/kz_spearman_wb.png';
 import kzMonkWA from '../assets/sprites/units/kz/kz_monk_wa.png';
 import kzMonkWB from '../assets/sprites/units/kz/kz_monk_wb.png';
+import kzTraderWA from '../assets/sprites/units/kz/kz_trader_wa.png';
+import kzTraderWB from '../assets/sprites/units/kz/kz_trader_wb.png';
 import kzKnightWA from '../assets/sprites/units/kz/kz_knight_wa.png';
 import kzKnightWB from '../assets/sprites/units/kz/kz_knight_wb.png';
 import kzCavalryWA from '../assets/sprites/units/kz/kz_cavalry_wa.png';
@@ -219,6 +224,7 @@ const KZ_BASE: Partial<Record<UnitKey, HTMLImageElement>> = {
   villager: mk(kzVillager), swordsman: mk(kzSwordsman), archer: mk(kzArcher), spearman: mk(kzSpearman),
   knight: mk(kzKnight), cavalry: mk(kzCavalry), catapult: mk(kzCatapult), monk: mk(kzMonk),
   scout: mk(kzScout), // свой спрайт лёгкого разведчика-бегуна (синий чапан, бурка, сабля)
+  trader: mk(kzTrader), // көпес: полосатый чапан, тюбетейка, тюк за спиной
 };
 const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   swordsman: [[mk(kzSwordsmanF), 'kz_swordsman_f'], [mk(kzSwordsmanF), 'kz_swordsman_f']],
@@ -226,6 +232,7 @@ const KZ_FRONT_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   archer: [[mk(kzArcherF), 'kz_archer_f'], [mk(kzArcherF), 'kz_archer_f']],
   spearman: [[mk(kzSpearmanF), 'kz_spearman_f'], [mk(kzSpearmanF), 'kz_spearman_f']],
   monk: [[mk(kzMonkF), 'kz_monk_f'], [mk(kzMonkF), 'kz_monk_f']],
+  trader: [[mk(kzTraderF), 'kz_trader_f'], [mk(kzTraderF), 'kz_trader_f']],
   knight: [[mk(kzKnightF), 'kz_knight_f'], [mk(kzKnightF), 'kz_knight_f']],
   cavalry: [[mk(kzCavalryF), 'kz_cavalry_f'], [mk(kzCavalryF), 'kz_cavalry_f']],
 };
@@ -235,6 +242,7 @@ const KZ_BACK_CYCLE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   archer: [[mk(kzArcherB), 'kz_archer_b'], [mk(kzArcherB), 'kz_archer_b']],
   spearman: [[mk(kzSpearmanB), 'kz_spearman_b'], [mk(kzSpearmanB), 'kz_spearman_b']],
   monk: [[mk(kzMonkB), 'kz_monk_b'], [mk(kzMonkB), 'kz_monk_b']],
+  trader: [[mk(kzTraderB), 'kz_trader_b'], [mk(kzTraderB), 'kz_trader_b']],
   knight: [[mk(kzKnightB), 'kz_knight_b'], [mk(kzKnightB), 'kz_knight_b']],
   cavalry: [[mk(kzCavalryB), 'kz_cavalry_b'], [mk(kzCavalryB), 'kz_cavalry_b']],
 };
@@ -250,6 +258,7 @@ const KZ_WALK_SIDE: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
   knight: W2(kzKnightWA, 'kz_knight_wa', kzKnightWB, 'kz_knight_wb'),
   cavalry: W2(kzCavalryWA, 'kz_cavalry_wa', kzCavalryWB, 'kz_cavalry_wb'),
   monk: W2(kzMonkWA, 'kz_monk_wa', kzMonkWB, 'kz_monk_wb'),
+  trader: W2(kzTraderWA, 'kz_trader_wa', kzTraderWB, 'kz_trader_wb'),
 };
 // перёд-шаг (на камеру) и спина-шаг (от камеры) — полноценный цикл у крестьянина
 const KZ_WALK_FRONT: Partial<Record<UnitKey, [HTMLImageElement, string][]>> = {
