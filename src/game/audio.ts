@@ -370,6 +370,13 @@ export class SoundBank {
   lose() { this.ensure(); if (!this.gate('lose', 500)) return; [400, 350, 300, 240, 170].forEach((f, i) => this.tone(f, 0.4, 'sine', 0.18, -30, i * 0.16)); }
   quest() { this.ensure(); if (!this.gate('quest', 300)) return; this.tone(880, 0.14, 'sine', 0.18, 0, 0, 0.2); this.tone(1174, 0.2, 'sine', 0.16, 0, 0.1, 0.15); }
   heal() { this.ensure(); if (!this.gate('heal', 200)) return; this.tone(660, 0.2, 'sine', 0.14, 60, 0, 0.2); this.tone(990, 0.24, 'sine', 0.12, 0, 0.09, 0.15); }
+  // тревога «нас атакуют»: низкий боевой рог в две ноты (гейт 6с — не спамит)
+  alarm() {
+    this.ensure(); if (!this.gate('alarm', 6000)) return;
+    this.tone(196, 0.55, 'sawtooth', 0.16, 18, 0, 0.35);
+    this.tone(147, 0.75, 'sawtooth', 0.14, 12, 0.22, 0.4);
+    this.tone(392, 0.4, 'triangle', 0.07, 0, 0.05, 0.3);
+  }
   // вой волка (зверь не говорит)
   wolf() { this.ensure(); if (!this.gate('wolf', 800)) return; this.tone(220, 0.5, 'sine', 0.16, -90); this.tone(233, 0.5, 'sine', 0.1, -95, 0.02); }
 }

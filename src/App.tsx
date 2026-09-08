@@ -17,7 +17,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.065';
+export const GAME_VERSION = '1.0.066';
 function loadScores(): ScoreEntry[] {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
 }
@@ -204,6 +204,15 @@ export default function App() {
                 </span>
               )}
             </button>
+            {hud?.alertHud && (
+              <button
+                onClick={() => gameRef.current?.jumpToAlert()}
+                className="pointer-events-auto flex animate-pulse items-center gap-1.5 rounded-full border border-red-400/60 bg-red-600/30 px-2 py-0.5 text-[11px] font-black text-red-100 hover:bg-red-600/50"
+                title={`${hud.alertHud.sub} — щёлкните, чтобы перенести камеру к месту боя`}
+              >
+                ⚠️ НАС АТАКУЮТ! <span className="font-bold opacity-80">к месту →</span>
+              </button>
+            )}
             {(hud?.drought ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-orange-500/20 px-2 py-0.5 text-[11px] font-black text-orange-200" title="Засуха: пашни дают меньше еды">
                 🌵 Засуха: {hud!.drought}с

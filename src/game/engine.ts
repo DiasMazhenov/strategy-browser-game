@@ -169,6 +169,12 @@ interface Unit {
   wx: number; wy: number; // wander anchor for wolves
   hidden?: number;        // id здания-укрытия (гарнизон)
   relicTarget?: number;   // id реликвии, за которой идёт монах
+  // ── КАМЛАНИЕ ИМАМА (конверсия, AoE): переманивание вражеского юнита ──
+  convTarget?: number;    // [имам] id юнита, которого обращает
+  convT?: number;         // [имам] прогресс камлания, сек
+  convertedBy?: number;   // [цель] id имама, который её сейчас обращает
+  convProg?: number;      // [цель] прогресс 0..1 — для полосы над головой
+  converts?: number;      // [имам] сколько душ обращено (для статистики)
   // ── көпес (торговец): круговой маршрут «свой базар → дружественный город/лагерь → базар» ──
   trPhase?: 'out' | 'back';  // out — везёт товар к партнёру, back — возвращается с выручкой
   trHomeB?: number;          // id своего базара (точка отправления и сдачи выручки)
@@ -286,6 +292,8 @@ export interface HudSnapshot {
   // активное событие степи (модалка с выбором) и тикающие последствия
   event: { id: string; icon: string; title: string; text: string; opts: { label: string; desc: string }[] } | null;
   drought: number; plague: number;
+  // тревога «нас атакуют»: маркер жив ~20 с, клик по плашке прыгает к месту
+  alertHud: { sub: string; t: number } | null;
 }
 export interface NationHud {
   id: string; name: string; ruler: string; title: string; portrait: string; color: string; greet: string;
@@ -387,6 +395,9 @@ export class Game {
   event: { id: string; opts: string[] } | null = null; // активное событие (ждёт решения игрока)
   eventT = 0;                    // таймер до следующего события
   eventSeen: string[] = [];      // уже выпадавшие (чтобы не повторяться подряд)
+  // ── тревога «нас атакуют» (AoE) ──
+  alert: { x: number; y: number; t: number; sub: string } | null = null; // место последнего нападения
+  lastAlertT = -99;              // время прошлой тревоги (антиспам)
   droughtT = 0;                  // засуха: пашни дают меньше, пока тикает
   plagueT = 0;                   // эпидемия: шаруа работают медленнее
   audienceId: string | null = null;             // id народа на экране переговоров (открыт из модалки)
@@ -1674,7 +1685,16 @@ export class Game {
     const nd = this.pickNode(x, y);
     const hasVill = us.some(u => u.key === 'villager');
     const hasMil = us.some(u => this.combatUnit(u));
-    if (tu && tu.owner !== 'player') { this.orderAttack(us, tu); return; }
+    if (tu && tu.owner !== 'player') {
+      // ИМАМЫ в выделении камлают по цели (обращают), остальные атакуют обычным порядком
+      const monks = us.filter(u => u.key === 'monk');
+      const rest = us.filter(u => u.key !== 'monk');
+      let didConv = false;
+      if (monks.length) didConv = this.orderConvert(monks, tu);
+      if (rest.length) this.orderAttack(rest, tu);
+      else if (!didConv) this.orderAttack(us, tu); // цель необращаема (скот/волк) — обычная атака
+      return;
+    }
     if (tb && tb.owner !== 'player') { this.orderAttackBld(us, tb); return; }
     if (nd && hasVill) {
       const vills = us.filter(u => u.key === 'villager');
@@ -2588,6 +2608,7 @@ export class Game {
 
     this.updateUnits(dt);
     this.updateBuildings(dt);
+    if (this.alert) { this.alert.t += dt; if (this.alert.t > 20) this.alert = null; } // маркер тревоги гаснет
     this.updateEvents(dt);         // случайные события степи
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
@@ -3957,7 +3978,51 @@ export class Game {
     return [clamp(u.x + Math.cos(a) * 620, 60, WORLD.w - 60), clamp(u.y + Math.sin(a) * 620, 60, WORLD.h - 60)];
   }
 
+  // радиус, с которого имам может камлать (чуть меньше дальности лечения)
+  readonly CONV_RANGE = 120;
+  readonly CONV_TIME = 7;     // сколько секунд длится обращение
+
   updateMonk(u: Unit, dt: number) {
+    // ── КАМЛАНИЕ: обращение вражеского юнита в свою веру ──
+    if (u.convTarget != null) {
+      const t = this.units.find(x => x.id === u.convTarget);
+      const bad = !t || t.hp <= 0 || t.owner === u.owner || t.key === 'wolf'
+        || t.key === 'sheep' || t.key === 'cow' || t.key === 'deer';
+      if (bad) { this.stopConvert(u); }
+      else {
+        const d2 = dist2(u.x, u.y, t!.x, t!.y);
+        if (d2 > this.CONV_RANGE * this.CONV_RANGE) {
+          // цель убегает — догоняем, прогресс замирает (не сбрасывается сразу)
+          u.convT = Math.max(0, (u.convT ?? 0) - dt * 0.5);
+          t!.convProg = (u.convT ?? 0) / this.CONV_TIME;
+          this.moveTowardPath(u, t!.x, t!.y, dt, this.CONV_RANGE - 20);
+          if ((u.convT ?? 0) <= 0 && d2 > (this.CONV_RANGE * 2.5) ** 2) this.stopConvert(u); // ушла слишком далеко
+          return;
+        }
+        // стоим и камлаем
+        u.convT = (u.convT ?? 0) + dt;
+        t!.convertedBy = u.id;
+        t!.convProg = Math.min(1, u.convT / this.CONV_TIME);
+        u.atkAnim = Math.min(1, u.atkAnim + dt * 3);
+        u.face = t!.x >= u.x ? 1 : -1;
+        if (Math.random() < dt * 9) this.spark(t!.x + rand(-12, 12), t!.y - rand(6, 26), '#c4b5fd');
+        if (u.convT >= this.CONV_TIME) this.finishConvert(u, t!);
+        return;   // во время камлания имам не лечит
+      }
+    }
+    // ИИ-имам (джунгары) сам ищет жертву для камлания — иначе механика была бы
+    // односторонней: игрок переманивает, а его переманить некому
+    if (u.owner !== 'player' && u.convTarget == null && this.atWar) {
+      let best: Unit | null = null; let bd = this.CONV_RANGE * this.CONV_RANGE;
+      for (const e of this.units) {
+        if (!this.hostile(u.owner, e.owner) || e.hp <= 0) continue;
+        if (e.key === 'wolf' || e.key === 'sheep' || e.key === 'cow' || e.key === 'deer') continue;
+        if (e.convertedBy != null) continue;           // уже обрабатывают
+        const d = dist2(u.x, u.y, e.x, e.y);
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (best) { u.convTarget = best.id; u.convT = 0; }
+    }
     // добрался ли до точки движения
     if (u.state === 'move' || u.state === 'attackmove') {
       if (this.moveTowardPath(u, u.tx, u.ty, dt)) u.state = 'idle';
@@ -3988,6 +4053,76 @@ export class Game {
         u.cd = 0.25;
       }
     }
+  }
+
+  // приказ имаму: начать камлание над вражеским юнитом
+  orderConvert(monks: Unit[], target: Unit): boolean {
+    if (target.hp <= 0) return false;
+    // скот/дичь/волков не обращают — только людей противника
+    if (target.key === 'wolf' || target.key === 'sheep' || target.key === 'cow' || target.key === 'deer') return false;
+    let any = false;
+    for (const m of monks) {
+      if (m.key !== 'monk' || m.owner === target.owner) continue;
+      this.stopConvert(m);
+      m.convTarget = target.id; m.convT = 0;
+      m.state = 'move'; m.tx = target.x; m.ty = target.y; m.targetU = -1; m.targetB = -1;
+      any = true;
+    }
+    if (any) {
+      this.sound.select();
+      this.spawnRing(target.x, target.y, '#c4b5fd');
+      this.floater(target.x, target.y - 40, '☾ Камлание', '#c4b5fd', 14);
+    }
+    return any;
+  }
+  // прервать камлание (имам убит/отвлёкся/цель ушла)
+  stopConvert(m: Unit) {
+    if (m.convTarget != null) {
+      const t = this.units.find(x => x.id === m.convTarget);
+      if (t && t.convertedBy === m.id) { t.convertedBy = undefined; t.convProg = undefined; }
+    }
+    m.convTarget = undefined; m.convT = 0;
+  }
+  // успешное обращение: юнит меняет владельца
+  finishConvert(m: Unit, t: Unit) {
+    const wasOwner = t.owner;
+    t.owner = m.owner;
+    t.convertedBy = undefined; t.convProg = undefined;
+    t.targetU = -1; t.targetB = -1; t.state = 'idle'; t.tribe = false; t.aggro = false;
+    t.homeX = t.x; t.homeY = t.y; t.patrolX = t.x; t.patrolY = t.y;
+    // обращённый крестьянин перестаёт быть пастухом чужого загона
+    t.herder = false; t.penId = undefined; t.pastureId = undefined;
+    m.converts = (m.converts ?? 0) + 1;
+    this.stopConvert(m);
+    this.burst(t.x, t.y - 14, 16, ['#c4b5fd', '#e9d5ff', '#fff'], 110, 0.9);
+    this.spawnRing(t.x, t.y, '#c4b5fd');
+    this.sound.heal();
+    if (m.owner === 'player') {
+      this.score += 120;
+      this.floater(t.x, t.y - 40, `☾ ${UNIT_DEFS[t.key].name} обращён!`, '#e9d5ff', 15);
+      this.pushBanner('☾ Камлание удалось', `Имам обратил врага: ${UNIT_DEFS[t.key].name} теперь ваш`, 3.5);
+    } else if (wasOwner === 'player') {
+      // нас обокрали — это важное событие, поднимаем тревогу
+      this.raiseAlert(t.x, t.y, `Имам джунгар переманил: ${UNIT_DEFS[t.key].name}`);
+    }
+    this.pushHud();
+  }
+
+  // ── ТРЕВОГА «НАС АТАКУЮТ!» (AoE): гудок + маркер на миникарте + прыжок камеры ──
+  raiseAlert(x: number, y: number, sub = 'Ваши владения под ударом') {
+    // не спамим: одна тревога не чаще, чем раз в 12 секунд
+    if (this.time - this.lastAlertT < 12) return;
+    this.lastAlertT = this.time;
+    this.alert = { x, y, t: 0, sub };
+    this.pushBanner('⚠️ Нас атакуют!', sub, 4);
+    this.sound.alarm();
+    this.pushHud();
+  }
+  // прыжок камеры к месту последней тревоги (клик по баннеру/маркеру)
+  jumpToAlert() {
+    if (!this.alert) return;
+    this.centerOn(this.alert.x, this.alert.y);
+    this.sound.select();
   }
 
   // ── КӨПЕС (торговец): караван «свой базар → партнёр → базар» ──
@@ -4222,6 +4357,10 @@ export class Game {
     // удар по воину нейтрального племени — всё племя рядом мстит
     if (t.tribe && from) this.provokeTribe(t.x, t.y, from);
     t.hp -= dmg;
+    // ТРЕВОГА: наших бьют за кадром — игрок иначе не заметит (классика AoE)
+    if (t.owner === 'player' && from && from.owner !== 'player' && !this.inView(t.x, t.y, 40)) {
+      this.raiseAlert(t.x, t.y, t.key === 'villager' ? 'Шаруа под ударом!' : 'Ваши воины в бою');
+    }
     this.sound.hit();
     this.spark(t.x, t.y - 12, t.owner === 'player' ? '#93c5fd' : '#fca5a5');
     if (t.owner === 'player') this.dmgFlash = Math.min(0.5, this.dmgFlash + 0.06);
@@ -4249,7 +4388,12 @@ export class Game {
       if (attacker) this.provokeTribe(b.x, b.y, attacker);
     }
     b.hp -= dmg; b.flash = 1;
-    if (b.owner === 'player') { this.dmgFlash = Math.min(0.6, this.dmgFlash + 0.09); this.trauma = Math.min(1, this.trauma + 0.06); }
+    if (b.owner === 'player') {
+      this.dmgFlash = Math.min(0.6, this.dmgFlash + 0.09); this.trauma = Math.min(1, this.trauma + 0.06);
+      if (byOwner !== 'player' && !this.inView(b.x, b.y, 60)) {
+        this.raiseAlert(b.x, b.y, `${BUILDING_DEFS[b.key].name} под ударом!`);
+      }
+    }
     if (b.hp <= 30 && Math.random() < 0.3) this.burst(b.x + rand(-20, 20), b.y - 20, 2, ['#78716c', '#44403c'], 40, 0.8);
     if (b.hp <= 0) this.razeBld(b, byOwner);
   }
@@ -4277,6 +4421,13 @@ export class Game {
 
   killUnit(t: Unit, byOwner?: 'player' | 'enemy' | 'neutral', killer?: Unit) {
     t.hp = 0;
+    // убитый имам прерывает камлание (контрмера противника), а убитая цель —
+    // снимает прогресс со своего имама, иначе полоса «зависает» над трупом
+    if (t.key === 'monk' && t.convTarget != null) this.stopConvert(t);
+    if (t.convertedBy != null) {
+      const m = this.units.find(x => x.id === t.convertedBy);
+      if (m) this.stopConvert(m);
+    }
     this.units = this.units.filter(u => u.id !== t.id);
     this.selected.delete(t.id);
     this.corpses.push({ x: t.x, y: t.y, key: t.key, owner: t.owner, t: 0, life: 4, face: t.face });
@@ -4976,6 +5127,7 @@ export class Game {
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;
       })() : null,
       drought: Math.ceil(this.droughtT), plague: Math.ceil(this.plagueT),
+      alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
     });
   }
 
@@ -5917,6 +6069,21 @@ export class Game {
   drawUnitIso(u: Unit, ix: number, iy: number, water = 0) {
     // y-подскок юнита компенсирован внутри pixelart через bob — передаём «земную» точку
     drawPixelUnit(this.ctx, u, ix, iy, this.time, this.selected.has(u.id), water);
+    // ── полоса КАМЛАНИЯ над обращаемым юнитом (видно, что душу перетягивают) ──
+    if (u.convProg != null && u.convProg > 0) {
+      const ctx = this.ctx;
+      const p = clamp(u.convProg, 0, 1);
+      const w = 34, y = iy - 52;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(ix - w / 2, y, w, 6);
+      ctx.fillStyle = '#c4b5fd';
+      ctx.fillRect(ix - w / 2 + 1, y + 1, (w - 2) * p, 4);
+      // полумесяц-метка: чья вера тянет
+      ctx.fillStyle = '#e9d5ff';
+      ctx.font = '700 9px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('☾', ix, y - 2);
+    }
   }
 
 
@@ -6042,6 +6209,16 @@ export class Game {
     ctx.strokeStyle = '#7cb7ff'; ctx.lineWidth = 1.5; ctx.strokeRect(homeM[0] - 5, homeM[1] - 5, 10, 10);
     if (!this.settings.fogOfWar || this.fogAt(RIVAL.x, RIVAL.y).expl) {
       ctx.strokeStyle = '#f87171'; ctx.strokeRect(rivM[0] - 5, rivM[1] - 5, 10, 10);
+    }
+    // ── МАРКЕР ТРЕВОГИ: пульсирующее красное кольцо там, где нас бьют ──
+    if (this.alert) {
+      const [ax, ay] = toMap(this.alert.x, this.alert.y);
+      const ph = (this.time * 2.2) % 1;              // 0..1 — расходящаяся волна
+      ctx.strokeStyle = `rgba(248,113,113,${(1 - ph) * 0.95})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ax, ay, 3 + ph * 9, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath(); ctx.arc(ax, ay, 2.6, 0, Math.PI * 2); ctx.fill();
     }
     // рамка текущего вьюпорта
     const halfW = (this.vw / this.cam.zoom) / 2, halfH = (this.vh / this.cam.zoom) / 2;
