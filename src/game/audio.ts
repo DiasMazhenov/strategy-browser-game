@@ -51,6 +51,7 @@ const KZ_PHRASES: Record<string, { select: string[]; move: string[]; attack: str
   cavalry:   { select: ['готов', 'к бою'], move: ['вперед'], attack: ['в атаку', 'за короля'], gather: [] },
   catapult:  { select: ['готов', 'к бою'], move: ['вперед'], attack: ['в атаку'], gather: [] },
   monk:      { select: ['готов'], move: [], attack: [], gather: [] },
+  trader:    { select: ['слушаю'], move: ['сейчас сделаю'], attack: [], gather: [] },
 };
 
 // ── голосовые реплики юнитов. Используются ТОЛЬКО фразы, для которых есть

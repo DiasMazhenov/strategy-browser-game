@@ -1170,18 +1170,20 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   }
 
   if (u.key === 'monk') {
-    // роба трапецией
-    px(ctx, x - 9, y + 2, 18, 4, '#b45309');
-    px(ctx, x - 8, y - 12, 16, 14, '#d97706');
-    px(ctx, x - 8, y - 14, 16, 4, '#b45309');
-    // капюшон
-    cx(ctx, x, y - 19, 8, '#b45309');
-    cx(ctx, x + f * 1, y - 17, 5, '#f0c8a0');
-    px(ctx, x + f * 2, y - 19, 2, 2, '#2d1b0e');
-    // посох с крестом
+    // ИМАМ: длинный чапан-роба, белая чалма, посох с полумесяцем (не крест — казахи мусульмане)
+    px(ctx, x - 9, y + 2, 18, 4, '#0f766e');
+    px(ctx, x - 8, y - 12, 16, 14, '#14b8a6');
+    px(ctx, x - 8, y - 14, 16, 4, '#0f766e');
+    // лицо и белая чалма
+    cx(ctx, x, y - 19, 7, '#f0c8a0');
+    px(ctx, x + f * 2, y - 20, 2, 2, '#2d1b0e');
+    cx(ctx, x, y - 23, 8, '#f8fafc');
+    px(ctx, x - 8, y - 24, 16, 3, '#e2e8f0');
+    // посох с полумесяцем
     const sx2 = x + f * 10;
     ln(ctx, sx2, y + 2, sx2, y - 22, 2.5, '#8a6d3b');
-    px(ctx, sx2 - 4, y - 19, 8, 2.5, '#8a6d3b');
+    cx(ctx, sx2, y - 25, 4, '#fde68a');
+    cx(ctx, sx2 + f * 1.6, y - 25, 3.2, '#14b8a6');
     if (atk > 0) {
       ctx.globalAlpha = atk * 0.8;
       cx(ctx, sx2, y - 20, 7, '#fde68a');
@@ -1192,6 +1194,26 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   }
 
   // тело
+  if (u.key === 'trader') {
+    // КӨПЕС: полосатый халат-чапан, тюбетейка, тюк товара за спиной
+    px(ctx, x - 7, y - 13, 14, 15, '#7c3aed');
+    px(ctx, x - 7, y - 13, 14, 3, t.tunic);
+    px(ctx, x - 7, y - 8, 14, 2, '#a78bfa');
+    px(ctx, x - 7, y - 4, 14, 3, '#4c1d95');
+    // тюк с товаром на спине
+    px(ctx, x - f * 10, y - 18, 8, 10, '#a16207');
+    px(ctx, x - f * 10, y - 16, 8, 2, '#facc15');
+    // голова + тюбетейка
+    cx(ctx, x, y - 20, 7, '#f0c8a0');
+    px(ctx, x + f * 3, y - 21, 2, 2, '#2d1b0e');
+    cx(ctx, x, y - 24, 7, '#1e3a8a');
+    px(ctx, x - 7, y - 23, 14, 2, '#fbbf24');
+    // кошель с монетами в руке
+    const px2 = x + f * 9;
+    px(ctx, px2 - 2, y - 9, 5, 6, '#b45309');
+    px(ctx, px2 - 1, y - 10, 3, 2, '#fde047');
+    return;
+  }
   if (u.key === 'villager') {
     px(ctx, x - 7, y - 13, 14, 15, '#b07520');
     px(ctx, x - 7, y - 4, 14, 3, '#5c3618');

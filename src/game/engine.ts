@@ -30,6 +30,7 @@ import kzImgPen from '../assets/sprites/kz/kz_pen.png';
 import kzImgStable from '../assets/sprites/kz/kz_stable.png';
 import kzImgMarket from '../assets/sprites/kz/kz_market.png';
 import kzImgStorehouse from '../assets/sprites/kz/kz_storehouse.png';
+import kzImgMosque from '../assets/sprites/kz/kz_mosque.png';
 import kzImgBlacksmith from '../assets/sprites/kz/kz_blacksmith.png';
 import kzImgWall from '../assets/sprites/kz/kz_wall.png';
 import kzImgGate from '../assets/sprites/kz/kz_gate.png';
@@ -49,7 +50,7 @@ const SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
 const KZ_SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
   towncenter: kzImgTowncenter, house: kzImgHouse, barracks: kzImgBarracks, tower: kzImgTower, farm: kzImgFarm, pen: kzImgPen,
   stable: kzImgStable, market: kzImgMarket, blacksmith: kzImgBlacksmith, wall: kzImgWall, gate: kzImgGate,
-  storehouse: kzImgStorehouse,
+  storehouse: kzImgStorehouse, mosque: kzImgMosque,
 };
 interface BldSprite { img: HTMLImageElement; flash: HTMLCanvasElement | null; ax: number; ay: number; baseW: number }
 const BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
@@ -150,6 +151,7 @@ interface Unit {
   penId?: number;                      // id загона, к которому прикреплён пастух
   herdT?: number;                      // фаза цикла выпаса (счётчик)
   herding?: number[];                  // id животных, которых гонит пастух
+  milkScanT?: number;                  // [работница] таймер редкой проверки «стадо вернулось — пора доить»
   herdX?: number; herdY?: number;      // точка притяжения скота (пастбище/загон) во время выпаса
   pastureId?: number;                  // [скот] id загона, к которому приписано стадо
   herdState?: 'graze' | 'home' | 'pen' | 'back'; // фаза пастушего цикла
@@ -166,6 +168,14 @@ interface Unit {
   wx: number; wy: number; // wander anchor for wolves
   hidden?: number;        // id здания-укрытия (гарнизон)
   relicTarget?: number;   // id реликвии, за которой идёт монах
+  // ── көпес (торговец): круговой маршрут «свой базар → дружественный город/лагерь → базар» ──
+  trPhase?: 'out' | 'back';  // out — везёт товар к партнёру, back — возвращается с выручкой
+  trHomeB?: number;          // id своего базара (точка отправления и сдачи выручки)
+  trDestB?: number;          // id здания партнёра (лагерь племени / ставка соперника)
+  trNation?: string;         // народ-партнёр (для баннера и проверки дружбы)
+  trGold?: number;           // выручка, которую везёт домой
+  trWaitT?: number;          // пауза на «торге» в точке назначения
+  trScanT?: number;          // таймер редкого поиска нового партнёра
   hunt?: boolean;         // крестьянин получил явный приказ охотиться/атаковать (преследует дичь)
   xp?: number; level?: number; kills?: number; // опыт и ранг героя
   // ── разведчик: приказы и шпионаж ──
@@ -897,6 +907,7 @@ export class Game {
     else if (k === '7') this.train('catapult');
     else if (k === '8') this.train('monk');
     else if (k === '9') this.train('scout');
+    else if (k === '0') this.train('trader');
     else if (k === 'h') this.enterPlacement('pen');
     else if (k === 'q') this.enterPlacement('house');
     else if (k === 'e') this.enterPlacement('barracks');
@@ -906,6 +917,7 @@ export class Game {
     else if (k === 'x') this.enterPlacement('blacksmith');
     else if (k === 'c') this.enterPlacement('market');
     else if (k === 'k') this.enterPlacement('storehouse');
+    else if (k === 'm' || k === 'ь') this.enterPlacement('mosque');
     else if (k === 'b') this.enterPlacement('wall');
     else if (k === 'v') this.enterPlacement('gate');
     else if (k === 'w') this.enterPlacement('wonder');
@@ -1347,13 +1359,13 @@ export class Game {
     const tb = this.pickBld(x, y);
     const nd = this.pickNode(x, y);
     const hasVill = us.some(u => u.key === 'villager');
-    const hasMil = us.some(u => u.key !== 'villager');
+    const hasMil = us.some(u => this.combatUnit(u));
     if (tu && tu.owner !== 'player') { this.orderAttack(us, tu); return; }
     if (tb && tb.owner !== 'player') { this.orderAttackBld(us, tb); return; }
     if (nd && hasVill) {
       const vills = us.filter(u => u.key === 'villager');
       for (const v of vills) this.orderGather(v, nd.id);
-      if (hasMil) this.orderAttackMove(us.filter(u => u.key !== 'villager'), x, y);
+      if (hasMil) this.orderAttackMove(us.filter(u => this.combatUnit(u)), x, y);
       return;
     }
     // own farm → gather
@@ -1375,7 +1387,7 @@ export class Game {
         this.assignShepherd(free, tb);
         this.spawnRing(tb.x, tb.y, '#a3e635');
       }
-      if (hasMil) this.orderAttackMove(us.filter(u => u.key !== 'villager'), x, y);
+      if (hasMil) this.orderAttackMove(us.filter(u => this.combatUnit(u)), x, y);
       return;
     }
     // own construction → assist
@@ -1392,7 +1404,7 @@ export class Game {
     if (hasMil && !hasVill) this.orderAttackMove(us, x, y);
     else if (!hasMil) { for (const v of us) { v.state = 'move'; v.tx = x + rand(-24, 24); v.ty = y + rand(-24, 24); v.targetU = -1; v.targetB = -1; v.nodeId = -1; v.buildId = -1; } this.sound.move(); this.voiceSel('move'); this.spawnRing(x, y, '#7dd3fc'); }
     else {
-      this.orderAttackMove(us.filter(u => u.key !== 'villager'), x, y);
+      this.orderAttackMove(us.filter(u => this.combatUnit(u)), x, y);
       for (const v of us.filter(u => u.key === 'villager')) { v.state = 'move'; v.tx = x + rand(-24, 24); v.ty = y + rand(-24, 24); v.targetU = -1; v.targetB = -1; v.nodeId = -1; v.buildId = -1; }
       this.sound.move(); this.spawnRing(x, y, '#7dd3fc');
     }
@@ -1440,7 +1452,7 @@ export class Game {
   }
   orderAttackMove(us: Unit[], x: number, y: number) {
     // атакующие и обычные — строй, крестьяне не лезут в линию
-    const mil = us.filter(u => u.key !== 'villager');
+    const mil = us.filter(u => this.combatUnit(u));
     this.formation(mil, x, y);
     for (const u of mil) { u.state = 'attackmove'; u.targetU = -1; u.targetB = -1; }
     us.filter(u => u.key === 'villager').forEach((v, i) => {
@@ -1452,7 +1464,7 @@ export class Game {
 
   // боевая стойка выбранных войск
   setStance(stance: 'aggressive' | 'defensive' | 'stand') {
-    const us = this.selUnits().filter(u => u.owner === 'player' && u.key !== 'villager' && u.key !== 'wolf');
+    const us = this.selUnits().filter(u => u.owner === 'player' && this.combatUnit(u));
     if (!us.length) return;
     for (const u of us) {
       u.stance = stance;
@@ -1467,7 +1479,7 @@ export class Game {
 
   // приказ патрулировать между двумя точками (правый клик по конечной точке с зажатым P)
   setPatrol(x: number, y: number) {
-    const us = this.selUnits().filter(u => u.owner === 'player' && u.key !== 'villager' && u.key !== 'wolf');
+    const us = this.selUnits().filter(u => u.owner === 'player' && this.combatUnit(u));
     if (!us.length) return;
     this.formation(us, x, y);
     for (const u of us) {
@@ -1480,7 +1492,7 @@ export class Game {
     this.pushHud();
   }
   get selStance(): string | null {
-    const us = this.selUnits().filter(u => u.owner === 'player' && u.key !== 'villager' && u.key !== 'wolf');
+    const us = this.selUnits().filter(u => u.owner === 'player' && this.combatUnit(u));
     if (!us.length) return null;
     const s = us[0].stance;
     return us.every(u => u.stance === s) ? s : 'mixed';
@@ -1841,6 +1853,12 @@ export class Game {
 
   // ── рынок: обмен ресурсов на золото ──
   marketCount(): number { return this.blds.filter(b => b.owner === 'player' && b.key === 'market' && b.done >= 1).length; }
+  // боевой юнит: не рабочий, не торговец, не зверь (торговец/скот не должны попадать
+  // в «войска» — иначе караван уходит в атаку по приказу армии и считается силой)
+  combatUnit(u: Unit): boolean {
+    return u.key !== 'villager' && u.key !== 'trader' && u.key !== 'wolf'
+      && u.key !== 'sheep' && u.key !== 'cow' && u.key !== 'deer';
+  }
   tradeRate(): number { return this.hasTech('coinage') ? 60 : 100; } // сколько ресурса за 10 золота
   trade(from: 'wood' | 'food'): boolean {
     if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен: Базар!', '#f87171', 16); this.sound.error(); return false; }
@@ -2023,7 +2041,7 @@ export class Game {
     return out;
   }
   clearSel() { this.selected.clear(); this.selBld = -1; }
-  armySelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && u.key !== 'villager') this.selected.add(u.id); this.sound.ack('soldier'); this.voiceSel('select'); this.pushHud(); }
+  armySelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && this.combatUnit(u)) this.selected.add(u.id); this.sound.ack('soldier'); this.voiceSel('select'); this.pushHud(); }
   villsSelect() { this.clearSel(); for (const u of this.units) if (u.owner === 'player' && u.key === 'villager') this.selected.add(u.id); this.sound.ack('villager'); this.voiceSel('select'); this.pushHud(); }
   idleSelect() {
     this.clearSel();
@@ -2228,7 +2246,7 @@ export class Game {
     }
     // статистика матча
     const pop = this.popUsed('player');
-    const army = this.units.filter(u => u.owner === 'player' && u.key !== 'villager').length;
+    const army = this.units.filter(u => u.owner === 'player' && this.combatUnit(u)).length;
     if (pop > this.peakPop) this.peakPop = pop;
     if (army > this.peakArmy) this.peakArmy = army;
     this.histT += dt;
@@ -2311,7 +2329,7 @@ export class Game {
           'Шаруа: ПКМ по дереву / ягодам / золоту — добыча',
           'Клавиши 2-8 — войско • Q юрта • E казармы • Z конюшня • X кузница • C базар',
           'Стройте пашни (F) — бесконечная еда • Башни (R) — оборона',
-          'Кузница строит катапульты (7) • Базар — баксы-лекарей (8)!',
+          'Кузница строит катапульты (7) • Мешіт-медресе — имамов-лекарей (8)!',
           'Жмите T для перехода в новую эпоху, когда хватает ресурсов!',
         ];
         this.hint = hints[((this.time / 6) | 0) % hints.length];
@@ -2394,6 +2412,7 @@ export class Game {
       }
       if (u.owner === 'neutral' && u.tribe) this.updateSoldier(u, dt);
       else if (u.key === 'villager') this.updateVillager(u, dt);
+      else if (u.key === 'trader') this.updateTrader(u, dt);
       else if (u.key === 'scout') this.updateScout(u, dt);
       else this.updateSoldier(u, dt);
       // building collision push (стены блокируют; ворота пропускают своих)
@@ -2597,27 +2616,35 @@ export class Game {
         u.path = undefined; u.pathGoal = { x: tx, y: ty };
         return this.moveToward(u, tx, ty, dt, arrive);
       }
-      // пере-прокладка не чаще раза в ~0.5с, когда цели нет
+      // Пере-прокладка A* не чаще раза в ~0.5с — но ЖДАТЬ нельзя: раньше здесь стоял
+      // `return false`, и юнит замирал на полсекунды (рабочие «застывали» у ресурса,
+      // когда точка сдачи лежит внутри коробки склада и путь не находится). Троттлим
+      // только сам расчёт пути, а идти продолжаем напрямую.
       const now = this.time;
-      if (u.noPathT && now - u.noPathT < 0.5) return false;
+      if (u.noPathT && now - u.noPathT < 0.5) return this.moveToward(u, tx, ty, dt, arrive);
       const p = this.computePath(u.x, u.y, tx, ty, u.owner);
       u.pathGoal = { x: tx, y: ty };
       if (p && p.length) { u.path = p; u.noPathT = 0; u.stuckT = 0; }
       else { u.path = undefined; u.noPathT = now; return this.moveToward(u, tx, ty, dt, arrive); } // не нашли — прём прямо
     }
-    // идём по первому waypoint'у; пройденный — выкидываем
+    // идём по первому waypoint'у; пройденные — выкидываем (сразу все достигнутые,
+    // не тратя по кадру на каждый — иначе юнит «залипает» на плотной цепочке точек)
+    while (u.path.length && Math.hypot(u.path[0].x - u.x, u.path[0].y - u.y) < 8) u.path.shift();
+    if (!u.path.length) { u.path = undefined; return this.moveToward(u, tx, ty, dt, arrive); }
     const wp = u.path[0];
-    const wdx = wp.x - u.x, wdy = wp.y - u.y;
-    const wd = Math.hypot(wdx, wdy);
-    if (wd < 8) { u.path.shift(); if (!u.path.length) { u.path = undefined; return false; } return false; }
-    const moved = !this.moveToward(u, wp.x, wp.y, dt, 6);
-    // детекция застревания (юнит у стены, но не продвигается) — перепроложить
-    if (moved) {
-      const lm = Math.hypot(u.x - (u.lastX ?? u.x), u.y - (u.lastY ?? u.y));
-      u.stuckT = u.stuckT ?? 0;
-      if (lm < u.speed * dt * 0.5) u.stuckT += dt; else u.stuckT = Math.max(0, u.stuckT - dt);
-      u.lastX = u.x; u.lastY = u.y;
-      if (u.stuckT > 0.7) { u.stuckT = 0; u.path = undefined; u.pathGoal = undefined; u.noPathT = 0; }
+    this.moveToward(u, wp.x, wp.y, dt, 6);
+    // Детекция застревания (юнит упёрся в гору/здание и не продвигается) — перепроложить.
+    // Считаем ВСЕГДА: раньше проверка жила внутри `if (moved)`, поэтому при полностью
+    // нулевом смещении (самый частый случай затыка) stuckT не рос и путь не сбрасывался.
+    const lm = Math.hypot(u.x - (u.lastX ?? u.x), u.y - (u.lastY ?? u.y));
+    u.stuckT = u.stuckT ?? 0;
+    if (lm < u.speed * dt * 0.5) u.stuckT += dt; else u.stuckT = Math.max(0, u.stuckT - dt);
+    u.lastX = u.x; u.lastY = u.y;
+    if (u.stuckT > 0.7) {
+      u.stuckT = 0; u.path = undefined; u.pathGoal = undefined; u.noPathT = 0;
+      // «отлипание»: маленький шаг вбок от препятствия, чтобы сойти с угла коробки
+      const jx = Math.cos(u.id * 2.399) * 9, jy = Math.sin(u.id * 2.399) * 9;
+      if (!this.terrainBlocked(u.x + jx, u.y + jy)) { u.x += jx; u.y += jy; }
     }
     return false;
   }
@@ -2736,6 +2763,14 @@ export class Game {
       return n ? { x: hx / n, y: hy / n, n } : null;
     };
 
+    // СТАБИЛЬНЫЕ слоты стада: место каждой головы считается от её индекса в стаде, а НЕ
+    // через rand() каждый кадр — иначе цель прыгает 60 раз в секунду и скот «дрожит».
+    const slot = (a: Unit) => {
+      const k = herd.indexOf(a); const n = Math.max(1, herd.length);
+      const ang = (k / n) * Math.PI * 2 + (a.id % 7) * 0.11;
+      return { ang, ring: k % 3 };
+    };
+
     if (u.herdState === 'graze') {
       // ── ВЫПАС (4.5 мин): стадо идёт по кругу дугой, разбросано, скот ВПЕРЕДИ ──
       const flockAng = this.time * 0.22;
@@ -2761,7 +2796,10 @@ export class Game {
       // ── ПЕРЕГОН: скот бежит к загону, пастух гонит с тыла; ждём, пока стадо дойдёт ──
       for (const a of herd) {
         if (dist2(a.x, a.y, pen.x, pen.y) < PEN_R * PEN_R) continue; // уже в загоне
-        a.herdX = pen.x + rand(-26, 26); a.herdY = pen.y + rand(-26, 26); // вперёд к загону
+        // фиксированное место в загоне (по слоту), а не новая случайная точка каждый кадр
+        const s = slot(a);
+        a.herdX = pen.x + Math.cos(s.ang) * (16 + s.ring * 9);
+        a.herdY = pen.y + Math.sin(s.ang) * (12 + s.ring * 7);
         a.anim += dt * 9;
       }
       const out = herdCenter(true);
@@ -2777,7 +2815,15 @@ export class Game {
     }
     else if (u.herdState === 'pen') {
       // ── ПОСТОЙ В ЗАГОНЕ (25с): стадо внутри, еда капает ──
-      for (const a of herd) { a.herdX = pen.x + rand(-40, 40); a.herdY = pen.y + rand(-40, 40); a.anim += dt * 4; }
+      // Скот СТОИТ на своих местах в загоне. Точка слота стабильна во времени, лишь очень
+      // медленно дышит (период ~14с, амплитуда ~5 ед.) — стадо выглядит живым, но не дрожит.
+      for (const a of herd) {
+        const s = slot(a);
+        const br = Math.sin(this.time * 0.45 + a.id * 1.7) * 5;
+        a.herdX = pen.x + Math.cos(s.ang) * (18 + s.ring * 10 + br);
+        a.herdY = pen.y + Math.sin(s.ang) * (13 + s.ring * 8 + br * 0.7);
+        a.anim += dt * 1.6;
+      }
       this.moveToward(u, pen.x + 70, pen.y + 50, dt, 26);
       const n = inPen();
       if (n > 0) {
@@ -2797,7 +2843,9 @@ export class Game {
     else { // 'back': стадо возвращается на пастбище, пастух гонит за ним
       for (const a of herd) {
         if (dist2(a.x, a.y, cx, cy) < 220 * 220) continue;
-        a.herdX = cx + rand(-60, 60); a.herdY = cy + rand(-60, 60);
+        const s = slot(a);
+        a.herdX = cx + Math.cos(s.ang) * (60 + s.ring * 26);
+        a.herdY = cy + Math.sin(s.ang) * (60 + s.ring * 26);
         a.anim += dt * 9;
       }
       const ctr = herdCenter(false);
@@ -2884,7 +2932,10 @@ export class Game {
           u.tx = farm.x + rand(-20, 20); u.ty = farm.y + rand(-16, 16); u.gatherT = 0; return; }
       }
       const near = this.nearestResource(u.x, u.y);
-      if (near && dist2(u.x, u.y, near.x, near.y) < 1600 * 1600) { this.orderGather(u, near.id); return; }
+      if (near && dist2(u.x, u.y, near.x, near.y) < 2600 * 2600) { this.orderGather(u, near.id); return; }
+      // Простояв 4с без работы рядом, рабочий идёт к ЛЮБОМУ оставшемуся ресурсу на карте,
+      // даже далёкому. Иначе, когда округа выработана, крестьяне застывают навсегда.
+      if (near && u.idleT > 4) { this.orderGather(u, near.id); return; }
       return;
     }
     // работница на дойке: идёт к загону и доит, пока стадо на постое (фаза pen)
@@ -2908,10 +2959,9 @@ export class Game {
         u.gatherT = 0; u.wphase = 0;
         u.carry = { type: 'food', amt: u.carry.amt + 3 * this.gatherMult() };
         if (Math.random() < 0.7) this.burst(u.x + 14, u.y - 6, 2, ['#fef3c7', '#fde68a', '#fff'], 46, 0.5);
-        if (u.carry.amt >= this.carryCap()) {
-          this.res.food += Math.floor(u.carry.amt); this.gatheredTotal += u.carry.amt; this.score += u.carry.amt * 0.35;
-          this.floater(u.x, u.y - 26, `+${Math.floor(u.carry.amt)} 🥛`, '#fde68a', 13); u.carry.amt = 0; this.checkQuests();
-        }
+        // молоко идёт в казну ВЛАДЕЛЬЦА (deposit), а не всегда игроку — тот же баг, что
+        // чинили у фермы в 1.0.062
+        if (u.carry.amt >= this.carryCap()) this.deposit(u);
       }
       return;
     }
@@ -2933,6 +2983,23 @@ export class Game {
       return;
     }
     if (u.state === 'gather') {
+      // ДОЙКА В ПРИОРИТЕТЕ: как только стадо вернулось в загон, работница бросает текущую
+      // работу (пашня, лес, ягоды) и идёт доить. Без этого она уходила в дойку только из
+      // состояния idle, в которое занятая крестьянка практически никогда не попадала —
+      // поэтому «автоматически доить» не срабатывало. Проверяем раз в ~1с, не каждый кадр.
+      if (u.female && !u.herder && u.wkind !== 'milk') {
+        u.milkScanT = (u.milkScanT ?? 0) + dt;
+        if (u.milkScanT > 1) {
+          u.milkScanT = 0;
+          const mp = this.pickMilkingPen(u);
+          if (mp) {
+            if (u.carry.amt > 0) this.deposit(u);
+            mp.milkWid = u.id; u.penId = mp.id; u.wkind = 'milk';
+            u.tx = mp.x + 34; u.ty = mp.y + 40; u.buildId = mp.id; u.nodeId = -1; u.gatherT = 0;
+            return;
+          }
+        }
+      }
       // farm?
       const fb = this.blds.find(b => b.id === u.buildId && b.key === 'farm');
       if (fb) {
@@ -2955,10 +3022,12 @@ export class Game {
       if (!n || n.amount <= 0) {
         if (u.carry.amt > 0) { u.state = 'return'; this.sendToDrop(u); }
         else {
-          // ресурс кончился: свободный рабочий сразу идёт к ближайшему ЛЮБОМУ ресурсу
+          // Ресурс кончился: свободный рабочий сразу идёт к ближайшему ЛЮБОМУ ресурсу.
+          // Радиус тот же, что в idle (2600): раньше здесь стояло 1500, и когда округу
+          // вырубали, рабочий уходил в idle и застывал НАВСЕГДА.
           const alt = this.nearestResource(u.x, u.y);
-          if (alt && dist2(alt.x, alt.y, u.x, u.y) < 1500 * 1500) this.orderGather(u, alt.id);
-          else u.state = 'idle';
+          if (alt && dist2(alt.x, alt.y, u.x, u.y) < 2600 * 2600) this.orderGather(u, alt.id);
+          else { u.state = 'idle'; u.idleT = 0; }
         }
         return;
       }
@@ -3044,9 +3113,11 @@ export class Game {
 
   // загон, где стадо сейчас на постое (фаза pen) и ещё нет доярки, ближайший к работнице
   private pickMilkingPen(u: Unit): Bld | null {
-    let best: Bld | null = null; let bd = 1400 * 1400;
+    // радиус поиска щедрый (2200): работница бросает дальнюю пашню и идёт доить, как только
+    // стадо вернулось. Загон ищем СВОЕГО владельца, а не всегда игрока.
+    let best: Bld | null = null; let bd = 2200 * 2200;
     for (const b of this.blds) {
-      if (b.owner !== 'player' || b.key !== 'pen' || b.done < 1) continue;
+      if (b.owner !== u.owner || b.key !== 'pen' || b.done < 1) continue;
       if (b.milkWid != null && this.units.some(w => w.id === b.milkWid && w.hp > 0)) continue;
       const shep = this.units.find(s => s.herder && s.penId === b.id);
       if (!shep || shep.herdState !== 'pen') continue; // стадо в загоне — есть что доить
@@ -3564,18 +3635,112 @@ export class Game {
     }
   }
 
+  // ── КӨПЕС (торговец): караван «свой базар → партнёр → базар» ──
+  // Партнёр — становище дружественного племени (tribeRel === 'friend') либо ставка соперника
+  // при действующем торговом договоре. Выручка зависит от длины плеча: дальний путь выгоднее.
+  private tradePartner(u: Unit): Bld | null {
+    let best: Bld | null = null; let bd = -1;
+    for (const b of this.blds) {
+      if (b.hp <= 0 || b.done < 1) continue;
+      let nid: string | null = null;
+      if (b.tribe) {
+        nid = this.tribeNationOf(b);
+        if (!nid || this.tribeRel[nid] !== 'friend') continue; // торгуем только с друзьями
+      } else if (b.owner === 'enemy') {
+        if (!this.tradeRoute || this.atWar) continue;          // с соперником — только по договору
+        if (b.key !== 'towncenter' && b.key !== 'market') continue;
+        nid = 'rival';
+      } else continue;
+      // самый дальний партнёр в разумных пределах — длинное плечо приносит больше золота
+      const d = dist2(u.x, u.y, b.x, b.y);
+      if (d > 9000 * 9000) continue;
+      if (d > bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+
+  updateTrader(u: Unit, dt: number) {
+    const home = this.blds.find(b => b.id === u.trHomeB && b.key === 'market' && b.done >= 1 && b.hp > 0)
+      ?? this.blds.find(b => b.owner === u.owner && b.key === 'market' && b.done >= 1 && b.hp > 0);
+    if (!home) { // базар снесли — торговец просто стоит (можно увести вручную)
+      if (u.state === 'move') { if (this.moveTowardPath(u, u.tx, u.ty, dt)) u.state = 'idle'; }
+      return;
+    }
+    u.trHomeB = home.id;
+    if (!u.trPhase) u.trPhase = 'out';
+
+    // цель маршрута: партнёр (ищем редко — обход всех зданий недёшев)
+    let dest = u.trDestB != null ? this.blds.find(b => b.id === u.trDestB && b.hp > 0 && b.done >= 1) : undefined;
+    if (dest && dest.tribe) { // дружба могла оборваться — тогда каравану туда нельзя
+      const nid = this.tribeNationOf(dest);
+      if (!nid || this.tribeRel[nid] !== 'friend') dest = undefined;
+    }
+    if (!dest && u.trPhase === 'out') {
+      u.trScanT = (u.trScanT ?? 0) + dt;
+      if (u.trScanT > 1.5) {
+        u.trScanT = 0;
+        const p = this.tradePartner(u);
+        if (p) { u.trDestB = p.id; u.trNation = p.tribe ? (this.tribeNationOf(p) ?? undefined) : 'rival'; dest = p; }
+      }
+      if (!dest) { // партнёров нет — ждём у базара
+        u.wkind = undefined;
+        if (dist2(u.x, u.y, home.x, home.y) > 120 * 120) this.moveTowardPath(u, home.x, home.y, dt, 40);
+        return;
+      }
+    }
+
+    // «торг» в точке назначения — короткая пауза с монетками
+    if (u.trWaitT && u.trWaitT > 0) {
+      u.trWaitT -= dt;
+      u.atkAnim = Math.min(1, u.atkAnim + dt * 4);
+      if (Math.random() < 0.06) this.spark(u.x + rand(-10, 10), u.y - 20, '#fde047');
+      return;
+    }
+
+    if (u.trPhase === 'out' && dest) {
+      if (this.moveTowardPath(u, dest.x, dest.y, dt, dest.size / 2 + 20)) {
+        // догрузились: выручка тем больше, чем дальше плечо (как торговые повозки в AoE)
+        const leg = Math.hypot(dest.x - home.x, dest.y - home.y);
+        const bonus = this.hasTech('coinage') ? 1.35 : 1;
+        u.trGold = Math.round(Math.min(90, 14 + leg / 22) * bonus);
+        u.trPhase = 'back'; u.trWaitT = 1.2;
+        this.burst(u.x, u.y - 18, 6, ['#fde047', '#facc15', '#fff7cc'], 60, 0.6);
+      }
+      return;
+    }
+
+    // возвращаемся на свой базар и сдаём выручку
+    if (this.moveTowardPath(u, home.x, home.y, dt, home.size / 2 + 18)) {
+      const g = u.trGold ?? 0;
+      if (g > 0) {
+        const bank = u.owner === 'enemy' ? this.eres : this.res;
+        bank.gold += g;
+        if (u.owner === 'player') {
+          this.score += g * 0.4;
+          this.floater(u.x, u.y - 28, `+${g} 🪙`, '#fde047', 14);
+          this.sound.coin();
+          this.checkQuests();
+        }
+      }
+      u.trGold = 0; u.trPhase = 'out'; u.trWaitT = 1; u.trDestB = undefined; // следующий круг
+    }
+  }
+
   // скот/дичь: пасутся рядом с домом и убегают от опасности
   updateAnimal(u: Unit, dt: number) {
     // скот, которого гонит пастух: идём к точке притяжения (пастбище/загон),
     // не пугаемся пастуха и не блуждаем вокруг спавна. Цель держим, пока есть пастух.
     if ((u.key === 'sheep' || u.key === 'cow') && u.pastureId != null && u.herdX != null) {
       const dx = u.herdX - u.x, dy = u.herdY! - u.y, d = Math.hypot(dx, dy);
-      if (d > 8) {
+      // Плавный подход (arrival): у самой цели скорость гаснет, поэтому животное НЕ пролетает
+      // точку и не «пилит» туда-сюда. Ниже 1.2 ед. — полный покой (скот стоит в загоне).
+      if (d > 1.2) {
         // к загону идём быстрее (бегут впереди пастуха), на пастбище — спокойно пасутся
         const driving = this.units.some(h => h.herder && (h.herdState === 'home' || h.herdState === 'back'));
-        const sp = driving ? 135 : Math.min(u.speed, 95);
-        u.x += (dx / d) * sp * dt; u.y += (dy / d) * sp * dt;
-        if (Math.abs(dx) > 4) u.face = dx > 0 ? 1 : -1;
+        const sp = Math.min(driving ? 135 : Math.min(u.speed, 95), d * 3);
+        const step = Math.min(sp * dt, d);
+        u.x += (dx / d) * step; u.y += (dy / d) * step;
+        if (Math.abs(dx) > 4 && step > 0.05) u.face = dx > 0 ? 1 : -1;
       }
       return;
     }
@@ -3906,6 +4071,9 @@ export class Game {
             if (owner === 'player' && q.key === 'villager' && rallyN && rallyN.amount > 0) {
               u.state = 'gather'; u.nodeId = rallyN.id; u.buildId = -1;
               u.tx = rallyN.x; u.ty = rallyN.y; u.carry.type = rallyN.kind === 'fish' ? 'food' : rallyN.kind; u.gatherT = 0;
+            } else if (q.key === 'trader') {
+              // көпес выходит с базара и сразу встаёт на круговой маршрут
+              u.trHomeB = b.id; u.trPhase = 'out'; u.state = 'idle'; u.trWaitT = 0.6;
             } else {
               u.tx = b.rallyX; u.ty = b.rallyY; u.state = 'move';
             }
@@ -4119,7 +4287,7 @@ export class Game {
     const wonder = this.blds.some(b => b.owner === 'player' && b.key === 'wonder');
     if (wonder) g += diff.aiAggression * 2.5;
     // воинственность игрока: много армии при слабом противнике
-    const army = this.units.filter(u => u.owner === 'player' && u.key !== 'villager' && u.key !== 'wolf').length;
+    const army = this.units.filter(u => u.owner === 'player' && this.combatUnit(u)).length;
     if (army > 24) g += diff.aiAggression * 0.4;
     // лёгкий фоновый дрейф с течением времени (торговля гасит неприязнь — уже учтена выше)
     g += 0.25 + diff.aiAggression * 0.15;
