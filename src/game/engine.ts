@@ -10,6 +10,8 @@ import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTo
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
 import { GREATS, GREAT_BY_ID, type GreatId } from './greats';
+import { CITY_BY_ID, currentPrayer, nextPrayer, prayerTimes, PRAYER_NAMES, PRAYER_ORDER,
+  fmtHM, type PrayerKey } from './prayer-times';
 import { NATIONS, NATION_BY_ID, TRIBE_IDS, TRIBE_KIND_BY_ID, TRIBE_TYPES, ENVOY_TIERS, envoyCost,
   type FacRel, type TribeKind } from './nations';
 import imgTowncenter from '../assets/sprites/towncenter.png';
@@ -322,6 +324,9 @@ export interface HudSnapshot {
   unite: { have: number; need: number; t: number; hold: number };
   // великие люди: мудрость и карточки призыва
   wisdom: number; wisdomRate: number;
+  // азан по реальному времени: расписание на сегодня и ближайший намаз
+  realAzan: { on: boolean; city: string; next: string; nextAt: string; inMin: number;
+    times: { key: string; name: string; at: string; done: boolean }[] } | null;
   greats: { id: string; name: string; title: string; portrait: string; cost: number;
     effect: string; called: boolean; afford: boolean }[];
   techTree: TechTreeRow[];
@@ -501,6 +506,13 @@ export class Game {
   azanPhase: number[] = [];      // фазы суток, на которых звучит азан
   azanDone: number[] = [];       // какие намазы уже прозвучали в этих сутках
   prayerCount = 0;               // сколько намазов совершено за партию
+  // ── АЗАН ПО РЕАЛЬНОМУ ВРЕМЕНИ (настройка realAzan) ──
+  // Ключи намазов, уже прозвучавших сегодня по реальным часам. Дата хранится,
+  // чтобы после полуночи список сам сбросился.
+  realAzanDone: string[] = [];
+  realAzanDay = '';
+  realAzanT = 0;                 // троттлинг проверки времени (раз в секунду)
+  lastRealPrayer: { key: PrayerKey; at: string } | null = null;
   // ── ДЛИТЕЛЬНОСТЬ СУТОК ──
   // ЕДИНСТВЕННАЯ ручка времени: всё, что должно случаться «раз в день» или
   // «за смену», считается ОТ НЕЁ, а не забито в секундах. Раньше сутки были
@@ -2867,6 +2879,13 @@ export class Game {
       const mid = (this.nightHalf + this.duskEdge) / 2;
       this.azanPhase = [0.5 + mid, 0.02, 0.5 - mid];   // таң (рассвет), бесін (полдень), ақшам (закат)
     }
+    // ── РЕЖИМ «АЗАН ПО РЕАЛЬНОМУ ВРЕМЕНИ» ──
+    // Азан звучит в тот же миг, что и в настоящей мечети выбранного города.
+    // Игровые сутки при этом НЕ трогаем: освещение, смены и отдых живут своим
+    // 30-минутным циклом — иначе развалилась бы вся посменная механика.
+    if (this.settings.realAzan && mosque && !this.prayT) {
+      if (this.checkRealAzan(mosque)) return;
+    }
     const ph = this.dayPhase();
     if (mosque && !this.prayT) {
       for (let i = 0; i < this.azanPhase.length; i++) {
@@ -2891,6 +2910,65 @@ export class Game {
       if (this.prayT === 0) this.finishPrayer();
     }
   }
+  // Город, по которому считаются реальные времена намаза.
+  azanCity() { return CITY_BY_ID[this.settings.azanCity] ?? CITY_BY_ID.astana; }
+
+  /** Реальные времена намаза на сегодня — для подсказки в интерфейсе. */
+  realPrayerSchedule(): { key: PrayerKey; name: string; at: string; done: boolean }[] {
+    const t = prayerTimes(new Date(), this.azanCity());
+    return PRAYER_ORDER.map(k => ({
+      key: k, name: PRAYER_NAMES[k].kz, at: fmtHM(t[k]),
+      done: this.realAzanDone.includes(k),
+    }));
+  }
+
+  /**
+   * Проверка реального расписания. Возвращает true, если азан объявлен.
+   *
+   * Проверяем раз в секунду, а не каждый кадр: `new Date()` и тригонометрия
+   * 60 раз в секунду — пустая трата, а точности до секунды более чем хватает.
+   *
+   * Окно — 60 минут: если игрок запустил партию через полчаса после таң, азан
+   * всё равно прозвучит («догоняющий»). Иначе за 40-минутную сессию реальный
+   * намаз почти никогда не попадал бы в игру: их всего 5 на 24 часа.
+   */
+  checkRealAzan(mosque: Bld): boolean {
+    this.realAzanT += 1 / 60;
+    if (this.realAzanT < 1) return false;
+    this.realAzanT = 0;
+
+    const now = new Date();
+    const day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    if (this.realAzanDay !== day) { this.realAzanDay = day; this.realAzanDone = []; }
+
+    const cur = currentPrayer(now, this.azanCity(), 60);
+    if (!cur || this.realAzanDone.includes(cur.key)) return false;
+    if (this.enemyNearHome()) { this.realAzanDone.push(cur.key); return false; }
+
+    this.realAzanDone.push(cur.key);
+    this.lastRealPrayer = { key: cur.key, at: fmtHM(prayerTimes(now, this.azanCity())[cur.key]) };
+    // тот же призыв, что и по игровым суткам, — сзывает жителей и даёт берекет
+    this.callToPrayerReal(mosque, cur.key, cur.agoMin);
+    return true;
+  }
+
+  // Призыв по реальному времени. Отличается от игрового только баннером:
+  // показываем настоящее время намаза и город, чтобы игрок видел связь с миром.
+  callToPrayerReal(mosque: Bld, key: PrayerKey, agoMin: number) {
+    const city = this.azanCity();
+    const at = fmtHM(prayerTimes(new Date(), city)[key]);
+    const nm = PRAYER_NAMES[key];
+    // Помечаем и игровой намаз пройденным, чтобы за одни игровые сутки не
+    // прозвучали оба — реальный и «запасной» по фазе.
+    for (let i = 0; i < this.azanPhase.length; i++) {
+      if (!this.azanDone.includes(i)) this.azanDone.push(i);
+    }
+    this.callToPrayer(mosque, -1);
+    const late = agoMin > 3 ? ` (${Math.round(agoMin)} мин назад)` : '';
+    this.pushBanner(`🕌 ${nm.kz} — ${at}`,
+      `${city.name}: время ${nm.ru} намаза${late}. Шаруа идут к мешіті`, 5);
+  }
+
   // есть ли враг вблизи ставки (тогда азан пропускаем)
   enemyNearHome(): boolean {
     const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
@@ -2898,7 +2976,9 @@ export class Game {
     return this.units.some(u => u.owner === 'enemy' && dist2(u.x, u.y, tc.x, tc.y) < 900 * 900);
   }
   callToPrayer(mosque: Bld, idx: number) {
-    this.azanDone.push(idx);
+    // idx = -1 приходит из режима реального времени: там своё расписание
+    // (realAzanDone), а в azanDone писать нечего.
+    if (idx >= 0) this.azanDone.push(idx);
     const played = this.sound.azan();
     this.prayT = this.PRAYER_LEN;
     // сзываем мирных жителей к мечети
@@ -6286,6 +6366,12 @@ export class Game {
       unite: { have: this.uniteCount(), need: this.UNITE_NEED,
         t: Math.floor(this.uniteT), hold: this.UNITE_HOLD },
       wisdom: Math.floor(this.wisdom), wisdomRate: Math.round(this.wisdomRate() * 10) / 10,
+      realAzan: this.settings.realAzan ? (() => {
+        const nx = nextPrayer(new Date(), this.azanCity());
+        return { on: true, city: this.azanCity().name,
+          next: PRAYER_NAMES[nx.key].kz, nextAt: fmtHM(nx.at), inMin: Math.round(nx.inMin),
+          times: this.realPrayerSchedule() };
+      })() : null,
       greats: GREATS.map(g => ({ id: g.id, name: g.name, title: g.title, portrait: g.portrait,
         cost: g.cost, effect: g.effect, called: this.hasGreat(g.id),
         afford: this.wisdom >= g.cost && !this.hasGreat(g.id) })),

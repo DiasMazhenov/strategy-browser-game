@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { Game, type GameStats, type HudSnapshot } from './game/engine';
 import { PLAYER_NATION } from './game/nations';
+import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
+  PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
 import heroKhanate from './assets/hero-khanate.jpg';
 
@@ -17,7 +19,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.084';
+export const GAME_VERSION = '1.0.085';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -264,6 +266,12 @@ export default function App() {
             {(hud?.wonderT ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Мавзолей хана до конца отсчёта — это победа">
                 ⭐ Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
+              </div>
+            )}
+            {hud?.realAzan?.on && (
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-black text-emerald-100"
+                title={`${hud.realAzan.city}: ${hud.realAzan.times.map(t => t.name.replace(' намазы','') + ' ' + t.at).join(' • ')}`}>
+                🕌 {hud.realAzan.next.replace(' намазы', '')} {hud.realAzan.nextAt}
               </div>
             )}
             {(hud?.wisdomRate ?? 0) > 0 && (
@@ -1003,6 +1011,13 @@ function Toggle({ on, onClick, label, desc }: { on: boolean; onClick: () => void
 
 // ── Панель настроек: сложность, темп, звук, эффекты ──
 function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings: Settings; updateSettings: (p: Partial<Settings>) => void; onClose: () => void; inGame?: boolean }) {
+  // Расписание намаза на сегодня для выбранного города — считается локально,
+  // без сети. Пересчитываем только при смене города.
+  const azanToday = (() => {
+    const city = AZAN_CITY_BY_ID[settings.azanCity] ?? AZAN_CITY_BY_ID.astana;
+    const t = azanTimes(new Date(), city);
+    return AZAN_ORDER.map(k => ({ key: k, name: AZAN_NAMES[k].kz, at: azanFmt(t[k]) }));
+  })();
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <div className="panel-iron anim-banner max-h-[88dvh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl p-5 text-slate-100">
@@ -1075,7 +1090,39 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
           <Toggle on={settings.particles} onClick={() => updateSettings({ particles: !settings.particles })} label="Частицы" desc="Искры, дым, пыль из-под ног" />
           <Toggle on={settings.damageNumbers} onClick={() => updateSettings({ damageNumbers: !settings.damageNumbers })} label="Числа урона и очков" desc="Всплывающие +очки и награды" />
           <Toggle on={settings.autoPauseOnBlur} onClick={() => updateSettings({ autoPauseOnBlur: !settings.autoPauseOnBlur })} label="Авто-пауза" desc="Ставить игру на паузу при сворачивании вкладки" />
+          <Toggle on={settings.realAzan} onClick={() => updateSettings({ realAzan: !settings.realAzan })}
+            label="Азан по реальному времени"
+            desc="Призыв звучит в то же время, что и в настоящей мечети выбранного города" />
         </div>
+
+        {/* город для расчёта времён намаза — только когда режим включён */}
+        {settings.realAzan && (
+          <div className="mt-3 rounded-2xl bg-black/30 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-[12px] font-black text-slate-200">🕌 Город намаза</div>
+              <div className="text-[10px] text-slate-500">времена считаются астрономически</div>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {AZAN_CITIES.map(c => (
+                <button key={c.id} onClick={() => updateSettings({ azanCity: c.id })}
+                  className={`rounded-xl px-1.5 py-1.5 text-[11px] font-bold transition ${
+                    settings.azanCity === c.id
+                      ? 'bg-amber-400/25 text-amber-100 ring-1 ring-amber-300/50'
+                      : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}>
+                  {c.name}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 grid grid-cols-5 gap-1 text-center">
+              {azanToday.map(t => (
+                <div key={t.key} className="rounded-lg bg-black/30 px-0.5 py-1">
+                  <div className="text-[9px] leading-tight text-slate-400">{t.name.replace(' намазы', '')}</div>
+                  <div className="text-[11px] font-black text-teal-200">{t.at}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <button onClick={onClose} className="btn-gold mt-5 w-full rounded-2xl py-3 text-sm font-black tracking-wide">
           {inGame ? 'Продолжить' : 'Готово'}

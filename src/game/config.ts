@@ -119,6 +119,8 @@ export interface Settings {
   particles: boolean;      // частицы и пыль
   damageNumbers: boolean;  // всплывающие числа урона/лечения
   autoPauseOnBlur: boolean;// пауза при потере фокуса
+  realAzan: boolean;       // азан по РЕАЛЬНОМУ времени намаза, а не по игровым суткам
+  azanCity: string;        // город для расчёта времён (id из CITIES в prayer-times.ts)
 }
 export type Biome = 'green' | 'autumn' | 'winter' | 'desert';
 export const BIOMES: { id: Biome; name: string; icon: string }[] = [
@@ -140,6 +142,10 @@ export const DEFAULT_SETTINGS: Settings = {
   particles: true,
   damageNumbers: true,
   autoPauseOnBlur: true,
+  // По умолчанию ВЫКЛ: старое поведение (азан по игровым суткам) остаётся
+  // основным, реальные времена — осознанный выбор игрока.
+  realAzan: false,
+  azanCity: 'astana',
 };
 export const SPEED_OPTIONS: { id: GameSpeed; label: string }[] = [
   { id: 0.75, label: '0.75×' },
