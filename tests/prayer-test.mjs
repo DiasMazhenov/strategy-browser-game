@@ -27,10 +27,16 @@ const frac = (name) => {
 
 const DAY_LEN = num(/DAY_LEN_SEC = ([\d.]+)/, 'DAY_LEN_SEC');
 const AZAN_LEN = num(/readonly AZAN_LEN = ([\d.]+)/, 'AZAN_LEN');
-const PRAYER_LEN = frac('PRAYER_LEN');
+// PRAYER_LEN = Math.max(DAY_LEN·доля, запись+запас) — защита от того, чтобы
+// намаз не стал короче самого азана при коротких сутках. Считаем так же.
+const PRAYER_LEN = (() => {
+  const m = eng.match(/readonly PRAYER_LEN = Math\.max\(DAY_LEN_SEC \* ([\d.]+), ([\d.]+) \+ ([\d.]+)\)/);
+  if (!m) { fail++; console.log('FAIL: не разобрал PRAYER_LEN'); return NaN; }
+  return Math.max(DAY_LEN * parseFloat(m[1]), parseFloat(m[2]) + parseFloat(m[3]));
+})();
 const BEREKE_LEN = frac('BEREKE_LEN');
 
-ok(`сутки длятся 30 минут (${DAY_LEN} с)`, DAY_LEN === 1800, DAY_LEN);
+ok(`сутки длятся 15 минут (${DAY_LEN} с)`, DAY_LEN === 900, DAY_LEN);
 ok(`намаз (${PRAYER_LEN.toFixed(0)}с) длиннее записи азана (${AZAN_LEN}с)`, PRAYER_LEN > AZAN_LEN,
   PRAYER_LEN.toFixed(0));
 

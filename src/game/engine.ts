@@ -377,16 +377,18 @@ export interface AudienceHud {
 // происходить «раз в день» или «за смену», считается ОТ НЕЁ в долях, а не
 // хардкодится в секундах — иначе при смене длины суток механики молча
 // разъезжаются (так и было, пока сутки были 240 с).
-export const DAY_LEN_SEC = 1800;   // 30 минут
+export const DAY_LEN_SEC = 900;    // 15 минут
 
 // Из этих 30 минут ночь занимает ровно столько, сколько задано здесь, — не
 // «сколько получится» из формулы освещения. Раньше темнота считалась косинусом
 // и «ночью» (порог 0.62) оказывались 12.7 минуты из 30, причём подпись в HUD
 // («Түн» — ровно четверть суток) с этим не совпадала: игрок видел «вечер», а
 // рабочие уже уставали по ночной ставке.
-export const NIGHT_LEN_SEC = 240;    // 4 минуты глухой ночи
-export const TWILIGHT_SEC = 240;     // закат и рассвет, по 4 минуты каждый
-// день = 1800 − 240 − 2·240 = 18 минут светлого времени
+// Пропорции те же, что при 30-минутных сутках (по 13.3% на ночь и на сумерки),
+// поэтому смена длины дня не меняет ощущение цикла — только его темп.
+export const NIGHT_LEN_SEC = 120;    // 2 минуты глухой ночи
+export const TWILIGHT_SEC = 120;     // закат и рассвет, по 2 минуты каждый
+// день = 900 − 120 − 2·120 = 9 минут светлого времени (60% суток, как и было)
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => v < a ? a : v > b ? b : v;
@@ -500,7 +502,12 @@ export class Game {
   // Намаз должен длиться дольше самой записи азана (46.6 с), иначе люди
   // расходились бы под ещё звучащий призыв, и при этом оставлять запас
   // времени на дорогу до мечети через полкарты.
-  readonly PRAYER_LEN = DAY_LEN_SEC * 0.045;  // ~81 с при 30-минутных сутках
+  //
+  // ВАЖНО: берём МАКСИМУМ из доли суток и длины записи с запасом. Чистая доля
+  // 0.045 при 15-минутных сутках дала бы 40.5 с — короче самого азана (47 с),
+  // и молящиеся расходились бы под звучащий призыв. Так формула переживёт
+  // любую длину суток, а не только текущую.
+  readonly PRAYER_LEN = Math.max(DAY_LEN_SEC * 0.045, 47 + 14);  // 61 с при 15-минутных сутках
   readonly BEREKE_LEN = DAY_LEN_SEC * 0.2;    // благодать держится 1/5 суток (~360 с)
   prayT = 0;                     // сколько ещё идёт намаз (0 — не идёт)
   berekeT = 0;                   // остаток благодати
@@ -1729,7 +1736,11 @@ export class Game {
     const w = this.screenToWorld(e.clientX, e.clientY);
     this.mouse.x = w.px; this.mouse.y = w.py; this.mouse.in = true; this.mouse.isTouch = e.pointerType !== 'mouse';
     if (p) {
-      if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 9) p.moved = true;
+      // Порог «указатель сдвинулся». Для пальца он больше: палец при тапе
+      // всегда чуть ползёт, и с мышиными 9px обычное касание превращалось
+      // в рамку выделения вместо приказа.
+      const slop = e.pointerType === 'mouse' ? 9 : 16;
+      if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > slop) p.moved = true;
       p.x = e.clientX; p.y = e.clientY;
     }
     // pinch zoom
@@ -2016,7 +2027,10 @@ export class Game {
 
   // ---------- picking ----------
   pickUnit(x: number, y: number): Unit | null {
-    let best: Unit | null = null; let bd = 30 * 30;
+    // Палец накрывает область больше курсора: на тач-экране расширяем зону
+    // попадания, иначе по юниту приходится целиться несколько раз.
+    const r = this.mouse.isTouch ? 42 : 30;
+    let best: Unit | null = null; let bd = r * r;
     for (const u of this.units) { const d = dist2(x, y, u.x, u.y); if (d < bd) { bd = d; best = u; } }
     return best;
   }
@@ -2028,7 +2042,8 @@ export class Game {
     return null;
   }
   pickNode(x: number, y: number): Node | null {
-    let best: Node | null = null; let bd = 34 * 34;
+    const r = this.mouse.isTouch ? 46 : 34;
+    let best: Node | null = null; let bd = r * r;
     for (const n of this.nodes) { if (n.amount <= 0) continue; const d = dist2(x, y, n.x, n.y); if (d < bd) { bd = d; best = n; } }
     return best;
   }

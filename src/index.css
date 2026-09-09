@@ -26,6 +26,23 @@ canvas.game-canvas {
   cursor: crosshair;
 }
 
+/* ── Мобильные телефоны ───────────────────────────────────────────────────── */
+/* Двойной тап по кнопке в Safari зумит страницу — игра «прыгает». */
+button, .btn-iron, .btn-gold { touch-action: manipulation; }
+
+/* Экраны с «чёлкой»/островом: HUD не должен уезжать под вырез и под
+   системную полосу жестов внизу. Значения нулевые на обычных экранах. */
+@supports (padding: max(0px)) {
+  .safe-top { padding-top: max(0px, env(safe-area-inset-top)); }
+  .safe-bottom { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+}
+
+/* Телефон в АЛЬБОМНОЙ ориентации: по высоте всего ~360px, и обычный HUD
+   съедает почти весь экран. Ужимаем вертикальные отступы панелей. */
+@media (pointer: coarse) and (max-height: 460px) and (orientation: landscape) {
+  .panel-iron { padding-top: .35rem; padding-bottom: .35rem; }
+}
+
 /* Parchment + gold theme helpers */
 .gold-text {
   background: linear-gradient(180deg, #fde68a 0%, #f59e0b 45%, #b45309 70%, #fde68a 100%);

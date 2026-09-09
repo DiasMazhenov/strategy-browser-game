@@ -19,7 +19,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.087';
+export const GAME_VERSION = '1.0.088';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -63,7 +63,10 @@ export default function App() {
   const [scores, setScores] = useState<ScoreEntry[]>(loadScores);
   const [name, setName] = useState('');
   const [saved, setSaved] = useState(false);
-  const [showQuests, setShowQuests] = useState(true);
+  // На телефоне список заданий свёрнут: панель 172px поверх экрана шириной
+  // 360px закрывала бы треть карты. На десктопе оставляем раскрытой.
+  const [showQuests, setShowQuests] = useState(
+    typeof window === 'undefined' || !matchMedia('(pointer: coarse)').matches);
   const [showTech, setShowTech] = useState(false);
   const [showGreats, setShowGreats] = useState(false);
   const [showDip, setShowDip] = useState(false);
@@ -185,7 +188,7 @@ export default function App() {
       <canvas ref={canvasRef} className="game-canvas absolute inset-0" />
 
       {/* ===== TOP HUD ===== */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+      <div className="safe-top pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="flex items-start justify-between gap-2 p-2 sm:p-3">
           {/* resources */}
           <div className="panel-iron pointer-events-auto flex items-center gap-1 rounded-xl px-2 py-1.5 sm:gap-2 sm:px-3">
@@ -948,11 +951,14 @@ function Res({ icon, val }: { icon: React.ReactNode; val: number }) {
   );
 }
 function IconBtn({ children, onClick, label }: { children: React.ReactNode; onClick: () => void; label: string }) {
-  return <button title={label} onClick={onClick} className="btn-iron rounded-xl p-2.5 text-slate-200">{children}</button>;
+  // min-h/min-w 44px — минимальная цель для пальца по гайдлайнам Apple/Google.
+  // На десктопе визуально то же самое, промах мышью и так не проблема.
+  return <button title={label} onClick={onClick}
+    className="btn-iron flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl p-2.5 text-slate-200 sm:min-h-0 sm:min-w-0">{children}</button>;
 }
 function MiniBtn({ children, onClick, active, onContextMenu, title }: { children: React.ReactNode; onClick: () => unknown; active?: boolean; onContextMenu?: (e: React.MouseEvent) => void; title?: string }) {
   return (
-    <button title={title} onClick={onClick} onContextMenu={onContextMenu} className={`btn-iron flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold text-slate-200 ${active ? 'active text-amber-200' : ''}`}>
+    <button title={title} onClick={onClick} onContextMenu={onContextMenu} className={`btn-iron flex min-h-[38px] items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold text-slate-200 sm:min-h-0 ${active ? 'active text-amber-200' : ''}`}>
       {children}
     </button>
   );

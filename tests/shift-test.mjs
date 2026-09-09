@@ -16,8 +16,8 @@ const TIRE_FULL=DAY_LEN*parseFloat(cfg(/TIRE_RATE = 1 \/ \(DAY_LEN_SEC \* ([\d.]
 const FRESH_BONUS=parseFloat(cfg(/FRESH_BONUS = ([\d.]+)/,'FRESH_BONUS')[1]);
 const TIRE_RATE=1/TIRE_FULL;
 
-// ── длина суток: заявленные 30 минут и вменяемый ритм смен ──
-ok(`сутки длятся 30 минут (${DAY_LEN} с)`, DAY_LEN===1800, DAY_LEN);
+// ── длина суток: заявленные 15 минут и вменяемый ритм смен ──
+ok(`сутки длятся 15 минут (${DAY_LEN} с)`, DAY_LEN===900, DAY_LEN);
 ok('отдых заметно короче рабочей смены', REST_TIME < TIRE_FULL*0.5, `${REST_TIME.toFixed(0)} vs ${TIRE_FULL.toFixed(0)}`);
 ok('бодрости хватает надолго, но не на все сутки', FRESH_TIME>REST_TIME && FRESH_TIME<DAY_LEN*0.5,
   FRESH_TIME.toFixed(0));
@@ -41,11 +41,16 @@ const darkness=t=>darkAt(phase(t));
 const isNightAt=p=>Math.abs(p-0.5)<=nightHalf;
 const isNight=t=>isNightAt(phase(t));
 
-ok(`ночь длится ровно ${NIGHT_LEN/60} мин`, NIGHT_LEN===240, NIGHT_LEN);
+ok(`ночь длится ровно ${NIGHT_LEN/60} мин`, NIGHT_LEN===120, NIGHT_LEN);
 ok('день+сумерки+ночь складываются в сутки',
   near((DAY_LEN-NIGHT_LEN-2*TWILIGHT)+2*TWILIGHT+NIGHT_LEN, DAY_LEN));
 ok(`светлого дня ${(DAY_LEN-NIGHT_LEN-2*TWILIGHT)/60} мин`,
-  DAY_LEN-NIGHT_LEN-2*TWILIGHT===1080);
+  DAY_LEN-NIGHT_LEN-2*TWILIGHT===540);
+// ПРОПОРЦИИ важнее абсолютных чисел: при смене длины суток доли должны
+// остаться прежними — 13.3% ночь, по 13.3% сумерки, 60% светлый день.
+ok('доля ночи 13.3% суток (как при 30-минутных)', near(NIGHT_LEN/DAY_LEN, 0.1333, 0.005));
+ok('доля сумерек 13.3% суток', near(TWILIGHT/DAY_LEN, 0.1333, 0.005));
+ok('доля светлого дня 60% суток', near((DAY_LEN-NIGHT_LEN-2*TWILIGHT)/DAY_LEN, 0.6, 0.005));
 // доля ночи, посчитанная перебором — так же, как её увидит игрок
 let nightTicks=0; const N=DAY_LEN*2;
 for(let i=0;i<N;i++) if(isNightAt((i/2%DAY_LEN)/DAY_LEN)) nightTicks++;
