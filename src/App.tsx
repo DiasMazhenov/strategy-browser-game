@@ -1330,9 +1330,10 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         <div className="absolute bottom-10 right-0 h-72 w-72 rounded-full bg-red-600/10 blur-[90px]" />
         {/* Фон — авторская плитка pattern.svg (100x100, белое кружево
             fill-opacity .7): прежняя data-URI розетка қошқар мүйіз заменена
-            файлом из ассетов. Слой держим слабым (opacity .08), чтобы узор
-            оставался фактурой войлока, а не обоями. */}
-        <div className="absolute inset-0 opacity-[0.08]" style={{
+            файлом из ассетов. Слой держим очень слабым (opacity .03 — кружево файла
+            имеет fill-opacity .7, просили ещё прозрачнее): узор остаётся
+            фактурой войлока, а не обоями. */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{
           backgroundImage: `url("${menuPattern}")`,
           backgroundSize: '100px 100px',
         }} />
