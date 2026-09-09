@@ -19,7 +19,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.089';
+export const GAME_VERSION = '1.0.090';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -1313,11 +1313,13 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         <div className="absolute -top-32 left-1/2 h-96 w-[700px] -translate-x-1/2 rounded-full bg-amber-500/15 blur-[100px]" />
         <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-emerald-600/15 blur-[90px]" />
         <div className="absolute bottom-10 right-0 h-72 w-72 rounded-full bg-red-600/10 blur-[90px]" />
-        {/* Фон — казахский орнамент вместо офисной клетки: тот же ритм,
-            но мотив кошкар-мүйіз («бараньи рога») вместо линейной сетки. */}
-        <div className="absolute inset-0 opacity-[0.10]" style={{
-          backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='88' height='88' viewBox='0 0 88 88'%3E%3Cg stroke='%23fde68a' stroke-width='1.3' fill='none' stroke-linecap='round'%3E%3Cpath d='M44 20c-9 0-15 6-15 13 0 5 4 9 9 9 4 0 6-3 6-6 0-2-2-4-4-4'/%3E%3Cpath d='M44 20c9 0 15 6 15 13 0 5-4 9-9 9-4 0-6-3-6-6 0-2 2-4 4-4'/%3E%3Cpath d='M44 46v18M30 64h28'/%3E%3Ccircle cx='44' cy='72' r='4'/%3E%3C/g%3E%3C/svg%3E\")",
-          backgroundSize: '88px 88px',
+        {/* Фон — сетка ҚОШҚАР МҮЙІЗ: парные встречные спирали «бараньих рогов»,
+            построенные по формуле (см. scripts/make-ornaments.cjs), плюс ромб
+            төрт құлақ между ними. Прежний вариант был абстрактными завитками
+            и казахским орнаментом не являлся. */}
+        <div className="absolute inset-0 opacity-[0.09]" style={{
+          backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='%23fde68a'%3E%3Cpath d='M39.75 26.5L37.15 26.55L34.62 26.86L32.22 27.41L30.02 28.19L28.06 29.18L26.4 30.35L25.07 31.68L24.11 33.12L23.53 34.65L23.35 36.22L23.57 37.79L24.17 39.32L25.14 40.75L26.44 42.06L28.02 43.19L29.84 44.12L31.83 44.81L33.94 45.25L36.09 45.42L36.11 42.42L34.42 42.28L32.75 41.94L31.18 41.39L29.75 40.66L28.51 39.77L27.5 38.75L26.76 37.64L26.3 36.47L26.14 35.28L26.28 34.09L26.72 32.94L27.45 31.86L28.44 30.87L29.68 30L31.14 29.26L32.78 28.68L34.56 28.27L36.44 28.04L38.38 28L38.36 25L39.75 26.5Z'/%3E%3Cpath d='M56.25 26.5L58.85 26.55L61.38 26.86L63.78 27.41L65.98 28.19L67.94 29.18L69.6 30.35L70.93 31.68L71.89 33.12L72.47 34.65L72.65 36.22L72.43 37.79L71.83 39.32L70.86 40.75L69.56 42.06L67.98 43.19L66.16 44.12L64.17 44.81L62.06 45.25L59.91 45.42L59.89 42.42L61.58 42.28L63.25 41.94L64.82 41.39L66.25 40.66L67.49 39.77L68.5 38.75L69.24 37.64L69.7 36.47L69.86 35.28L69.72 34.09L69.28 32.94L68.55 31.86L67.56 30.87L66.32 30L64.86 29.26L63.22 28.68L61.44 28.27L59.56 28.04L57.62 28L57.64 25L56.25 26.5Z'/%3E%3Cpath d='M48 56L54 64L48 72L42 64Z'/%3E%3C/g%3E%3C/svg%3E\")",
+          backgroundSize: '96px 96px',
         }} />
       </div>
 
