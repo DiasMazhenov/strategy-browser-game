@@ -100,6 +100,32 @@ console.log('\n=== 5. Фон меню — орнамент, а не офисна
   ok(/backgroundImage: "url\(\\"data:image\/svg\+xml/.test(app), 'фон меню — SVG-орнамент');
 }
 
+console.log('\n=== 5b. Устав и Зал легенд — в попапе, не на экране меню ===');
+{
+  // Раньше две панели занимали весь второй экран меню и оттесняли «В ПОХОД!».
+  ok(/setInfoTab\('how'\)/.test(app) && /setInfoTab\('scores'\)/.test(app),
+    'обе кнопки вызова на месте');
+  ok(/useState<'how' \| 'scores' \| null>\(null\)/.test(app),
+    'попап закрыт по умолчанию');
+  // содержимое должно быть ВНУТРИ модалки, а не дублироваться в меню
+  const modalStart = app.indexOf('{infoTab && (');
+  ok(modalStart > 0, 'модалка есть в разметке');
+  const modal = app.slice(modalStart, app.indexOf('{/* версия — левый нижний угол меню */}'));
+  ok((modal.match(/HowRow n=/g) || []).length === 6, 'все 6 пунктов устава внутри попапа');
+  ok(/scores\.map/.test(modal), 'таблица рекордов внутри попапа');
+  // в самом меню их быть не должно
+  const menuOnly = app.slice(0, modalStart);
+  ok(!/HowRow n=/.test(menuOnly), 'пункты устава убраны с экрана меню');
+  ok(/onClick={\(\) => setInfoTab\(null\)}/.test(modal), 'клик по фону закрывает');
+  ok(/e\.key === 'Escape'/.test(app), 'Esc закрывает попап');
+  ok(/!showSettings && !infoTab && \(e\.key === 'Enter'/.test(app),
+    'Enter не стартует игру, пока читаешь устав');
+  ok(/kz-corners panel-iron anim-banner/.test(modal),
+    'попап оформлен в общем стиле (орнаментальные углы)');
+  ok(/overflow-y-auto overscroll-contain/.test(modal),
+    'длинный текст прокручивается, не растягивая окно');
+}
+
 console.log('\n=== 6. Мобильные и производительность не пострадали ===');
 {
   // Псевдоэлементы орнамента не должны перехватывать касания по канвасу.

@@ -19,7 +19,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.091';
+export const GAME_VERSION = '1.0.092';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -1298,13 +1298,20 @@ function bldIcon(k: BuildingKey) {
 /* ================= MENU ================= */
 function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { scores: ScoreEntry[]; settings: Settings; updateSettings: (p: Partial<Settings>) => void; onPlay: () => void; onResume: () => void }) {
   const [showSettings, setShowSettings] = useState(false);
+  // Устав и Зал легенд живут в одной модалке с вкладками: null — закрыта.
+  const [infoTab, setInfoTab] = useState<'how' | 'scores' | null>(null);
   const difficulty = settings.difficulty;
   const hasSave = Game.hasSave();
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (!showSettings && (e.key === 'Enter' || e.key === ' ')) onPlay(); };
+    const h = (e: KeyboardEvent) => {
+      // Esc закрывает попап; Enter/пробел стартуют игру, но не когда открыто
+      // окно — иначе игрок, читая устав, случайно улетал бы в бой.
+      if (e.key === 'Escape') { setInfoTab(null); return; }
+      if (!showSettings && !infoTab && (e.key === 'Enter' || e.key === ' ')) onPlay();
+    };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onPlay, showSettings]);
+  }, [onPlay, showSettings, infoTab]);
   if (showSettings) return <SettingsPanel settings={settings} updateSettings={updateSettings} onClose={() => setShowSettings(false)} />;
   return (
     <div className="parchment relative min-h-[100dvh] overflow-y-auto text-white">
@@ -1402,55 +1409,90 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
           <div className="mt-2 text-[11px] font-bold text-slate-500">нажми <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-slate-300">Enter</kbd> для старта • ⚙️ — сложность, темп и эффекты • сразу в бой</div>
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-2">
-          {/* how to play */}
-          <div className="panel-iron rounded-2xl p-4">
-            <div className="font-display text-sm font-black tracking-widest text-amber-200">📜 УСТАВ КОЧЕВНИКА</div>
-            <div className="mt-3 space-y-2 text-xs leading-relaxed text-slate-300">
-              <HowRow n="1" t="Сарбазы уже выбраны — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
-              <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
-              <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда. Склад (K) у дальней рощи — шаруа сдают добычу туда, а не в ставку." />
-              <HowRow n="4" t="Юрта (Q) для населения → Казармы (E) → Сарбазы (2) и Мергены (3). Конюшня (Z) даёт жасауылов, кузница (X) — катапульты. Мешіт-медресе (M) готовит имамов-лекарей (8)." />
-              <HowRow n="5" t="Базар (C) шлёт көпес-торговцев (0) в становища друзей — караван возит золото сам. Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами." />
-              <HowRow n="6" t="Дипломатия: шлите ✉️ посланников племенам — на 1/3/6 посланниках открываются бонусы (воины в дар, золото, скидки, урожай). Джунгары шлют своих: у кого больше — тот сюзерен. Победа — сжечь ставку хунтайджи!" />
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-1.5">
-              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 0-9 / QERFKMZXC / G / H / Space</div>
-              <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>Касание — выбор • касание земли — приказ • Рамка/Камера • щипковый зум • прыжок по мини-карте</div>
-            </div>
-          </div>
-          {/* highscores */}
-          <div className="panel-iron rounded-2xl p-4">
-            <div className="flex items-center justify-between">
-              <div className="font-display text-sm font-black tracking-widest text-amber-200">🏆 ЗАЛ ЛЕГЕНД</div>
-              <div className="text-[10px] font-bold text-slate-500">локально • топ-8</div>
-            </div>
-            {scores.length === 0 ? (
-              <div className="mt-3 rounded-xl border border-dashed border-white/15 p-5 text-center text-xs text-slate-400">
-                Легенд пока нет. <b className="text-amber-200">Твоё имя может стать первым.</b><br />Победа + убийства + скорость = вечная слава.
-              </div>
-            ) : (
-              <div className="mt-3 space-y-1">
-                {scores.map((s, i) => (
-                  <div key={i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold ${i === 0 ? 'bg-amber-400/15 text-amber-200' : 'bg-white/5 text-slate-300'}`}>
-                    <span className="w-6 text-center">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}</span>
-                    <span className="flex-1 truncate">{s.name}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${s.result === 'victory' ? 'bg-lime-500/20 text-lime-300' : 'bg-red-500/20 text-red-300'}`}>{s.result === 'victory' ? 'ПОБЕДА' : 'ПАЛ'}</span>
-                    <span className="tabular-nums text-amber-300">{s.score}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500/10 p-2 text-[11px] font-semibold text-emerald-200">
-              <Shield className="h-4 w-4 shrink-0" />Совет: волки дают еду и очки. Охоться рано, развивайся быстро, ударь до 4-й волны.
-            </div>
-          </div>
+        {/* Устав и Зал легенд убраны в модалку: на экране меню они занимали
+            весь второй экран и оттесняли кнопку «В ПОХОД!». Теперь — две
+            кнопки, а содержимое открывается поверх. */}
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:mx-auto sm:max-w-md">
+          <button onClick={() => setInfoTab('how')}
+            className="btn-iron flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-[13px] font-black text-amber-100">
+            <span className="text-base">📜</span>УСТАВ КОЧЕВНИКА
+          </button>
+          <button onClick={() => setInfoTab('scores')}
+            className="btn-iron flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-[13px] font-black text-amber-100">
+            <span className="text-base">🏆</span>ЗАЛ ЛЕГЕНД
+            {scores.length > 0 && <b className="rounded-full bg-amber-400/25 px-1.5 text-[10px]">{scores.length}</b>}
+          </button>
         </div>
 
         <div className="mt-6 text-center text-[11px] font-semibold text-slate-600">
           60 кадров/с • движок на Canvas • синтезированные звуки битвы • великая степь ждёт своего хана 🎇
         </div>
       </div>
+      {/* ===== ПОПАП: УСТАВ / ЗАЛ ЛЕГЕНД ===== */}
+      {infoTab && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm"
+          onClick={() => setInfoTab(null)}>
+          <div className="kz-corners panel-iron anim-banner flex max-h-[92dvh] w-full max-w-2xl flex-col rounded-3xl"
+            onClick={e => e.stopPropagation()}>
+            {/* вкладки: переключение без закрытия окна */}
+            <div className="flex items-center gap-1 border-b border-amber-300/15 p-3">
+              {([['how', '📜', 'УСТАВ КОЧЕВНИКА'], ['scores', '🏆', 'ЗАЛ ЛЕГЕНД']] as const).map(([id, ic, label]) => (
+                <button key={id} onClick={() => setInfoTab(id)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-black tracking-wide transition ${
+                    infoTab === id ? 'bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/40' : 'text-slate-400 hover:bg-white/5'}`}>
+                  <span>{ic}</span><span className="hidden sm:inline">{label}</span>
+                  <span className="sm:hidden">{label.split(' ')[0]}</span>
+                </button>
+              ))}
+              <button onClick={() => setInfoTab(null)}
+                className="ml-1 rounded-xl px-3 py-2 text-slate-400 hover:bg-white/10">✕</button>
+            </div>
+
+            <div className="scroll-thin overflow-y-auto overscroll-contain p-4">
+              {infoTab === 'how' ? (
+                <>
+                  <div className="space-y-2 text-xs leading-relaxed text-slate-300">
+                    <HowRow n="1" t="Сарбазы уже выбраны — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
+                    <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
+                    <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда. Склад (K) у дальней рощи — шаруа сдают добычу туда, а не в ставку." />
+                    <HowRow n="4" t="Юрта (Q) для населения → Казармы (E) → Сарбазы (2) и Мергены (3). Конюшня (Z) даёт жасауылов, кузница (X) — катапульты. Мешіт-медресе (M) готовит имамов-лекарей (8)." />
+                    <HowRow n="5" t="Базар (C) шлёт көпес-торговцев (0) в становища друзей — караван возит золото сам. Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами." />
+                    <HowRow n="6" t="Дипломатия: шлите ✉️ посланников племенам — на 1/3/6 посланниках открываются бонусы (воины в дар, золото, скидки, урожай). Джунгары шлют своих: у кого больше — тот сюзерен. Победа — сжечь ставку хунтайджи!" />
+                  </div>
+                  <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+                    <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 0-9 / QERFKMZXC / G / H / Space</div>
+                    <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>Касание — выбор • касание земли — приказ • Рамка/Камера • щипковый зум • прыжок по мини-карте</div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mb-2 text-right text-[10px] font-bold text-slate-500">локально • топ-8</div>
+                  {scores.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-white/15 p-5 text-center text-xs text-slate-400">
+                      Легенд пока нет. <b className="text-amber-200">Твоё имя может стать первым.</b><br />Победа + убийства + скорость = вечная слава.
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {scores.map((s2, i) => (
+                        <div key={i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold ${i === 0 ? 'bg-amber-400/15 text-amber-200' : 'bg-white/5 text-slate-300'}`}>
+                          <span className="w-6 text-center">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}</span>
+                          <span className="flex-1 truncate">{s2.name}</span>
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] ${s2.result === 'victory' ? 'bg-lime-500/20 text-lime-300' : 'bg-red-500/20 text-red-300'}`}>{s2.result === 'victory' ? 'ПОБЕДА' : 'ПАЛ'}</span>
+                          <span className="tabular-nums text-amber-300">{s2.score}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500/10 p-2 text-[11px] font-semibold text-emerald-200">
+                    <Shield className="h-4 w-4 shrink-0" />Совет: волки дают еду и очки. Охоться рано, развивайся быстро, ударь до 4-й волны.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* версия — левый нижний угол меню */}
       <div className="pointer-events-none fixed bottom-2 left-3 z-10 select-none text-[10px] font-semibold tracking-wide text-white/40">
         Казахское Ханство • v{GAME_VERSION}
