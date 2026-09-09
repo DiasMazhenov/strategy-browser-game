@@ -197,7 +197,7 @@ export default function App() {
             <Res icon={<TreePine className="h-4 w-4 text-lime-300" />} val={hud?.wood ?? 0} />
             <Res icon={<Drumstick className="h-4 w-4 text-rose-300" />} val={hud?.food ?? 0} />
             <Res icon={<Coins className="h-4 w-4 text-yellow-300" />} val={hud?.gold ?? 0} />
-            <div className="ml-1 hidden items-center gap-1 rounded-lg bg-black/45 px-2 py-1 text-xs font-bold sm:flex">
+            <div className="ml-1 hidden items-center gap-1 rounded-lg bg-black/30 px-2 py-1 text-xs font-bold sm:flex">
               <Users className="h-3.5 w-3.5 text-sky-300" />
               <span className={(hud && hud.pop >= hud.popCap) ? 'text-red-400' : 'text-white'}>{hud?.pop ?? 0}/{hud?.popCap ?? 10}</span>
             </div>
@@ -953,7 +953,7 @@ export default function App() {
 /* ---------- pieces ---------- */
 function Res({ icon, val }: { icon: React.ReactNode; val: number }) {
   return (
-    <div className="flex items-center gap-1 rounded-lg bg-black/45 px-2 py-1 text-sm font-black tabular-nums">
+    <div className="flex items-center gap-1 rounded-lg bg-black/30 px-2 py-1 text-sm font-black tabular-nums">
       {icon}<span>{val}</span>
     </div>
   );
@@ -1358,7 +1358,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
               { i: 'crown', c: 'text-amber-300', t: '4 эпохи ханства' },
               { i: 'handshake', c: 'text-sky-300', t: 'Дипломатия народов' },
             ] as const).map(f => (
-              <div key={f.t} className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-200/25 bg-black/60 px-2 py-2 text-[11px] font-bold text-slate-100 backdrop-blur sm:text-xs">
+              <div key={f.t} className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-200/25 bg-black/30 px-2 py-2 text-[11px] font-bold text-slate-100 backdrop-blur sm:text-xs">
                 <Ico name={f.i} className={`h-4 w-4 shrink-0 ${f.c}`} />{f.t}
               </div>
             ))}
