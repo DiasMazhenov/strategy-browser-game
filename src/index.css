@@ -95,7 +95,7 @@ button, .btn-iron, .btn-gold { touch-action: manipulation; }
   height: 16px;
   background-image: none;
   background-color: var(--kz-gold);
-  opacity: .55;
+  opacity: .3;   /* непрозрачность 30%: кружево плотное, чтобы не спорить с контентом панели */
   -webkit-mask-image: url("@/assets/path76.svg");
           mask-image: url("@/assets/path76.svg");
   -webkit-mask-repeat: repeat-x;
