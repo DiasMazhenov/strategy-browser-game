@@ -35,6 +35,18 @@ function loadSettings(): Settings {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(LS_SETTINGS) || '{}') }; }
   catch { return { ...DEFAULT_SETTINGS }; }
 }
+// Условные часы мира: фаза суток 0..1, где 0 = полдень (стартуем днём),
+// сутки DAY_LEN_SEC реальных секунд. Показываем «игровое» время суток.
+function gameClock(phase: number): string {
+  const total = Math.floor(((phase % 1) + 1) % 1 * 24 * 60);
+  const h = Math.floor((12 * 60 + total) / 60) % 24;
+  return `${String(h).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+// «через 1 ч 03 м» / «через 47 м» до следующего намаза
+function fmtLeft(min: number): string {
+  const m = Math.max(0, Math.round(min));
+  return m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч ${String(m % 60).padStart(2, '0')} мин`;
+}
 function fmtTime(s: number) {
   const m = Math.floor(s / 60), ss = s % 60;
   return `${m}:${ss.toString().padStart(2, '0')}`;
@@ -210,7 +222,7 @@ export default function App() {
           <div className="flex flex-col items-center gap-1">
             <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-xl px-4 py-1.5 text-xs font-bold">
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
-              <span className="flex items-center gap-1 text-slate-300"><Timer className="h-3.5 w-3.5" />{fmtTime(hud?.timeSec ?? 0)}</span>
+              <span className="flex items-center gap-1 text-slate-300" title={`Реальное время партии: ${fmtTime(hud?.timeSec ?? 0)}`}><Clock className="h-3.5 w-3.5" />{gameClock(hud?.day?.phase ?? 0)}</span>
               {/* Счётчик волны — только во время войны. В мире набеги не идут
                   (движок крутит waveT лишь при atWar), и отсчёт до несуществующей
                   атаки только пугал игрока зря. */}
@@ -295,7 +307,7 @@ export default function App() {
                 title={`${hud.realAzan.city}: ${hud.realAzan.times.map(t => t.name.replace(' намазы','') + ' ' + t.at).join(' • ')}${
                   hud.realAzan.on ? '' : '\nМеханика «азан по реальному времени» выключена — время справочно (включается в настройках)'}`}
               >
-                <Ico name="mosque" /> {hud.realAzan.next.replace(' намазы', '')} {hud.realAzan.nextAt}
+                <Ico name="mosque" /> {hud.realAzan.next.replace(' намазы', '')} {hud.realAzan.nextAt} <span className="opacity-80">({fmtLeft(hud.realAzan.inMin)})</span>
                 {!hud.realAzan.on && <span className="opacity-60">· справочно</span>}
               </div>
             )}
@@ -347,7 +359,7 @@ export default function App() {
         <div className="flex justify-center md:hidden">
           <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-full px-3 py-1 text-[11px] font-bold">
             <span className="text-amber-300"><Ico name="trophy" />{hud?.score ?? 0}</span>
-            <span className="text-slate-300">{fmtTime(hud?.timeSec ?? 0)}</span>
+            <span className="text-slate-300" title={`Реальное время партии: ${fmtTime(hud?.timeSec ?? 0)}`}>{gameClock(hud?.day?.phase ?? 0)}</span>
             {hud?.atWar && (
               <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}><Ico name="sea" />{hud?.nextWave ?? 0}с</span>
             )}
