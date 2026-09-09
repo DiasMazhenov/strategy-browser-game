@@ -3,6 +3,15 @@
 // (детерминированный value-noise на целочисленном хэше решётки, без границ карты).
 // Контент (ресурсы/животные/племена) генерится лениво по чанкам — см. engine.ts.
 
+// ── КРУГЛАЯ ЗЕМЛЯ: мир — тор WORLD_W×WORLD_H. Ушёл за левый край — вышел
+// справа, за верхний — снизу. Шум сделан ПЕРИОДИЧЕСКИМ (решётка каждой
+// октавы заворачивается по целому числу ячеек), поэтому стык бесшовен.
+import { WORLD as WORLD_BOX } from './config';
+export const WORLD_W = WORLD_BOX.w;
+export const WORLD_H = WORLD_BOX.h;
+export const wrapW = (x: number): number => ((x % WORLD_W) + WORLD_W) % WORLD_W;
+export const wrapH = (z: number): number => ((z % WORLD_H) + WORLD_H) % WORLD_H;
+
 export type TerrainClass =
   | 'deep'      // глубокая вода
   | 'water'     // река/озеро
@@ -36,19 +45,26 @@ const smooth = (t: number) => t * t * (3 - 2 * t);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 // value-noise 0..1 в мировой точке (wx, wz), размер ячейки cell
-function valueNoise(wx: number, wz: number, cell: number, seed: number): number {
+function valueNoise(wx: number, wz: number, cell: number, seed: number, px = 0, pz = 0): number {
   const gx = wx / cell, gz = wz / cell;
-  const x0 = Math.floor(gx), z0 = Math.floor(gz);
+  let x0 = Math.floor(gx), z0 = Math.floor(gz);
   const fx = smooth(gx - x0), fz = smooth(gz - z0);
-  const v00 = hash2(x0, z0, seed), v10 = hash2(x0 + 1, z0, seed);
-  const v01 = hash2(x0, z0 + 1, seed), v11 = hash2(x0 + 1, z0 + 1, seed);
+  // тор: индексы решётки по модулю периода октавы (px,pz — целые числа ячеек)
+  const mx = (i: number) => (px > 0 ? ((i % px) + px) % px : i);
+  const mz = (i: number) => (pz > 0 ? ((i % pz) + pz) % pz : i);
+  const v00 = hash2(mx(x0), mz(z0), seed), v10 = hash2(mx(x0 + 1), mz(z0), seed);
+  const v01 = hash2(mx(x0), mz(z0 + 1), seed), v11 = hash2(mx(x0 + 1), mz(z0 + 1), seed);
   return lerp(lerp(v00, v10, fx), lerp(v01, v11, fx), fz);
 }
 // фрактальный шум (несколько октав)
 function fbm(wx: number, wz: number, seed: number, base: number, oct = 4): number {
   let sum = 0, amp = 0.5, norm = 0, freq = 1;
   for (let i = 0; i < oct; i++) {
-    sum += amp * valueNoise(wx, wz, base / freq, seed + i * 101);
+    const cell = base / freq;
+    // базы подобраны делителями WORLD_W/H, поэтому периоды октав — целые
+    const px = Math.max(1, Math.round(WORLD_W / cell));
+    const pz = Math.max(1, Math.round(WORLD_H / cell));
+    sum += amp * valueNoise(wx, wz, cell, seed + i * 101, px, pz);
     norm += amp; amp *= 0.5; freq *= 2;
   }
   return sum / norm;
@@ -64,7 +80,8 @@ export class Terrain {
   }
 
   addSafe(x: number, y: number, radius: number) { this.safe.push({ x, y, r: radius }); }
-  private inSafe(x: number, y: number): boolean {
+  private inSafe(x0: number, y0: number): boolean {
+    const x = wrapW(x0), y = wrapH(y0);
     for (const s of this.safe) {
       const dx = x - s.x, dy = y - s.y;
       if (dx * dx + dy * dy < s.r * s.r) return true;
@@ -73,20 +90,21 @@ export class Terrain {
   }
 
   // базовые поля шума
-  private elev(wx: number, wz: number) { return fbm(wx, wz, this.seed, 720, 5); }
-  private moist(wx: number, wz: number) { return fbm(wx, wz, this.seed + 17, 620, 4); }
-  private temp(wx: number, wz: number) { return fbm(wx, wz, this.seed + 31, 1500, 3); }
+  private elev(wx: number, wz: number) { return fbm(wx, wz, this.seed, 600, 5); }
+  private moist(wx: number, wz: number) { return fbm(wx, wz, this.seed + 17, 600, 4); }
+  private temp(wx: number, wz: number) { return fbm(wx, wz, this.seed + 31, 1200, 3); }
   // долины рек: узкие извилистые ленты понижения
   private river(wx: number, wz: number) {
-    const v = fbm(wx, wz, this.seed + 53, 1150, 3);
+    const v = fbm(wx, wz, this.seed + 53, 1200, 3);
     // «гребень» v≈0.5 → узкая долина реки (две системы рек разной частотой)
     const m1 = 1 - Math.min(1, Math.abs(v - 0.5) * 16);
-    const v2 = fbm(wx + 9000, wz - 4000, this.seed + 71, 1700, 3);
+    const v2 = fbm(wx + 9000, wz - 4000, this.seed + 71, 1600, 3);
     const m2 = 1 - Math.min(1, Math.abs(v2 - 0.55) * 20);
     return Math.max(m1, m2);
   }
 
-  private rawClass(wx: number, wz: number): TerrainClass {
+  private rawClass(wx0: number, wz0: number): TerrainClass {
+    const wx = wrapW(wx0), wz = wrapH(wz0);
     const e = this.elev(wx, wz);
     const m = this.moist(wx, wz);
     const t = this.temp(wx, wz);
@@ -120,12 +138,13 @@ export class Terrain {
    * меньше одной ступени почти везде; вдобавок reliefGridHex давит дистанцией до
    * воды/берега (плавный подъём от низины к пику). Финальная лесенка — ≤1 ступени.
    */
-  private rawRelief(wx: number, wz: number): number {
+  private rawRelief(wx0: number, wz0: number): number {
+    const wx = wrapW(wx0), wz = wrapH(wz0);
     if (this.inSafe(wx, wz)) return 0;
     const c = this.rawClass(wx, wz);
     if (c === 'water' || c === 'deep' || c === 'sand') return 0; // вода и берег плоские
     // гладкая низкочастотная высота (та же, что задаёт биомы, но 2 октавы — без дёрганья)
-    const e = fbm(wx, wz, this.seed, 1100, 2);
+    const e = fbm(wx, wz, this.seed, 1200, 2);
     // пороги класса: горы с e>0.78, холмы 0.68..0.78
     if (c === 'mountain') {
       // ядро гор (e≈1) → до 30 ступеней; у подножия (e≈0.78) — меньше

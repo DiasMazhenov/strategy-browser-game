@@ -6,7 +6,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
   HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex, HS,
   type HexKind,
   TILE_STEP, HEX_CELL } from './iso';
-import { Terrain, mulberry32 as mulberry32Like } from './terrain';
+import { Terrain, mulberry32 as mulberry32Like, wrapW, wrapH } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
@@ -640,7 +640,7 @@ export class Game {
     // союз с военными племенами (ур.1): войска игрока крепче на 10%
     if (owner === 'player' && d.pop > 0 && key !== 'villager' && this.bonusTier('military', 1)) ageMult *= 1.1;
     const u: Unit = {
-      id: this.nextId++, key, owner, x: clamp(x, 20, WORLD.w - 20), y: clamp(y, 20, WORLD.h - 20),
+      id: this.nextId++, key, owner, x: wrapW(x), y: wrapH(y),
       hp: d.hp * ageMult, maxHp: d.hp * ageMult, atk: d.atk * (owner === 'neutral' ? 1 : ageMult),
       range: d.range, speed: d.speed * (key === 'knight' ? 1 : rand(0.94, 1.06)),
       cd: rand(0, 0.4), state: 'idle', tx: x, ty: y, targetU: -1, targetB: -1, nodeId: -1, buildId: -1,
@@ -795,10 +795,11 @@ export class Game {
   // гарантировать, что все чанки в радиусе R (в чанках) от точки загенерены
   ensureChunks(wx: number, wy: number, R: number) {
     const C = Game.CHUNK;
-    const ccx = Math.floor(wx / C), ccz = Math.floor(wy / C);
+    const NX = Math.round(WORLD.w / C), NZ = Math.round(WORLD.h / C);
+    const ccx0 = Math.floor(wx / C), ccz0 = Math.floor(wy / C);
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       if (dx * dx + dz * dz > R * R + 1) continue;
-      const cx = ccx + dx, cz = ccz + dz;
+      const cx = (((ccx0 + dx) % NX) + NX) % NX, cz = (((ccz0 + dz) % NZ) + NZ) % NZ;
       const key = this.chunkKey(cx, cz);
       if (this.chunksGen.has(key)) continue;
       this.chunksGen.add(key);
@@ -1624,7 +1625,8 @@ export class Game {
     }
     for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight);
   }
-  fogAt(wx: number, wy: number): { vis: boolean; expl: boolean } {
+  fogAt(wx0: number, wy0: number): { vis: boolean; expl: boolean } {
+    const wx = wrapW(wx0), wy = wrapH(wy0);
     const gx = (wx / this.fogCell) | 0, gy = (wy / this.fogCell) | 0;
     if (gx < 0 || gy < 0 || gx >= this.fogGW || gy >= this.fogGH) return { vis: false, expl: false };
     const idx = gy * this.fogGW + gx;
@@ -1883,9 +1885,9 @@ export class Game {
     this.clampCam();
   }
   clampCam() {
-    const mx = this.vw / 2 / this.cam.zoom, my = this.vh / 2 / this.cam.zoom;
-    this.cam.x = clamp(this.cam.x, -mx + 80, WORLD.w + mx - 80);
-    this.cam.y = clamp(this.cam.y, -my + 80, WORLD.h + my - 80);
+    // круглая земля: краёв нет — камера заворачивается по стыку тора
+    this.cam.x = wrapW(this.cam.x);
+    this.cam.y = wrapH(this.cam.y);
   }
 
   // ── Курсор под целью ──────────────────────────────────────────────────────
@@ -2603,6 +2605,12 @@ export class Game {
         d.siteDep.forEach((v: number, i: number) => { if (this.sites[i]) this.sites[i].dep = v; });
         this.siteI = typeof d.siteI === 'number' ? Math.min(Math.max(0, d.siteI), this.sites.length - 1) : 0;
       }
+      for (const b of this.blds) { b.x = wrapW(b.x); b.y = wrapH(b.y); }
+      for (const u of this.units) { u.x = wrapW(u.x); u.y = wrapH(u.y); }
+      for (const n of this.nodes) { n.x = wrapW(n.x); n.y = wrapH(n.y); }
+      for (const rl of this.relics) { rl.x = wrapW(rl.x); rl.y = wrapH(rl.y); }
+      // тор изменил террейн: стягиваем постройки с воды на ближайшую сушу
+      for (const b of this.blds) if (!this.terrain.isLand(b.x, b.y)) { const sl = this.nearLand(b.x, b.y); b.x = sl[0]; b.y = sl[1]; }
       this.terrDirty = true;
       this.pushBanner('{i:save} Сохранение загружено', 'Империя восстановлена', 3);
       return true;
@@ -3229,6 +3237,19 @@ export class Game {
   // итоговая цена постройки с учётом союза с ремесленниками (скидка на дерево)
   // ─────────── ТЕРРИТОРИЯ (оседлый) И КОШ (кочевой) ───────────
   koshBusy(): boolean { return this.mode === 'nomad' && this.migrating > 0; }
+  // КРУГЛАЯ ЗЕМЛЯ: кратчайшая дельта через стык тора
+  tdx(d: number): number { return d - WORLD.w * Math.round(d / WORLD.w); }
+  tdy(d: number): number { return d - WORLD.h * Math.round(d / WORLD.h); }
+  nearLand(x: number, y: number): [number, number] {
+    if (this.terrain.isLand(x, y)) return [x, y];
+    for (let rad = 40; rad <= 480; rad += 40)
+      for (let a = 0; a < 12; a++) {
+        const t = a * Math.PI / 6;
+        const px = wrapW(x + Math.cos(t) * rad), py = wrapH(y + Math.sin(t) * rad);
+        if (this.terrain.isLand(px, py)) return [px, py];
+      }
+    return [x, y];
+  }
   pastureMult(): number { const s = this.sites[this.siteI]; return s ? 1 - 0.45 * s.dep : 1; }
   private hexLand(q: number, r: number): boolean {
     const [wx, wy] = hexCenterWorld(q, r);
@@ -3529,19 +3550,19 @@ export class Game {
     if (isWallLike) { x = Math.round(x / TILE_STEP) * TILE_STEP; y = Math.round(y / TILE_STEP) * TILE_STEP; }
     else { const sx = snapToHexWorld(x, y); x = sx[0]; y = sx[1]; }
     const s = BUILDING_DEFS[key].size / 2 + (isWallLike ? 2 : 8);
-    if (x < s + 10 || y < s + 10 || x > WORLD.w - s - 10 || y > WORLD.h - s - 10) return false;
+    // тор: краёв нет — стройка у стыка разрешена (s остаётся для интервалов)
     for (const b of this.blds) {
       const bWall = b.key === 'wall' || b.key === 'gate';
       // стена к стене — вплотную (допускаем минимальное перекрытие фундаментов)
       const need = isWallLike && bWall
         ? BUILDING_DEFS[key].size / 2 + b.size / 2 - 16
         : s + b.size / 2 + (isWallLike ? -4 : 6);
-      if (Math.abs(x - b.x) < need && Math.abs(y - b.y) < need) return false;
+      if (Math.abs(this.tdx(x - b.x)) < need && Math.abs(this.tdy(y - b.y)) < need) return false;
     }
     for (const n of this.nodes) {
       if (n.amount <= 0) continue;
       const need = s + n.r;
-      if (Math.abs(x - n.x) < need && Math.abs(y - n.y) < need) return false;
+      if (Math.abs(this.tdx(x - n.x)) < need && Math.abs(this.tdy(y - n.y)) < need) return false;
     }
     // террейн: ни на горах, ни на воде (фундамент по сетке точек вокруг центра)
     for (let ox = -s; ox <= s; ox += 22) for (let oy = -s; oy <= s; oy += 22) {
@@ -3956,7 +3977,7 @@ export class Game {
       p.life -= dt;
       if (p.life <= 0) { this.parts.splice(i, 1); continue; }
       p.vy += p.grav * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.x = wrapW(p.x + p.vx * dt); p.y = wrapH(p.y + p.vy * dt);
       p.rot += p.vr * dt;
     }
     for (let i = this.floaters.length - 1; i >= 0; i--) {
@@ -4019,6 +4040,7 @@ export class Game {
     this.updateAutosave(dt);
     // ── режимы: границы / перекочёвки ──
     this.updateModes(dt);
+    this.cam.x = wrapW(this.cam.x); this.cam.y = wrapH(this.cam.y);
 
     // AI tick
     this.aiT += dt;
@@ -4057,7 +4079,7 @@ export class Game {
     const ddx = this.cam.x - wx, ddy = this.cam.y - wy;
     if (ddx * ddx + ddy * ddy < rc * rc) return true; // рядом с камерой
     const r2 = rad * rad;
-    for (const u of this.units) { if (u.owner === 'neutral') continue; const dx = u.x - wx, dy = u.y - wy; if (dx * dx + dy * dy < r2) return true; }
+    for (const u of this.units) { if (u.owner === 'neutral') continue; const dx = this.tdx(u.x - wx), dy = this.tdy(u.y - wy); if (dx * dx + dy * dy < r2) return true; }
     for (const b of this.blds) { if (b.owner === 'neutral') continue; const dx = b.x - wx, dy = b.y - wy; if (dx * dx + dy * dy < r2) return true; }
     return false;
   }
@@ -4116,12 +4138,12 @@ export class Game {
       if (u.owner === 'neutral' && !u.tribe) {
         const w0 = u.x, z0 = u.y;
         if (u.key === 'wolf') this.updateWolf(u, dt); else this.updateAnimal(u, dt);
-        const moved = Math.hypot(u.x - w0, u.y - z0) > 1.5;
+        const moved = Math.hypot(this.tdx(u.x - w0), this.tdy(u.y - z0)) > 1.5;
         (u as Unit & { walk?: boolean }).walk = moved;
         // изо-направление зверя: волк галопом, скот (овцы/коровы/олени) шагает —
         // у всех теперь есть кадры «сбоку / спереди / со спины»
         if (moved && (u.key === 'wolf' || u.key === 'sheep' || u.key === 'cow' || u.key === 'deer')) {
-          const sxv = (u.x - w0) - (u.y - z0), syv = ((u.x - w0) + (u.y - z0)) * 0.5;
+          const sxv = this.tdx(u.x - w0) - this.tdy(u.y - z0), syv = (this.tdx(u.x - w0) + this.tdy(u.y - z0)) * 0.5;
           u.mvx = (u.mvx ?? sxv) * 0.6 + sxv * 0.4;
           u.mvy = (u.mvy ?? syv) * 0.6 + syv * 0.4;
           if (Math.abs(u.mvy) > Math.abs(u.mvx) * 1.05 && Math.abs(u.mvy) > 0.4) {
@@ -4150,16 +4172,16 @@ export class Game {
         const h = b.size / 2;
         const rad = wallLike ? 13 : 12;
         const cx = clamp(u.x, b.x - h, b.x + h), cy = clamp(u.y, b.y - h, b.y + h);
-        const dx = u.x - cx, dy = u.y - cy, d2 = dx * dx + dy * dy;
+        const dx = this.tdx(u.x - cx), dy = this.tdy(u.y - cy), d2 = dx * dx + dy * dy;
         if (d2 < rad * rad) {
           if (d2 < 0.01) { u.x += rad * dt * 60 * 0.05; continue; }
           const d = Math.sqrt(d2);
           u.x = cx + (dx / d) * rad; u.y = cy + (dy / d) * rad;
         }
       }
-      u.x = clamp(u.x, 14, WORLD.w - 14); u.y = clamp(u.y, 14, WORLD.h - 14);
+      u.x = wrapW(u.x); u.y = wrapH(u.y);   // круглая земля: вместо стен — стык
       // реальное перемещение за кадр (в бою на месте шаг не играем)
-      const distMoved = Math.hypot(u.x - px0, u.y - py0);
+      const distMoved = Math.hypot(this.tdx(u.x - px0), this.tdy(u.y - py0));
       // ── СТОРОЖ ЗАСТРЕВАНИЯ ПАСТУХА ──
       // Замер обязан быть ЗДЕСЬ, после отталкивания от зданий. Внутри herdMove
       // он бесполезен: moveToward честно сдвигает юнита на 3.9 ед., а коллизия
@@ -4173,7 +4195,7 @@ export class Game {
         // никогда не достигается — «дёрг-стоп-дёрг» до бесконечности.
         u.herdProbeT = (u.herdProbeT ?? 0) + dt;
         if (u.herdProbeT >= 2) {
-          const adv = Math.hypot(u.x - (u.herdProbeX ?? u.x), u.y - (u.herdProbeY ?? u.y));
+          const adv = Math.hypot(this.tdx(u.x - (u.herdProbeX ?? u.x)), this.tdy(u.y - (u.herdProbeY ?? u.y)));
           // за 2 с на скорости 175 юнит проходит ~350 ед.; 60 — заведомый затык
           if (adv < 60) u.herdStuckT = (u.herdStuckT ?? 0) + u.herdProbeT;
           else u.herdStuckT = 0;
@@ -4186,7 +4208,7 @@ export class Game {
       // sx = dwx - dwy (право), sy = (dwx + dwy)/2 (вниз к камере). Вниз по экрану → спереди, вверх → спина.
       if (walk) {
         // мировая дельта шага → изо-экранная (toIso): sx вправо, sy вниз к камере
-        const dWx = u.x - px0, dWy = u.y - py0;
+        const dWx = this.tdx(u.x - px0), dWy = this.tdy(u.y - py0);
         const sxv = dWx - dWy, syv = (dWx + dWy) * 0.5;
         // сглаживаем вектор, чтобы режим не «дёргался» на диагоналях
         u.mvx = (u.mvx ?? sxv) * 0.6 + sxv * 0.4;
@@ -4216,11 +4238,11 @@ export class Game {
   }
 
   moveToward(u: Unit, tx: number, ty: number, dt: number, arrive = 6): boolean {
-    const dx = tx - u.x, dy = ty - u.y;
+    const dx = this.tdx(tx - u.x), dy = this.tdy(ty - u.y);
     const d = Math.hypot(dx, dy);
     if (d < arrive) return true;
     // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
-    const midC = this.terrain.classAt((u.x + tx) / 2, (u.y + ty) / 2);
+    const midC = this.terrain.classAt(u.x + dx / 2, u.y + dy / 2);
     const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
     const s = Math.min(u.speed * wade * dt, d);
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
@@ -4378,14 +4400,14 @@ export class Game {
     }
     // идём по первому waypoint'у; пройденные — выкидываем (сразу все достигнутые,
     // не тратя по кадру на каждый — иначе юнит «залипает» на плотной цепочке точек)
-    while (u.path.length && Math.hypot(u.path[0].x - u.x, u.path[0].y - u.y) < 8) u.path.shift();
+    while (u.path.length && Math.hypot(this.tdx(u.path[0].x - u.x), this.tdy(u.path[0].y - u.y)) < 8) u.path.shift();
     if (!u.path.length) { u.path = undefined; return this.moveToward(u, tx, ty, dt, arrive); }
     const wp = u.path[0];
     this.moveToward(u, wp.x, wp.y, dt, 6);
     // Детекция застревания (юнит упёрся в гору/здание и не продвигается) — перепроложить.
     // Считаем ВСЕГДА: раньше проверка жила внутри `if (moved)`, поэтому при полностью
     // нулевом смещении (самый частый случай затыка) stuckT не рос и путь не сбрасывался.
-    const lm = Math.hypot(u.x - (u.lastX ?? u.x), u.y - (u.lastY ?? u.y));
+    const lm = Math.hypot(this.tdx(u.x - (u.lastX ?? u.x)), this.tdy(u.y - (u.lastY ?? u.y)));
     u.stuckT = u.stuckT ?? 0;
     if (lm < u.speed * dt * 0.5) u.stuckT += dt; else u.stuckT = Math.max(0, u.stuckT - dt);
     u.lastX = u.x; u.lastY = u.y;
@@ -4414,10 +4436,10 @@ export class Game {
       if (f.tu >= 0) { const cand = this.units.find(e => e.id === f.tu); if (cand && valid(cand) && !isPrey(cand)) { u.targetU = f.tu; tu = cand; } }
     }
     if (tu) {
-      const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+      const d = Math.hypot(this.tdx(tu.x - u.x), this.tdy(tu.y - u.y));
       const reach = u.range + 6;
       if (d <= reach) {
-        if (Math.abs(tu.x - u.x) > 3) u.face = tu.x > u.x ? 1 : -1;
+        if (Math.abs(this.tdx(tu.x - u.x)) > 3) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
         if (u.cd <= 0) this.strike(u, tu, undefined);
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
       } else {
@@ -4913,7 +4935,7 @@ export class Game {
         return;
       }
       // рабочий на берегу: разворот к воде/косяку
-      if (Math.abs(n.x - u.x) > 4) u.face = n.x > u.x ? 1 : -1;
+      if (Math.abs(this.tdx(n.x - u.x)) > 4) u.face = this.tdx(n.x - u.x) > 0 ? 1 : -1;
       // вид работы: лес — топор, золото/руда — кирка, рыба — удочка (стоит на берегу), фрукты/ягоды — сбор
       u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : n.kind === 'fish' ? 'fish' : 'gather';
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
@@ -4942,7 +4964,7 @@ export class Game {
       // снаружи, не попадая в круг сдачи.
       const dropR = tc.size / 2 + 22;
       const hx = tc.size / 2;
-      const ox = Math.max(0, Math.abs(u.x - tc.x) - hx), oy = Math.max(0, Math.abs(u.y - tc.y) - hx);
+      const ox = Math.max(0, Math.abs(this.tdx(u.x - tc.x)) - hx), oy = Math.max(0, Math.abs(this.tdy(u.y - tc.y)) - hx);
       if (ox * ox + oy * oy < dropR * dropR || dist2(u.x, u.y, tc.x, tc.y) < dropR * dropR) {
         this.deposit(u);
         // после сдачи — обратно к работе
@@ -4962,7 +4984,7 @@ export class Game {
       // Цель — ближняя точка У ГРАНИЦЫ ТЦ (на радиусе сдачи, со стороны подхода): стабильна
       // между кадрами, arrive совпадает с радиусом сдачи — рабочий не доходит до коллизии и
       // не топчется/толкается у угла, а разгружается сразу на входе в зону.
-      const dx = u.x - tc.x, dy = u.y - tc.y;
+      const dx = this.tdx(u.x - tc.x), dy = this.tdy(u.y - tc.y);
       const d = Math.hypot(dx, dy) || 1;
       const rr = Math.max(8, dropR - 6);
       const tx = tc.x + (dx / d) * rr, ty = tc.y + (dy / d) * rr;
@@ -5027,7 +5049,7 @@ export class Game {
     if (!tc) return;
     // стабильная точка сдачи у кромки здания (а не в центре зоны коллизии — там рабочий
     // толкается и топчется). Встаём со стороны, откуда пришёл, на радиусе ~TC+8.
-    const dx = u.x - tc.x, dy = u.y - tc.y;
+    const dx = this.tdx(u.x - tc.x), dy = this.tdy(u.y - tc.y);
     const d = Math.hypot(dx, dy) || 1;
     const r = tc.size / 2 + 10;
     u.tx = tc.x + (dx / d) * r;
@@ -5169,9 +5191,9 @@ export class Game {
     if (tu) {
       if (tu.owner === u.owner) { u.targetU = -1; }
       else {
-        const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+        const d = Math.hypot(this.tdx(tu.x - u.x), this.tdy(tu.y - u.y));
         if (d <= uRange + (tu.key === 'wolf' ? 4 : 6)) {
-          if (Math.abs(tu.x - u.x) > 4) u.face = tu.x > u.x ? 1 : -1;
+          if (Math.abs(this.tdx(tu.x - u.x)) > 4) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
           if (u.key === 'archer') u.aiming = true;
           if (u.cd <= 0) this.strike(u, tu, undefined);
         } else {
@@ -5182,11 +5204,11 @@ export class Game {
     }
     if (tb) {
       const edge = tb.size / 2 + uRange * 0.6;
-      const dx = u.x - tb.x, dy = u.y - tb.y;
+      const dx = this.tdx(u.x - tb.x), dy = this.tdy(u.y - tb.y);
       const overlapX = Math.max(Math.abs(dx) - tb.size / 2, 0), overlapY = Math.max(Math.abs(dy) - tb.size / 2, 0);
       const ed = Math.hypot(overlapX, overlapY);
       if (ed <= uRange * 0.7 + 8) {
-        if (Math.abs(tb.x - u.x) > 4) u.face = tb.x > u.x ? 1 : -1;
+        if (Math.abs(this.tdx(tb.x - u.x)) > 4) u.face = this.tdx(tb.x - u.x) > 0 ? 1 : -1;
         if (u.key === 'archer') u.aiming = true;
         if (u.cd <= 0) this.strike(u, undefined, tb);
       } else this.moveTowardPath(u, tb.x, tb.y, dt, edge);
@@ -5250,7 +5272,7 @@ export class Game {
       // в стойке «держать позицию» воин не сходит с места: цель только если враг в радиусе удара
       if (f.tu >= 0) {
         const e = this.units.find(x => x.id === f.tu);
-        const inReach = e && Math.hypot(e.x - u.x, e.y - u.y) <= u.range + 14;
+        const inReach = e && Math.hypot(this.tdx(e.x - u.x), this.tdy(e.y - u.y)) <= u.range + 14;
         if (u.stance !== 'stand' || inReach) { u.targetU = f.tu; u.state = 'attackmove'; }
       }
       else if (isCata && f.tb >= 0) { u.targetB = f.tb; u.state = 'attackmove'; }
@@ -5265,10 +5287,10 @@ export class Game {
     let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
     if (tu && (tu.hp <= 0 || !this.scoutHostile(u, tu))) { tu = undefined; u.targetU = -1; }
     if (tu) {
-      const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+      const d = Math.hypot(this.tdx(tu.x - u.x), this.tdy(tu.y - u.y));
       const reach = u.range + 6;
       if (d <= reach) {
-        if (Math.abs(tu.x - u.x) > 3) u.face = tu.x > u.x ? 1 : -1;
+        if (Math.abs(this.tdx(tu.x - u.x)) > 3) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
         if (u.cd <= 0) this.strike(u, tu, undefined);
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
       } else {
@@ -5409,7 +5431,7 @@ export class Game {
         if (u.mtx == null) { const b = this.nearestEnemyBase(u.x, u.y); if (b) { u.mtx = b.x; u.mty = b.y; u.infBaseId = b.id; } }
         if (u.mtx != null && u.mty != null) {
           // цель — точка РЯДОМ с базой (не в центр, чтобы не агрить вплотную): встаём у кромки обзора
-          const dx = u.x - u.mtx, dy = u.y - u.mty, d = Math.hypot(dx, dy) || 1;
+          const dx = this.tdx(u.x - u.mtx), dy = this.tdy(u.y - u.mty), d = Math.hypot(dx, dy) || 1;
           const stand = 230;
           if (d > stand) { u.tx = u.mtx + (dx / d) * stand; u.ty = u.mty + (dy / d) * stand; u.state = 'move'; }
           else { u.state = 'idle'; u.infT = (u.infT ?? 0) + 0.5; this.scoutInfiltrateProgress(u); }
@@ -5827,7 +5849,7 @@ export class Game {
     if (isCata && tb) dmg *= 1.7; // катапульта особенно разрушительна для зданий
     if (isRanged) {
       const tx = tu ? tu.x : tb ? tb.x : att.tx, ty = tu ? tu.y : tb ? tb.y : att.ty;
-      const dx = tx - att.x, dy = ty - att.y, d = Math.max(1, Math.hypot(dx, dy));
+      const dx = this.tdx(tx - att.x), dy = this.tdy(ty - att.y), d = Math.max(1, Math.hypot(dx, dy));
       const sp = isCata ? 300 : 420;
       this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind: isCata ? 'rock' : 'arrow', srcU: att.id });
       if (isCata) { this.sound.boom(); this.trauma = Math.min(1, this.trauma + 0.12); this.burst(att.x, att.y - 26, 8, ['#a8a29e', '#78716c'], 120, 0.5); }
@@ -6157,11 +6179,11 @@ export class Game {
     for (let i = this.projs.length - 1; i >= 0; i--) {
       const p = this.projs[i];
       p.life -= dt;
-      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.x = wrapW(p.x + p.vx * dt); p.y = wrapH(p.y + p.vy * dt);
       let hit = false;
       const tu = p.targetU >= 0 ? this.units.find(u => u.id === p.targetU) : undefined;
       if (tu && tu.hp > 0) {
-        if (dist2(p.x, p.y, tu.x, tu.y - 10) < 20 * 20) {
+        if (this.tdx(tu.x - p.x) ** 2 + this.tdy(tu.y - 10 - p.y) ** 2 < 20 * 20) {
           const shooter = p.srcU != null ? this.units.find(u => u.id === p.srcU) : undefined;
           this.damageUnit(tu, p.dmg, shooter);
           // credit kills to owner side loosely for score if player-owned arrow
@@ -6176,8 +6198,8 @@ export class Game {
         const tb = p.targetB >= 0 ? this.blds.find(b => b.id === p.targetB) : undefined;
         if (tb && tb.hp > 0) {
           const h = tb.size / 2;
-          if (Math.abs(p.x - tb.x) < h && Math.abs(p.y - (tb.y - 20)) < h + 20) { this.damageBld(tb, p.dmg, p.owner); hit = true; }
-        } else if (Math.hypot(p.x - p.tx, p.y - p.ty) < 14) hit = true;
+          if (Math.abs(this.tdx(p.x - tb.x)) < h && Math.abs(this.tdy(p.y - (tb.y - 20))) < h + 20) { this.damageBld(tb, p.dmg, p.owner); hit = true; }
+        } else if (Math.hypot(this.tdx(p.x - p.tx), this.tdy(p.y - p.ty)) < 14) hit = true;
       }
       if (hit || p.life <= 0) {
         this.spark(p.x, p.y, p.kind === 'rock' ? '#d6d3d1' : '#fde68a');
