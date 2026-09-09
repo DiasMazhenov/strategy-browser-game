@@ -3,7 +3,7 @@ import { SoundBank } from './audio';
 import { drawIcon, drawRich, strokeRich, measureRich } from './iconset';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
   getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
-  HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex,
+  HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex, HS,
   type HexKind,
   TILE_STEP, HEX_CELL } from './iso';
 import { Terrain, mulberry32 as mulberry32Like } from './terrain';
@@ -303,6 +303,12 @@ export interface AgeReport {
 }
 
 export interface HudSnapshot {
+  mode: 'settled' | 'nomad';                      // режим партии
+  terrCount: number; terrLand: number;            // гексы границы / земля долины
+  cityTier: number; cityName: string;             // аул -> қала -> астана
+  pasture: number;                                // % качества пастбища (кочевой)
+  migrating: number;                              // сек до перекочёвки
+  sites?: { i: number; tag: string; dep: number; cur: boolean; dist: number }[];
   wood: number; food: number; gold: number; pop: number; popCap: number;
   age: number; ageName: string; score: number; kills: number; razed: number;
   timeSec: number; wave: number; nextWave: number; enemyAge: number;
@@ -445,6 +451,15 @@ export class Game {
   woodOnRepair = 0; // накопитель стоимости ремонта (дерево)
   trauma = 0; dmgFlash = 0;
   paused = false; over: 'victory' | 'defeat' | null = null;
+  // ── РЕЖИМЫ: отырықшы (города и границы) / көшпенді (перекочёвки) ──
+  mode: 'settled' | 'nomad' = 'settled';
+  terr = new Map<string, 1 | 2>();        // гекс "q,r" -> 1 игрок, 2 враг
+  terrCount = 0; terrLand = 0; terrDirty = true;
+  cityTier = 0; cityT = 0;
+  valley = { x: 0, y: 0, r: 1 };
+  valleyLandP = { x: 0, y: 0 }; valleyLandE = { x: 0, y: 0 };
+  sites: { x: number; y: number; dep: number; tag: string }[] = [];
+  siteI = 0; migrating = 0; koshTarget = -1;
 
   // ── дипломатия (в стиле Civilization) ──
   atWar = false;                 // война с ИИ-соперником
@@ -681,6 +696,13 @@ export class Game {
     // террейн: безопасные зоны вокруг баз (суша, без гор/воды)
     this.terrain.addSafe(P.x, P.y, 360);
     this.terrain.addSafe(E.x, E.y, 360);
+    // долина (зона территориальной победы) и стоянки кочевья считаются всегда:
+    // сейв мог сохранить режим, отличный от настроек меню
+    this.valley = { x: (P.x + E.x) / 2, y: (P.y + E.y) / 2, r: 500 };
+    this.valleyLandP = P; this.valleyLandE = E;
+    this.countValleyLand();
+    this.discoverSites(P);
+    this.mode = this.settings.mode === 'nomad' ? 'nomad' : 'settled';
 
     // стартовые ресурсы у игрока (дуга леса + золото/ягоды)
     const arc = (cx: number, cy: number, n: number, r0: number, a0: number) => {
@@ -2427,6 +2449,7 @@ export class Game {
   serialize(): string {
     const data = {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
+      mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep),
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
       kills: this.kills, razed: this.razed, gatheredTotal: this.gatheredTotal, woodGathered: this.woodGathered,
       gotWood: this.gotWood, gotFood: this.gotFood, gotGold: this.gotGold, ageMark: this.ageMark,
@@ -2575,6 +2598,12 @@ export class Game {
       if (d.pray) { this.azanDone = d.pray.azanDone || []; this.berekeT = clamp(d.pray.berekeT ?? 0, 0, this.BEREKE_LEN); this.berekePower = clamp(d.pray.berekePower ?? 0, 0, 1); this.prayerCount = d.pray.prayerCount ?? 0; }
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
+      this.mode = d.mode === 'nomad' ? 'nomad' : 'settled';
+      if (this.mode === 'nomad' && Array.isArray(d.siteDep)) {
+        d.siteDep.forEach((v: number, i: number) => { if (this.sites[i]) this.sites[i].dep = v; });
+        this.siteI = typeof d.siteI === 'number' ? Math.min(Math.max(0, d.siteI), this.sites.length - 1) : 0;
+      }
+      this.terrDirty = true;
       this.pushBanner('{i:save} Сохранение загружено', 'Империя восстановлена', 3);
       return true;
     } catch { return false; }
@@ -3198,6 +3227,127 @@ export class Game {
     for (const u of tired.slice(0, cap - resting)) this.sendToRest(u);
   }
   // итоговая цена постройки с учётом союза с ремесленниками (скидка на дерево)
+  // ─────────── ТЕРРИТОРИЯ (оседлый) И КОШ (кочевой) ───────────
+  koshBusy(): boolean { return this.mode === 'nomad' && this.migrating > 0; }
+  pastureMult(): number { const s = this.sites[this.siteI]; return s ? 1 - 0.45 * s.dep : 1; }
+  private hexLand(q: number, r: number): boolean {
+    const [wx, wy] = hexCenterWorld(q, r);
+    const c = this.terrain.classAt(wx, wy);
+    return c !== 'water' && c !== 'deep' && c !== 'mountain';
+  }
+  countValleyLand() {
+    // долина победы = два столичных круга: держим знаменатель досягаемым
+    const R = this.valley.r; let n = 0;
+    const seen = new Set<string>();
+    for (const C of [this.valleyLandP, this.valleyLandE]) {
+      const [cq, cr] = worldToHex(C.x, C.y);
+      const qR = Math.ceil(R / (HS * 1.5)) + 1, rR = Math.ceil(R / (HS * Math.sqrt(3))) + 1;
+      for (let dq = -qR; dq <= qR; dq++) for (let dr = -rR; dr <= rR; dr++) {
+        const q = cq + dq, r = cr + dr, k = q + ',' + r;
+        if (seen.has(k)) continue; seen.add(k);
+        const [wx, wy] = hexCenterWorld(q, r);
+        const dx = wx - C.x, dy = wy - C.y;
+        if (dx * dx + dy * dy <= R * R && this.hexLand(q, r)) n++;
+      }
+    }
+    this.terrLand = n;
+  }
+  discoverSites(P: { x: number; y: number }) {
+    this.sites = [{ x: P.x, y: P.y, dep: 0, tag: 'родовой жайляу' }];
+    const tags = ['сочные луга', 'у воды', 'укрытая падь'];
+    const angs = [0.7, 2.6, 4.4];
+    for (let i = 0; i < 3; i++) {
+      let best: { x: number; y: number } | null = null;
+      for (let rad = 480; rad <= 1150 && !best; rad += 70) {
+        const x = P.x + Math.cos(angs[i]) * rad, y = P.y + Math.sin(angs[i]) * rad;
+        const c = this.terrain.classAt(x, y);
+        if (c === 'grass' || c === 'field') best = { x, y };
+      }
+      if (!best) best = { x: P.x + Math.cos(angs[i]) * 620, y: P.y + Math.sin(angs[i]) * 620 };
+      this.sites.push({ x: best.x, y: best.y, dep: 0, tag: tags[i] });
+    }
+  }
+  recomputeTerr() {
+    this.terr.clear(); this.terrCount = 0;
+    if (this.mode !== 'settled') return;
+    const stamp = (owner: 1 | 2) => {
+      for (const b of this.blds) {
+        if (b.owner !== (owner === 1 ? 'player' : 'enemy') || b.done < 1) continue;
+        let R = 0;
+        if (b.key === 'towncenter') R = 6 + (owner === 1 ? this.cityTier * 2 : 0);
+        else if (b.key === 'tower' || b.key === 'mosque' || b.key === 'house' || b.key === 'wonder') R = 3;
+        else if (b.key === 'market' || b.key === 'storehouse') R = 2;
+        else continue;
+        const [cq, cr] = worldToHex(b.x, b.y);
+        for (let dq = -R; dq <= R; dq++) {
+          for (let dr = Math.max(-R, -dq - R); dr <= Math.min(R, -dq + R); dr++) {
+            const q = cq + dq, r = cr + dr;
+            if (this.hexLand(q, r)) this.terr.set(q + ',' + r, owner);
+          }
+        }
+      }
+    };
+    stamp(1); stamp(2);   // враг печатает поверх: фронт границ честный
+    for (const v of this.terr.values()) if (v === 1) this.terrCount++;
+  }
+  startKosh(i: number) {
+    if (this.mode !== 'nomad' || this.migrating > 0 || i === this.siteI || !this.sites[i]) return;
+    this.migrating = 20; this.koshTarget = i;
+    this.pushBanner('{i:camel} Аттан! Көш собирается', 'Производство и стройка паузятся на 20 секунд марша');
+  }
+  private doKosh() {
+    const old = this.sites[this.siteI], site = this.sites[this.koshTarget];
+    if (!site || !old) { this.migrating = 0; this.koshTarget = -1; return; }
+    const dx = site.x - old.x, dy = site.y - old.y;
+    const PACK = new Set(['towncenter', 'house', 'pen', 'barracks', 'stable', 'blacksmith', 'market', 'storehouse', 'mosque']);
+    const keep: Bld[] = [];
+    for (const b of this.blds) {
+      if (b.owner !== 'player') { keep.push(b); continue; }
+      if (PACK.has(b.key)) {
+        b.x += dx; b.y += dy; b.rallyX += dx; b.rallyY += dy; keep.push(b); continue;
+      }
+      // недвижимое разбираем с возвратом 40%; склад оставляет қыстау-тайник
+      if (b.key === 'storehouse') {
+        this.nodes.push({ id: 900000 + this.nodes.length, kind: 'food', x: old.x + 70, y: old.y + 50, amount: 260, max: 260, r: 46, phase: 0 });
+        this.decor.push({ x: old.x, y: old.y, k: 3, s: 1.1, c: '#8a6d3b' });
+      }
+      const c = this.bldCost(b.key);
+      this.res.wood += Math.floor(c.wood * 0.4); this.res.food += Math.floor(c.food * 0.4); this.res.gold += Math.floor(c.gold * 0.4);
+    }
+    this.blds = keep;
+    for (const u of this.units) if (u.owner === 'player') { u.x += dx; u.y += dy; u.path = undefined; }
+    this.cam.x = site.x; this.cam.y = site.y;
+    this.ensureChunks(site.x, site.y, 2);
+    old.dep = 0.05; this.siteI = this.koshTarget; this.koshTarget = -1; this.migrating = 0;
+    this.pushBanner('{i:yurt} Новый жайляу!', 'Пастбища отдохнули; на старом месте остался қыстау с тайником');
+  }
+  private updateModes(dt: number) {
+    if (this.mode === 'settled') {
+      if (this.terrDirty) { this.terrDirty = false; this.recomputeTerr(); }
+      this.cityT += dt;
+      if (this.cityT > 2) {
+        this.cityT = 0;
+        const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
+        if (tc) {
+          const n = this.blds.filter(b => b.owner === 'player' && b.done >= 1 && Math.hypot(b.x - tc.x, b.y - tc.y) < 300).length;
+          const tier = n >= 12 ? 2 : n >= 6 ? 1 : 0;
+          if (tier !== this.cityTier) {
+            this.cityTier = tier; this.terrDirty = true;
+            this.pushBanner('{i:star} ' + ['Аул', 'Қала', 'Астана'][tier] + '!', 'Город вырос: граница от центра шире на 1 гекс');
+          }
+        }
+        if (!this.over && this.terrLand > 0 && this.terrCount / this.terrLand >= 0.6) {
+          this.pushBanner('{i:flag} Границы ханства!', '60% долины под вашей властью — территориальная победа');
+          this.finish('victory');
+        }
+      }
+    } else {
+      const pens = this.blds.filter(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1).length;
+      const s = this.sites[this.siteI];
+      if (s && this.migrating <= 0) s.dep = Math.min(1, s.dep + dt * (0.00009 + pens * 0.00003));
+      if (this.migrating > 0) { this.migrating -= dt; if (this.migrating <= 0) this.doKosh(); }
+    }
+  }
   bldCost(key: BuildingKey): { wood: number; food: number; gold: number } {
     const c = BUILDING_DEFS[key].cost;
     const d = this.woodDiscount();
@@ -3670,7 +3820,7 @@ export class Game {
     // (updateVillager крутится для обеих сторон, а deposit писал только в this.res).
     const bank = v.owner === 'enemy' ? this.eres : this.res;
     if (v.carry.type === 'wood') bank.wood += amt;
-    else if (v.carry.type === 'food') bank.food += amt;
+    else if (v.carry.type === 'food') bank.food += (v.owner === 'player' && this.mode === 'nomad' ? Math.round(amt * this.pastureMult()) : amt);
     else bank.gold += amt;
     if (v.owner === 'player') {
       if (v.carry.type === 'wood') { this.woodGathered += amt; this.gotWood += amt; }
@@ -3867,6 +4017,8 @@ export class Game {
     if (!this.over) this.updateWisdom(dt);
     // ── автосохранение партии ──
     this.updateAutosave(dt);
+    // ── режимы: границы / перекочёвки ──
+    this.updateModes(dt);
 
     // AI tick
     this.aiT += dt;
@@ -5834,7 +5986,7 @@ export class Game {
     for (const b of this.blds) {
       b.flash = Math.max(0, b.flash - dt * 4);
       // construction
-      if (b.done < 1) {
+      if (b.done < 1 && !this.koshBusy()) {
         const def = BUILDING_DEFS[b.key];
         let rate = b.owner === 'enemy' ? 1 / (def.buildTime * 0.8) : 1 / (def.buildTime * 2.2);
         // союз с научными племенами (ур.3) ускоряет возведение построек
@@ -5902,7 +6054,7 @@ export class Game {
       }
       // research progress
       if (b.research && b.owner === 'player') {
-        b.research.t += dt * this.researchMult();
+        if (!this.koshBusy()) b.research.t += dt * this.researchMult();
         if (Math.random() < dt * 2) this.spark(b.x + rand(-16, 16), b.y - 36, '#93c5fd');
         if (b.research.t >= b.research.total) { const id = b.research.id; b.research = null; this.applyTech(id); }
       }
@@ -5910,7 +6062,7 @@ export class Game {
       if (b.queue.length) {
         const q = b.queue[0];
         // resource trickle for enemy handled in AI; player pop check
-        q.t += dt;
+        if (!this.koshBusy()) q.t += dt;
         if (Math.random() < dt * 3) this.spark(b.x + rand(-20, 20), b.y - 30, '#fde68a');
         if (q.t >= q.total) {
           b.queue.shift();
@@ -6520,6 +6672,15 @@ export class Game {
       alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
       unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
         archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
+      mode: this.mode,
+      terrCount: this.terrCount, terrLand: this.terrLand,
+      cityTier: this.cityTier, cityName: ['Аул', 'Қала', 'Астана'][this.cityTier],
+      pasture: this.mode === 'nomad' ? Math.round((1 - (this.sites[this.siteI]?.dep ?? 0)) * 100) : 100,
+      migrating: Math.max(0, Math.ceil(this.migrating)),
+      sites: this.mode === 'nomad'
+        ? this.sites.map((s, i) => ({ i, tag: s.tag, dep: Math.round(s.dep * 100), cur: i === this.siteI,
+            dist: Math.round(Math.hypot(s.x - (this.sites[this.siteI]?.x ?? s.x), s.y - (this.sites[this.siteI]?.y ?? s.y)) / 10) * 10 }))
+        : undefined,
       day: { num: this.dayNum, name: this.dayName(), icon: this.dayIcon(), phase: this.dayPhase(),
         night: this.isNight(),
         resting: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && u.resting).length,
@@ -6757,6 +6918,27 @@ export class Game {
         ctx.drawImage(tile, hx - TCX, hy - TCY - up);
         // обрывы высот тоже прячем в неосвещённых областях (их грани несут «сетку» вверх)
         if (lit) drawCliffsHex(hx, hy, up, cls, q, r);
+        // границы режима «оседлый»: тонировка гекса + кант по передним рёбрам
+        if (this.mode === 'settled' && lit && this.terr.size) {
+          const ow = this.terr.get(q + ',' + r);
+          if (ow) {
+            const col = ow === 1 ? '246,212,124' : '248,113,113';
+            ctx.fillStyle = `rgba(${col},0.10)`;
+            ctx.beginPath();
+            ctx.moveTo(hx + HEX_PTS[0][0], hy - up + HEX_PTS[0][1]);
+            for (let i = 1; i < 6; i++) ctx.lineTo(hx + HEX_PTS[i][0], hy - up + HEX_PTS[i][1]);
+            ctx.closePath(); ctx.fill();
+            const nb: [number, number, number, number][] = [[0, 1, q + 1, r], [1, 2, q, r + 1], [5, 0, q + 1, r - 1]];
+            ctx.strokeStyle = `rgba(${col},0.55)`; ctx.lineWidth = 2;
+            for (const [a, b2, nq, nr] of nb) {
+              if (this.terr.get(nq + ',' + nr) === ow) continue;
+              ctx.beginPath();
+              ctx.moveTo(hx + HEX_PTS[a][0], hy - up + HEX_PTS[a][1]);
+              ctx.lineTo(hx + HEX_PTS[b2][0], hy - up + HEX_PTS[b2][1]);
+              ctx.stroke();
+            }
+          }
+        }
       }
     }
     // upAt для объектов (деревья/юниты/здания/декор) — высота гекса под мировой точкой

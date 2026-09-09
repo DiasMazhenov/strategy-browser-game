@@ -116,6 +116,7 @@ export interface Settings {
   fogOfWar: boolean;       // туман войны (враг скрыт вне обзора)
   dayNight: boolean;       // суточный цикл освещения
   biome: Biome;            // тип карты
+  mode: 'settled' | 'nomad'; // оседлый: города/границы; кочевой: перекочёвки
   particles: boolean;      // частицы и пыль
   damageNumbers: boolean;  // всплывающие числа урона/лечения
   autoPauseOnBlur: boolean;// пауза при потере фокуса
@@ -132,6 +133,7 @@ export const BIOMES: { id: Biome; name: string; icon: string }[] = [
 ];
 export const DEFAULT_SETTINGS: Settings = {
   difficulty: 'normal',
+  mode: 'settled',
   speed: 1,
   muted: false,
   voices: true,

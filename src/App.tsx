@@ -72,6 +72,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [dockTab, setDockTab] = useState<'units' | 'build'>('units');
   const [hud, setHud] = useState<HudSnapshot | null>(null);
+  const [koshOpen, setKoshOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [over, setOver] = useState<GameStats | null>(null);
   const [scores, setScores] = useState<ScoreEntry[]>(loadScores);
@@ -298,6 +299,19 @@ export default function App() {
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Мавзолей хана до конца отсчёта — это победа">
                 <Ico name="star" /> Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
               </div>
+            )}
+            {hud?.mode === 'settled' && (
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-100"
+                title={`Территориальная победа: 60% земли долины (${hud.terrLand} гексов) под границей`}>
+                <Ico name="flag" /> {hud.cityName} · {hud.terrCount}/{hud.terrLand}
+              </div>
+            )}
+            {hud?.mode === 'nomad' && (
+              <button onClick={() => setKoshOpen(true)}
+                className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-teal-500/15 px-2 py-0.5 text-[11px] font-black text-teal-100"
+                title="Качество пастбища стоянки; нажмите для көша на новый жайляу">
+                <Ico name="camel" /> Жайляу {hud.pasture}%{hud.migrating > 0 ? ` · көш ${hud.migrating}с` : ''}
+              </button>
             )}
             {/* ближнее время намаза: видно всегда; при включённой механике — ярче */}
             {hud?.realAzan && (
@@ -729,6 +743,29 @@ export default function App() {
         </div>
       </div>
 
+      {/* ===== КОШ (кочевой режим) ===== */}
+      {koshOpen && hud?.mode === 'nomad' && !over && (
+        <Overlay>
+          <div className="font-display mb-2 flex items-center justify-center gap-2 text-lg font-black text-amber-100"><Ico name="camel" className="h-5 w-5" />Көш: новый жайляу</div>
+          <p className="mb-3 text-[12px] leading-snug text-slate-400">Марш займёт 20 секунд — производство и стройка паузятся.
+            Перевозимое едет с аулом; пашни и башни разбираются с возвратом 40%, склад оставит қыстау с тайником еды.</p>
+          <div className="mb-3 grid grid-cols-1 gap-2">
+            {(hud.sites ?? []).map(s => (
+              <button key={s.i} disabled={s.cur || hud.migrating > 0}
+                onClick={() => { g()?.startKosh(s.i); setKoshOpen(false); }}
+                className={`rounded-2xl border p-2.5 text-left transition ${s.cur ? 'border-lime-300 bg-lime-400/10 opacity-70' : 'border-white/10 bg-black/30 hover:bg-black/20'}`}>
+                <span className="flex items-center justify-between text-[12px] font-black text-amber-100">
+                  <span className="flex items-center gap-1.5"><Ico name="yurt" className="h-4 w-4" />{s.tag}</span>
+                  <span>{s.cur ? 'нынешняя' : `${s.dist} ед.`}</span>
+                </span>
+                <span className="mt-1 block text-[10px] text-slate-400">Пастбище: {100 - s.dep}%{s.dep > 60 ? ' — истощено, пора сниматься!' : ''}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setKoshOpen(false)} className="rounded-full bg-white/10 px-4 py-1.5 text-[12px] font-bold text-slate-200 hover:bg-white/20">Остаться</button>
+        </Overlay>
+      )}
+
       {/* ===== PAUSE ===== */}
       {paused && !over && (
         <Overlay>
@@ -1075,6 +1112,18 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
         </div>
 
         {/* сложность */}
+        <div className="mb-1 text-[11px] font-black tracking-widest text-slate-400">РЕЖИМ ПАРТИИ</div>
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          {([[ 'settled', 'tower', 'Оседлый', 'Города и границы гексов; территориальная победа — 60% долины под сюзеренитетом' ],
+             [ 'nomad', 'camel', 'Кочевник', 'Көш между жайляу: пастбища истощаются, қыстау и тайники на старых местах' ]] as const).map(([m, ic, t, d]) => (
+            <button key={m} onClick={() => updateSettings({ mode: m })}
+              className={`rounded-2xl border p-2.5 text-left transition ${settings.mode === m ? 'border-amber-300 bg-amber-400/15' : 'border-white/10 bg-black/30 hover:bg-black/20'}`}>
+              <span className="flex items-center gap-1.5 text-[12px] font-black text-amber-100"><Ico name={ic} className="h-4 w-4" />{t}</span>
+              <span className="mt-1 block text-[10px] leading-snug text-slate-400">{d}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mb-4 text-[10px] text-slate-500">Применяется к новому походу; текущая партия доиграет свой режим.</div>
         <div className="mb-1 text-[11px] font-black tracking-widest text-slate-400">СЛОЖНОСТЬ</div>
         <div className="grid grid-cols-3 gap-2">
           {DIFFS.map(d => (
