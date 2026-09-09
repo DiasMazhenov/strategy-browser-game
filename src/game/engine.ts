@@ -6493,12 +6493,13 @@ export class Game {
       unite: { have: this.uniteCount(), need: this.UNITE_NEED,
         t: Math.floor(this.uniteT), hold: this.UNITE_HOLD },
       wisdom: Math.floor(this.wisdom), wisdomRate: Math.round(this.wisdomRate() * 10) / 10,
-      realAzan: this.settings.realAzan ? (() => {
+      // ближнее время намаза показываем ВСЕГДА (справочно), on = включена ли механика
+      realAzan: (() => {
         const nx = nextPrayer(new Date(), this.azanCity());
-        return { on: true, city: this.azanCity().name,
+        return { on: this.settings.realAzan, city: this.azanCity().name,
           next: PRAYER_NAMES[nx.key].kz, nextAt: fmtHM(nx.at), inMin: Math.round(nx.inMin),
           times: this.realPrayerSchedule() };
-      })() : null,
+      })(),
       greats: GREATS.map(g => ({ id: g.id, name: g.name, title: g.title, portrait: g.portrait,
         cost: g.cost, effect: g.effect, called: this.hasGreat(g.id),
         afford: this.wisdom >= g.cost && !this.hasGreat(g.id) })),

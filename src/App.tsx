@@ -19,9 +19,8 @@ interface ScoreEntry { name: string; score: number; result: string; difficulty: 
 
 const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
-// версия игры — единый источник для показа в меню.
-// При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.094';
+// версия игры живёт в game/version.ts (иначе ломается Fast Refresh)
+import { GAME_VERSION } from './game/version';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -287,10 +286,16 @@ export default function App() {
                 <Ico name="star" /> Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
               </div>
             )}
-            {hud?.realAzan?.on && (
-              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-black text-emerald-100"
-                title={`${hud.realAzan.city}: ${hud.realAzan.times.map(t => t.name.replace(' намазы','') + ' ' + t.at).join(' • ')}`}>
+            {/* ближнее время намаза: видно всегда; при включённой механике — ярче */}
+            {hud?.realAzan && (
+              <div
+                className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
+                  hud.realAzan.on ? 'bg-emerald-500/20 text-emerald-100' : 'bg-teal-500/10 text-teal-200/80'}`}
+                title={`${hud.realAzan.city}: ${hud.realAzan.times.map(t => t.name.replace(' намазы','') + ' ' + t.at).join(' • ')}${
+                  hud.realAzan.on ? '' : '\nМеханика «азан по реальному времени» выключена — время справочно (включается в настройках)'}`}
+              >
                 <Ico name="mosque" /> {hud.realAzan.next.replace(' намазы', '')} {hud.realAzan.nextAt}
+                {!hud.realAzan.on && <span className="opacity-60">· справочно</span>}
               </div>
             )}
             {(hud?.wisdomRate ?? 0) > 0 && (
