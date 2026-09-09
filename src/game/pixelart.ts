@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 import { BUILDING_DEFS, type BuildingKey, type UnitKey } from './config';
 import { UNIT_ANCHORS, UNIT_TARGET_H } from './sprite-art';
+import { drawIcon } from './iconset';
 // детальные AI-спрайты юнитов (боковой вид); _w/_walk2 — согласованные кадры шага
 import uVillager from '../assets/sprites/units/villager.png';
 import uVillagerW from '../assets/sprites/units/villager_w.png';
@@ -1294,7 +1295,7 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
     ctx.fillRect(snap(ix - bw / 2) + 1, snap(by) + 1, Math.round((bw - 2) * s), bh - 2);
   }
 
-  // ранг героя (⭐) над юнитами игрока, достигшими 2+ уровня
+  // ранг героя (звёзды-иконки) над юнитами игрока, достигшими 2+ уровня
   const lvl = (u as unknown as { level?: number }).level;
   if (u.owner === 'player' && lvl && lvl >= 2) {
     const stars = lvl - 1; // ур.2 → 1 звезда … ур.5 → 4
@@ -1302,8 +1303,8 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
     const unitH = sprReady ? (UNIT_TARGET_H[u.key] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
     const sy = iy + 8 - unitH - 14;
     ctx.font = '8px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const txt = '⭐'.repeat(Math.min(4, stars));
-    ctx.fillText(txt, ix, snap(sy));
+    const n = Math.min(4, stars);
+    for (let k = 0; k < n; k++) drawIcon(ctx, 'star', ix - n * 4 + k * 8, snap(sy) - 4, 8, '#fde047');
   }
 }
 

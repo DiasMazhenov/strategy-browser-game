@@ -11,6 +11,8 @@ import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as az
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
 import heroKhanate from './assets/hero-khanate.jpg';
+import { Ico, RT } from './game/Ico';
+import { plainRich } from './game/iconset';
 
 type Screen = 'menu' | 'game';
 interface ScoreEntry { name: string; score: number; result: string; difficulty: string; kills: number; time: number; date: string }
@@ -19,7 +21,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.092';
+export const GAME_VERSION = '1.0.093';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -39,17 +41,17 @@ function fmtTime(s: number) {
 }
 function costStr(c: { wood: number; food: number; gold: number }) {
   const p: string[] = [];
-  if (c.wood) p.push(`${c.wood}🪵`);
-  if (c.food) p.push(`${c.food}🍖`);
-  if (c.gold) p.push(`${c.gold}🪙`);
+  if (c.wood) p.push(`${c.wood}{i:wood}`);
+  if (c.food) p.push(`${c.food}{i:food}`);
+  if (c.gold) p.push(`${c.gold}{i:gold}`);
   return p.join(' ') || 'Бесплатно';
 }
 const clampPct = (v: number) => Math.max(0, Math.min(1, isFinite(v) ? v : 0));
 
 const DIFFS: { id: Difficulty; name: string; desc: string; icon: string }[] = [
-  { id: 'easy', name: 'Кочевник', desc: 'Спокойные набеги. Для обучения.', icon: '🌱' },
-  { id: 'normal', name: 'Батыр', desc: 'Классический напор степной войны. Баланс.', icon: '⚔️' },
-  { id: 'hard', name: 'Великий хан', desc: 'Беспощадные джунгарские набеги.', icon: '🔥' },
+  { id: 'easy', name: 'Кочевник', desc: 'Спокойные набеги. Для обучения.', icon: 'sprout' },
+  { id: 'normal', name: 'Батыр', desc: 'Классический напор степной войны. Баланс.', icon: 'swords' },
+  { id: 'hard', name: 'Великий хан', desc: 'Беспощадные джунгарские набеги.', icon: 'fire' },
 ];
 
 export default function App() {
@@ -227,8 +229,8 @@ export default function App() {
               <Landmark className="h-4 w-4 text-amber-300" />
               Дипломатия
               {hud?.atWar
-                ? <span className="rounded-full bg-red-600/80 px-1.5 py-0.5 text-[9px] font-black text-white">⚔ ВОЙНА</span>
-                : <span className="rounded-full bg-emerald-600/60 px-1.5 py-0.5 text-[9px] font-black text-emerald-50">🕊 МИР</span>}
+                ? <span className="rounded-full bg-red-600/80 px-1.5 py-0.5 text-[9px] font-black text-white"><Ico name="swords" /> ВОЙНА</span>
+                : <span className="rounded-full bg-emerald-600/60 px-1.5 py-0.5 text-[9px] font-black text-emerald-50"><Ico name="dove" /> МИР</span>}
               {!!(hud?.nations?.some(n => n.met && n.kind === 'tribe')) && (
                 <span className="rounded-full bg-sky-500/30 px-1.5 py-0.5 text-[9px] font-bold text-sky-100">
                   знакомо: {hud.nations.filter(n => n.met).length}
@@ -240,61 +242,61 @@ export default function App() {
                 className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.day.night ? 'bg-indigo-500/25 text-indigo-100' : 'bg-amber-400/20 text-amber-100'}`}
                 title={`${hud.day.name} · День ${hud.day.num}\nСутки 30 минут: 18 мин день, по 4 мин закат и рассвет, 4 мин ночь\nНочью шаруа устают быстрее и уходят отдыхать раньше\nОтдыхает: ${hud.day.resting} · Бодрых: ${hud.day.fresh} · Устали: ${hud.day.tired}\nШаруа сменяют друг друга у юрт и возвращаются отдохнувшими (+35% к добыче)`}
               >
-                {hud.day.icon} День {hud.day.num}
+                <Ico name={hud.day.icon} className="h-3.5 w-3.5" /> День {hud.day.num}
                 {/* при получасовых сутках время дня важнее номера дня: показываем фазу */}
                 <span className="opacity-80">{hud.day.name.replace(/ \(.*\)/, '')}</span>
-                {hud.day.resting > 0 && <span className="rounded-full bg-emerald-500/40 px-1 text-[9px] text-emerald-50">😴 {hud.day.resting}</span>}
-                {hud.day.fresh > 0 && <span className="rounded-full bg-lime-400/30 px-1 text-[9px] text-lime-100">✨ {hud.day.fresh}</span>}
-                {hud.day.tired > 0 && <span className="rounded-full bg-orange-500/30 px-1 text-[9px] text-orange-100">💤 {hud.day.tired}</span>}
+                {hud.day.resting > 0 && <span className="rounded-full bg-emerald-500/40 px-1 text-[9px] text-emerald-50"><Ico name="sleep" /> {hud.day.resting}</span>}
+                {hud.day.fresh > 0 && <span className="rounded-full bg-lime-400/30 px-1 text-[9px] text-lime-100"><Ico name="sparkle" /> {hud.day.fresh}</span>}
+                {hud.day.tired > 0 && <span className="rounded-full bg-orange-500/30 px-1 text-[9px] text-orange-100"><Ico name="sleep" /> {hud.day.tired}</span>}
               </div>
             )}
             {hud?.pray?.active && (
               <div className="pointer-events-auto flex animate-pulse items-center gap-1.5 rounded-full bg-teal-500/25 px-2 py-0.5 text-[11px] font-black text-teal-100"
                 title={`Азан с минарета: жители идут на намаз (${hud.pray.praying} чел.)\nВоины не отвлекаются от обороны`}>
-                🕌 Намаз: {mmss(hud.pray.t)}
-                {hud.pray.praying > 0 && <span className="rounded-full bg-teal-400/40 px-1 text-[9px]">🤲 {hud.pray.praying}</span>}
+                <Ico name="mosque" /> Намаз: {mmss(hud.pray.t)}
+                {hud.pray.praying > 0 && <span className="rounded-full bg-teal-400/40 px-1 text-[9px]"><Ico name="hands" /> {hud.pray.praying}</span>}
               </div>
             )}
             {!hud?.pray?.active && (hud?.pray?.bereke ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-black text-emerald-100"
                 title={`Береке — благодать общины после намаза: +${hud!.pray.berekePct}% к добыче и мораль войска`}>
-                🤲 Береке: {mmss(hud!.pray.bereke)} <span className="opacity-80">+{hud!.pray.berekePct}%</span>
+                <Ico name="hands" /> Береке: {mmss(hud!.pray.bereke)} <span className="opacity-80">+{hud!.pray.berekePct}%</span>
               </div>
             )}
             {hud?.alertHud && (
               <button
                 onClick={() => gameRef.current?.jumpToAlert()}
                 className="pointer-events-auto flex animate-pulse items-center gap-1.5 rounded-full border border-red-400/60 bg-red-600/30 px-2 py-0.5 text-[11px] font-black text-red-100 hover:bg-red-600/50"
-                title={`${hud.alertHud.sub} — щёлкните, чтобы перенести камеру к месту боя`}
+                title={plainRich(`${hud.alertHud.sub} — щёлкните, чтобы перенести камеру к месту боя`)}
               >
-                ⚠️ НАС АТАКУЮТ! <span className="font-bold opacity-80">к месту →</span>
+                <Ico name="warn" /> НАС АТАКУЮТ! <span className="font-bold opacity-80">к месту →</span>
               </button>
             )}
             {(hud?.drought ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-orange-500/20 px-2 py-0.5 text-[11px] font-black text-orange-200" title="Засуха: пашни дают меньше еды">
-                🌵 Засуха: {hud!.drought}с
+                <Ico name="cactus" /> Засуха: {hud!.drought}с
               </div>
             )}
             {(hud?.plague ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-lime-500/20 px-2 py-0.5 text-[11px] font-black text-lime-200" title="Поветрие: шаруа добывают медленнее">
-                🤒 Поветрие: {hud!.plague}с
+                <Ico name="sick" /> Поветрие: {hud!.plague}с
               </div>
             )}
             {(hud?.wonderT ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-black text-amber-200" title="Защитите Мавзолей хана до конца отсчёта — это победа">
-                ⭐ Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
+                <Ico name="star" /> Мавзолей: {Math.floor((hud?.wonderT ?? 0) / 60)}:{String((hud?.wonderT ?? 0) % 60).padStart(2, '0')}
               </div>
             )}
             {hud?.realAzan?.on && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[11px] font-black text-emerald-100"
                 title={`${hud.realAzan.city}: ${hud.realAzan.times.map(t => t.name.replace(' намазы','') + ' ' + t.at).join(' • ')}`}>
-                🕌 {hud.realAzan.next.replace(' намазы', '')} {hud.realAzan.nextAt}
+                <Ico name="mosque" /> {hud.realAzan.next.replace(' намазы', '')} {hud.realAzan.nextAt}
               </div>
             )}
             {(hud?.wisdomRate ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-teal-500/20 px-2 py-0.5 text-[11px] font-black text-teal-100"
                 title="Мудрость: копится от Мешіт-медресе, Мавзолея и реликвий. Призыв великих людей — клавиша J">
-                ✨ {hud!.wisdom}
+                <Ico name="sparkle" /> {hud!.wisdom}
               </div>
             )}
             {/* Объединение степи: показываем, когда союз уже собирается */}
@@ -302,7 +304,7 @@ export default function App() {
               <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
                 (hud!.unite.t) > 0 ? 'animate-pulse bg-teal-500/25 text-teal-100' : 'bg-white/10 text-slate-200'}`}
                 title={`Станьте сюзереном ${hud!.unite.need} народов и удержите союз — дипломатическая победа`}>
-                🤝 Степь: {hud!.unite.have}/{hud!.unite.need}
+                <Ico name="handshake" /> Степь: {hud!.unite.have}/{hud!.unite.need}
                 {hud!.unite.t > 0 && <> • {Math.floor((hud!.unite.hold - hud!.unite.t) / 60)}:{String((hud!.unite.hold - hud!.unite.t) % 60).padStart(2, '0')}</>}
               </div>
             )}
@@ -314,7 +316,7 @@ export default function App() {
               <Crown className="h-4 w-4" />{hud?.ageName ?? 'Заря степи'}
             </div>
             <IconBtn onClick={() => g()?.jumpToIdleVillager()} label="Свободные шаруа (.)">
-              <span className="relative text-sm leading-none">🧑‍🌾{(hud?.idleVills ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-400 px-0.5 text-[8px] font-black text-black">{hud?.idleVills}</span>}</span>
+              <span className="relative text-sm leading-none"><Ico name="farmer" className="h-4 w-4" />{(hud?.idleVills ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-400 px-0.5 text-[8px] font-black text-black">{hud?.idleVills}</span>}</span>
             </IconBtn>
             <IconBtn onClick={() => g()?.toggleMute()} label="Звук">
               {(hud?.muted) ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
@@ -323,7 +325,7 @@ export default function App() {
               <ScrollText className="h-4 w-4" />
             </IconBtn>
             <IconBtn onClick={() => setShowGreats(true)} label="Великие люди степи (J)">
-              <span className="relative text-sm leading-none">✨{(hud?.greats?.some(x => x.afford) ?? false) &&
+              <span className="relative text-sm leading-none"><Ico name="sparkle" />{(hud?.greats?.some(x => x.afford) ?? false) &&
                 <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full bg-amber-400" />}</span>
             </IconBtn>
             <IconBtn onClick={() => setShowSettings(true)} label="Настройки">
@@ -338,12 +340,12 @@ export default function App() {
         {/* mobile score strip */}
         <div className="flex justify-center md:hidden">
           <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-full px-3 py-1 text-[11px] font-bold">
-            <span className="text-amber-300">🏆{hud?.score ?? 0}</span>
+            <span className="text-amber-300"><Ico name="trophy" />{hud?.score ?? 0}</span>
             <span className="text-slate-300">{fmtTime(hud?.timeSec ?? 0)}</span>
             {hud?.atWar && (
-              <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}>🌊{hud?.nextWave ?? 0}с</span>
+              <span className={(hud?.nextWave ?? 99) <= 10 ? 'animate-pulse text-red-400' : 'text-orange-300'}><Ico name="sea" />{hud?.nextWave ?? 0}с</span>
             )}
-            <span className="text-amber-200">{AGES[hud?.age ?? 0].icon}</span>
+            <Ico name={AGES[hud?.age ?? 0].icon} className="h-4 w-4 text-amber-200" />
           </div>
         </div>
 
@@ -351,8 +353,8 @@ export default function App() {
         {hud?.banner && (
           <div className="mt-2 flex justify-center px-4">
             <div className="anim-banner panel-iron rounded-2xl border-amber-300/40 px-5 py-2 text-center" style={{ animation: 'marquee-glow 2s ease-in-out infinite' }}>
-              <div className="font-display text-base font-black tracking-wide text-amber-200 sm:text-xl">{hud.banner.title}</div>
-              <div className="text-[11px] font-semibold text-slate-300 sm:text-xs">{hud.banner.sub}</div>
+              <div className="font-display text-base font-black tracking-wide text-amber-200 sm:text-xl"><RT t={hud.banner.title} /></div>
+              <div className="text-[11px] font-semibold text-slate-300 sm:text-xs"><RT t={hud.banner.sub} /></div>
             </div>
           </div>
         )}
@@ -369,11 +371,11 @@ export default function App() {
             <div className="mt-1.5 space-y-1">
               {hud?.quests.map(q => (
                 <div key={q.id} className={`flex items-center justify-between rounded-lg px-2 py-1 text-[11px] font-semibold ${q.done ? 'bg-lime-500/15 text-lime-300' : 'bg-white/5 text-slate-200'}`}>
-                  <span className="flex items-center gap-1.5">{q.done ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />}{q.label}</span>
+                  <span className="flex items-center gap-1.5">{q.done ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />}<RT t={q.label} /></span>
                   <span className="text-[10px] opacity-70">{q.progress}</span>
                 </div>
               ))}
-              <div className="rounded-lg bg-black/30 px-2 py-1 text-[10px] leading-snug text-slate-400">💡 {hud?.hint ?? ''}</div>
+              <div className="rounded-lg bg-black/30 px-2 py-1 text-[10px] leading-snug text-slate-400"><Ico name="bulb" /> <RT t={hud?.hint ?? ''} /></div>
             </div>
           )}
         </div>
@@ -406,22 +408,22 @@ export default function App() {
                 })}
               </div>
               <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] font-bold">
-                {([['wood', '🪵', 'Лес', 'text-lime-300'], ['food', '🍖', 'Еда', 'text-rose-300'],
-                   ['gold', '🪙', 'Золото', 'text-amber-300'], ['build', '🔨', 'Стройка', 'text-sky-300']] as const)
+                {([['wood', 'wood', 'Лес', 'text-lime-300'], ['food', 'food', 'Еда', 'text-rose-300'],
+                   ['gold', 'gold', 'Золото', 'text-amber-300'], ['build', 'hammer', 'Стройка', 'text-sky-300']] as const)
                   .map(([k, icon, label, cls]) => (
                     <button key={k} onClick={() => g()?.tradeSelect(k)}
                       title={`Выделить всех шаруа: ${label.toLowerCase()}`}
                       className={`flex items-center justify-between rounded px-1 py-0.5 hover:bg-white/10 ${cls}`}>
-                      <span>{icon} {label}</span><b>{hud!.econ[k]}</b>
+                      <span className="flex items-center gap-1"><Ico name={icon} /> {label}</span><b>{hud!.econ[k]}</b>
                     </button>
                   ))}
                 <button onClick={() => g()?.idleSelect()} title="Выделить простаивающих"
                   className="flex items-center justify-between rounded px-1 py-0.5 text-slate-300 hover:bg-white/10">
-                  <span>💤 Простой</span><b>{hud!.econ.idle}</b>
+                  <span><Ico name="sleep" /> Простой</span><b>{hud!.econ.idle}</b>
                 </button>
                 <div className="flex items-center justify-between px-1 py-0.5 text-indigo-300"
                   title="Отдыхают в ночную смену — это не простой">
-                  <span>🌙 Отдых</span><b>{hud!.econ.rest}</b>
+                  <span><Ico name="moon" /> Отдых</span><b>{hud!.econ.rest}</b>
                 </div>
               </div>
             </div>
@@ -453,7 +455,7 @@ export default function App() {
             {hud.sel.kind === 'units' ? (
               <>
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/20 text-xl">
-                  {hud.sel.types?.length === 1 ? unitIcon(hud.sel.types[0].key) : <Users className="h-5 w-5 text-sky-300" />}
+                  {hud.sel.types?.length === 1 ? <Ico name={unitIcon(hud.sel.types[0].key)} className="h-6 w-6" /> : <Users className="h-5 w-5 text-sky-300" />}
                 </div>
                 <div>
                   <div className="text-xs font-black text-white">
@@ -462,21 +464,21 @@ export default function App() {
                   <HpMini hp={hud.sel.avgHp ?? 1} max={hud.sel.maxHp ?? 1} />
                   {(hud.sel.maxLevel ?? 1) >= 2 && (
                     <div className="mt-0.5 text-[10px] font-bold text-amber-300">
-                      ⭐ Ветеран: ранг {hud.sel.maxLevel} · убийств {hud.sel.totalKills}
+                      <Ico name="star" /> Ветеран: ранг {hud.sel.maxLevel} · убийств {hud.sel.totalKills}
                     </div>
                   )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.attackArmed = true; gm.pushHud(); } }}><Flag className="h-3 w-3" />Атака-мув (G)</MiniBtn>
-                    <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕ Снять выбор</MiniBtn>
+                    <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}><Ico name="cross" /> Снять выбор</MiniBtn>
                   </div>
                   {/* приказы разведчика */}
                   {/* приказ рабочему: пасти скот у загона */}
                   {hud.sel.types?.some(t => t.key === 'villager') && (
                     <div className="mt-1.5 rounded-xl border border-lime-400/25 bg-lime-500/10 p-1.5">
-                      <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-lime-200">🐑 Пастух</div>
+                      <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-lime-200"><Ico name="sheep" /> Пастух</div>
                       <div className="flex flex-wrap gap-1">
                         <MiniBtn title="Рабочий верхом на коне пасёт скот и загоняет его в ближайший Загон (построй: Загон, клавиша H)" onClick={() => g()?.herdOrder()}>
-                          🐎 Пасти скот
+                          <Ico name="horse" /> Пасти скот
                         </MiniBtn>
                       </div>
                     </div>
@@ -495,22 +497,22 @@ export default function App() {
                   {!(hud.sel.types?.every(t => t.key === 'villager') || false) && (
                     <div className="mt-1 flex flex-wrap items-center gap-1">
                       <span className="text-[9px] font-black uppercase tracking-wide text-sky-300/80">Стойка:</span>
-                      <MiniBtn active={(hud.sel.stance ?? 'aggressive') === 'aggressive'} title="Преследовать врага далеко от позиции" onClick={() => g()?.setStance('aggressive')}>⚔️ Атак.</MiniBtn>
-                      <MiniBtn active={(hud.sel.stance ?? '') === 'defensive'} title="Дать отпор рядом, не убегая далеко" onClick={() => g()?.setStance('defensive')}>🛡 Оборон.</MiniBtn>
-                      <MiniBtn active={(hud.sel.stance ?? '') === 'stand'} title="Держать точку — не сходить с места" onClick={() => g()?.setStance('stand')}>⛳ Стоять</MiniBtn>
-                      <MiniBtn active={hud.patrolArmed} title="Кликните по конечной точке маршрута — войска будут ходить между позициями (клавиша Y)" onClick={() => { const gm = g(); if (gm) { gm.patrolArmed = !gm.patrolArmed; gm.attackArmed = false; gm.pushHud(); } }}>👁 Патруль (Y)</MiniBtn>
+                      <MiniBtn active={(hud.sel.stance ?? 'aggressive') === 'aggressive'} title="Преследовать врага далеко от позиции" onClick={() => g()?.setStance('aggressive')}><Ico name="swords" /> Атак.</MiniBtn>
+                      <MiniBtn active={(hud.sel.stance ?? '') === 'defensive'} title="Дать отпор рядом, не убегая далеко" onClick={() => g()?.setStance('defensive')}><Ico name="shield" /> Оборон.</MiniBtn>
+                      <MiniBtn active={(hud.sel.stance ?? '') === 'stand'} title="Держать точку — не сходить с места" onClick={() => g()?.setStance('stand')}><Ico name="flag" /> Стоять</MiniBtn>
+                      <MiniBtn active={hud.patrolArmed} title="Кликните по конечной точке маршрута — войска будут ходить между позициями (клавиша Y)" onClick={() => { const gm = g(); if (gm) { gm.patrolArmed = !gm.patrolArmed; gm.attackArmed = false; gm.pushHud(); } }}><Ico name="eye" /> Патруль (Y)</MiniBtn>
                     </div>
                   )}
                 </div>
               </>
             ) : (
               <>
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-xl">{bldIcon(hud.sel.bkey!)}</div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-200"><Ico name={bldIcon(hud.sel.bkey!)} className="h-6 w-6" /></div>
                 <div className="max-w-[260px]">
                   <div className="text-xs font-black text-white">{hud.sel.blabel} {(hud.sel.done ?? 1) < 1 && <span className="text-lime-300">• стройка {Math.round((hud.sel.done ?? 0) * 100)}%</span>}</div>
                   <HpMini hp={hud.sel.hp ?? 1} max={hud.sel.bmax ?? 1} />
                   {hud.sel.research && (
-                    <div className="mt-0.5 text-[10px] font-bold text-sky-300">📜 {hud.sel.research.name} {Math.round((hud.sel.research.t / hud.sel.research.total) * 100)}%</div>
+                    <div className="mt-0.5 text-[10px] font-bold text-sky-300"><Ico name="scroll" /> {hud.sel.research.name} {Math.round((hud.sel.research.t / hud.sel.research.total) * 100)}%</div>
                   )}
                   {(hud.sel.queue?.length ?? 0) > 0 && (
                     <div className="mt-1">
@@ -520,7 +522,7 @@ export default function App() {
                           const prog = i === 0 ? clampPct(q.t / q.total) : 0;
                           return (
                             <div key={i} className="relative flex h-7 w-7 items-center justify-center rounded-lg border border-amber-400/40 bg-black/40 text-base leading-none" title={`${q.label}${i === 0 ? ` — ${Math.round(prog * 100)}%` : ''}`}>
-                              <span className={i === 0 ? '' : 'opacity-70 grayscale'}>{unitIcon(q.key)}</span>
+                              <span className={i === 0 ? 'text-amber-200' : 'opacity-70 grayscale text-amber-200'}><Ico name={unitIcon(q.key)} className="h-4 w-4" /></span>
                               {i === 0 && (
                                 <span className="absolute -bottom-0.5 left-0.5 right-0.5 h-1 overflow-hidden rounded-full bg-black/60">
                                   <span className="block h-full bg-amber-400" style={{ width: `${prog * 100}%` }} />
@@ -530,7 +532,7 @@ export default function App() {
                             </div>
                           );
                         })}
-                        <button onClick={() => g()?.cancelTrain(hud.sel.bid!)} title="Отменить последнего (возврат ресурсов)" className="ml-1 rounded bg-red-500/30 px-1.5 py-0.5 text-[10px] font-bold text-red-200 hover:bg-red-500/50">✕</button>
+                        <button onClick={() => g()?.cancelTrain(hud.sel.bid!)} title="Отменить последнего (возврат ресурсов)" className="ml-1 rounded bg-red-500/30 px-1.5 py-0.5 text-[10px] font-bold text-red-200 hover:bg-red-500/50"><Ico name="cross" /></button>
                       </div>
                       <div className="mt-0.5 text-[10px] font-bold text-amber-200">Обучение: {hud.sel.queue![0].label} · {Math.round(clampPct(hud.sel.queue![0].t / hud.sel.queue![0].total) * 100)}%</div>
                     </div>
@@ -546,7 +548,7 @@ export default function App() {
                           onClick={() => g()?.research(t.id)}
                           className={`flex items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[10px] font-bold transition ${t.done ? 'border-lime-400/40 bg-lime-500/15 text-lime-300' : t.available && !t.busy ? 'border-sky-400/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/30' : 'border-white/10 bg-black/30 text-slate-400'}`}
                         >
-                          <span>{t.done ? '✓' : t.icon}</span>{t.name}
+                          <Ico name={t.done ? 'check' : t.icon} className="h-3.5 w-3.5 shrink-0" />{t.name}
                         </button>
                       ))}
                     </div>
@@ -562,15 +564,15 @@ export default function App() {
                           onClick={() => g()?.research(u.id)}
                           className={`flex items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[10px] font-black transition ${u.done ? 'border-amber-400/50 bg-amber-500/20 text-amber-200' : u.available ? 'border-violet-400/50 bg-violet-500/20 text-violet-100 hover:bg-violet-500/40' : 'border-white/10 bg-black/30 text-slate-500'}`}
                         >
-                          <span>{u.done ? '★' : u.locked ? '🔒' : u.icon}</span>{u.name}
+                          <Ico name={u.done ? 'star' : u.locked ? 'lock' : u.icon} className="h-3.5 w-3.5 shrink-0" />{u.name}
                         </button>
                       ))}
                     </div>
                   )}
                   {hud.sel.bkey === 'market' && (
                     <div className="mt-1 flex gap-1">
-                      <MiniBtn onClick={() => g()?.trade('wood')} title="Обмен дерева на золото">🪵→🪙 Торговля</MiniBtn>
-                      <MiniBtn onClick={() => g()?.trade('food')} title="Обмен еды на золото">🍖→🪙</MiniBtn>
+                      <MiniBtn onClick={() => g()?.trade('wood')} title="Обмен дерева на золото"><Ico name="wood" />→<Ico name="gold" /> Торговля</MiniBtn>
+                      <MiniBtn onClick={() => g()?.trade('food')} title="Обмен еды на золото"><Ico name="food" />→<Ico name="gold" /></MiniBtn>
                     </div>
                   )}
                   {hud.sel.bkey === 'tower' && hud.sel.towerUpg && (
@@ -578,9 +580,9 @@ export default function App() {
                       <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-amber-300/90">Улучшения башни</div>
                       <div className="flex flex-wrap gap-1">
                         {([
-                          ['range', '📐 Дальность', '+18% дальности обзора и стрельбы за уровень'],
-                          ['dmg', '🏹 Урон', '+35% урона и +80 прочности за уровень'],
-                          ['archers', '🎯 Лучники', '+1 лучник на башне: дополнительный залп (макс 2)'],
+                          ['range', '{i:ruler} Дальность', '+18% дальности обзора и стрельбы за уровень'],
+                          ['dmg', '{i:bow} Урон', '+35% урона и +80 прочности за уровень'],
+                          ['archers', '{i:target} Лучники', '+1 лучник на башне: дополнительный залп (макс 2)'],
                         ] as const).map(([k, lbl, tip]) => {
                           const tu = hud.sel.towerUpg!;
                           const lvl = k === 'range' ? tu.range : k === 'dmg' ? tu.dmg : tu.archers;
@@ -590,8 +592,8 @@ export default function App() {
                           return (
                             <MiniBtn key={k}
                               onClick={() => { if (!maxed) g()?.upgradeTower(hud.sel.bid!, k); }}
-                              title={`${tip} · ${maxed ? 'максимум' : `${cost}🪙`}`}>
-                              {lbl} {lvl}/{cap}{maxed ? ' ✓' : ` (${cost}🪙)`}
+                              title={plainRich(`${tip} · ${maxed ? 'максимум' : `${cost} золота`}`)}>
+                              <RT t={`${lbl} ${lvl}/${cap}${maxed ? ' {i:check}' : ` (${cost}{i:gold})`}`} />
                             </MiniBtn>
                           );
                         })}
@@ -600,11 +602,11 @@ export default function App() {
                   )}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {(hud.sel.done ?? 1) >= 1 && (hud.sel.hp ?? 0) < (hud.sel.bmax ?? 1) - 1 && (
-                      <MiniBtn onClick={() => g()?.repairBuilding(hud.sel.bid!)} title="Отправить шаруа чинить (тратит дерево)">🔧 Чинить</MiniBtn>
+                      <MiniBtn onClick={() => g()?.repairBuilding(hud.sel.bid!)} title="Отправить шаруа чинить (тратит дерево)"><Ico name="wrench" /> Чинить</MiniBtn>
                     )}
                     {(hud.sel.garrisonCap ?? 0) > 0 && (
                       <>
-                        <MiniBtn onClick={() => g()?.garrisonUnits(hud.sel.bid!)}>🛡 В укрытие ({hud.sel.garrison}/{hud.sel.garrisonCap})</MiniBtn>
+                        <MiniBtn onClick={() => g()?.garrisonUnits(hud.sel.bid!)}><Ico name="shield" /> В укрытие ({hud.sel.garrison}/{hud.sel.garrisonCap})</MiniBtn>
                         {(hud.sel.garrison ?? 0) > 0 && <MiniBtn onClick={() => g()?.ungarrisonUnits(hud.sel.bid!, true)}>Выпустить</MiniBtn>}
                       </>
                     )}
@@ -612,13 +614,13 @@ export default function App() {
                       <MiniBtn onClick={() => { const gm = g(); if (gm) { gm.rallyArmed = true; gm.pushHud(); } }} active={hud.rallyArmed} title="Кликните по точке сбора; если это ресурс — новые шаруа сразу идут на работу"><Flag className="h-3 w-3" />Сбор</MiniBtn>
                     )}
                     {hud.sel.bkey === 'wall' && (
-                      <MiniBtn onClick={() => g()?.buildGateOnWall(hud.sel.bid!)} title="Вставить ворота вместо этого участка стены (стоимость ворот)">🚪 Ворота</MiniBtn>
+                      <MiniBtn onClick={() => g()?.buildGateOnWall(hud.sel.bid!)} title="Вставить ворота вместо этого участка стены (стоимость ворот)"><Ico name="door" /> Ворота</MiniBtn>
                     )}
                     <MiniBtn
                       onClick={() => { const gm = g(); if (gm) gm.demolish(hud.sel.bid!); }}
                       title={hud.sel.bkey === 'towncenter' ? 'Ханскую ставку снести нельзя' : 'Снести строение (Delete) — возврат части ресурсов'}
-                    >⛏ Снести</MiniBtn>
-                    <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}>✕</MiniBtn>
+                    ><Ico name="pick" /> Снести</MiniBtn>
+                    <MiniBtn onClick={() => g()?.clearSel() ?? g()?.pushHud()}><Ico name="cross" /></MiniBtn>
                   </div>
                 </div>
               </>
@@ -631,7 +633,7 @@ export default function App() {
       {hud?.placement && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto flex items-center gap-2 rounded-full border border-lime-300/50 bg-lime-950/90 px-4 py-1.5 text-xs font-bold text-lime-200">
-            🏗️ Строим: {BUILDING_DEFS[hud.placement].name} — кликните по карте
+            <Ico name="crane" /> Строим: {BUILDING_DEFS[hud.placement].name} — кликните по карте
             <button onClick={() => g()?.cancelPlacement()} className="rounded-full bg-white/10 p-1"><X className="h-3.5 w-3.5" /></button>
           </div>
         </div>
@@ -639,7 +641,7 @@ export default function App() {
       {hud?.attackArmed && !hud?.placement && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto rounded-full border border-red-300/50 bg-red-950/90 px-4 py-1.5 text-xs font-bold text-red-200">
-            🎯 Атака-мув готова — укажите точку набега! (Esc — отмена)
+            <Ico name="target" /> Атака-мув готова — укажите точку набега! (Esc — отмена)
           </div>
         </div>
       )}
@@ -658,10 +660,10 @@ export default function App() {
                   disabled={(hud?.age ?? 0) >= 3}
                   className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-black transition ${(hud?.ageAfford && (hud?.age ?? 0) < 3) ? 'btn-gold animate-pulse' : 'btn-iron opacity-80'} disabled:opacity-40`}
                 >
-                  <span className="text-base leading-none">{(hud?.age ?? 0) >= 3 ? '👑' : AGES[(hud?.age ?? 0) + 1].icon}</span>
+                  <Ico name={(hud?.age ?? 0) >= 3 ? 'crown' : AGES[(hud?.age ?? 0) + 1].icon} className="h-5 w-5" />
                   <span className="text-left leading-tight">
                     <span className="block">{(hud?.age ?? 0) >= 3 ? 'МАКС. ВЕК' : 'Эпоха (T)'}</span>
-                    <span className="block text-[9px] font-bold opacity-80">{hud?.ageCost}</span>
+                    <span className="block text-[9px] font-bold opacity-80"><RT t={hud?.ageCost ?? ''} /></span>
                   </span>
                 </button>
               </div>
@@ -669,33 +671,33 @@ export default function App() {
             <div className="scroll-thin flex items-stretch gap-1.5 overflow-x-auto">
               {dockTab === 'units' ? (
                 <>
-                  <TrainBtn label="Шаруа" icon="🧑‍🌾" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
-                  <TrainBtn label={hud?.unitNames?.swordsman ?? 'Сарбаз'} icon="🗡️" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
-                  <TrainBtn label={hud?.unitNames?.archer ?? 'Мерген'} icon="🏹" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
-                  <TrainBtn label="Батыр" icon="🐎" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
-                  <TrainBtn label={hud?.unitNames?.spearman ?? 'Найзагер'} icon="🔱" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
-                  <TrainBtn label={hud?.unitNames?.cavalry ?? 'Жасауыл'} icon="🏇" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
-                  <TrainBtn label="Катапульта" icon="🪨" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
-                  <TrainBtn label="Имам" icon="🕌" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
-                  <TrainBtn label="Барлаушы" icon="🧭" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
-                  <TrainBtn label="Көпес" icon="🐫" key_="0" cost={UNIT_DEFS.trader.cost} ok={canAfford(UNIT_DEFS.trader.cost)} tip={unitStats('trader') + ' · нужен Базар и друзья-соседи'} onClick={() => g()?.train('trader')} />
+                  <TrainBtn label="Шаруа" icon="farmer" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
+                  <TrainBtn label={hud?.unitNames?.swordsman ?? 'Сарбаз'} icon="saber" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
+                  <TrainBtn label={hud?.unitNames?.archer ?? 'Мерген'} icon="bow" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
+                  <TrainBtn label="Батыр" icon="horse" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
+                  <TrainBtn label={hud?.unitNames?.spearman ?? 'Найзагер'} icon="spear" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
+                  <TrainBtn label={hud?.unitNames?.cavalry ?? 'Жасауыл'} icon="rider" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
+                  <TrainBtn label="Катапульта" icon="stone" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
+                  <TrainBtn label="Имам" icon="mosque" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
+                  <TrainBtn label="Барлаушы" icon="compass" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
+                  <TrainBtn label="Көпес" icon="camel" key_="0" cost={UNIT_DEFS.trader.cost} ok={canAfford(UNIT_DEFS.trader.cost)} tip={unitStats('trader') + ' · нужен Базар и друзья-соседи'} onClick={() => g()?.train('trader')} />
                 </>
               ) : (
                 <>
-                  <TrainBtn label="Юрта" icon="⛺" key_="Q" cost={bldCostOf('house', wdisc)} ok={canAfford(bldCostOf('house', wdisc))} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
-                  <TrainBtn label="Казармы" icon="⚒️" key_="E" cost={bldCostOf('barracks', wdisc)} ok={canAfford(bldCostOf('barracks', wdisc))} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
-                  <TrainBtn label="Башня" icon="🗼" key_="R" cost={bldCostOf('tower', wdisc)} ok={canAfford(bldCostOf('tower', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
-                  <TrainBtn label="Пашня" icon="🌾" key_="F" cost={bldCostOf('farm', wdisc)} ok={canAfford(bldCostOf('farm', wdisc))} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
-                  <TrainBtn label="Склад" icon="📦" key_="K" cost={bldCostOf('storehouse', wdisc)} ok={canAfford(bldCostOf('storehouse', wdisc))} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
-                  <TrainBtn label="Загон" icon="🐑" key_="H" cost={bldCostOf('pen', wdisc)} ok={canAfford(bldCostOf('pen', wdisc))} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
-                  <TrainBtn label="Конюшня" icon="🐴" key_="Z" cost={bldCostOf('stable', wdisc)} ok={canAfford(bldCostOf('stable', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
-                  <TrainBtn label="Кузница" icon="🔨" key_="X" cost={bldCostOf('blacksmith', wdisc)} ok={canAfford(bldCostOf('blacksmith', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
-                  <TrainBtn label="Базар" icon="🏪" key_="C" cost={bldCostOf('market', wdisc)} ok={canAfford(bldCostOf('market', wdisc))} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
-                  <TrainBtn label="Мешіт" icon="🕌" key_="M" cost={bldCostOf('mosque', wdisc)} ok={canAfford(bldCostOf('mosque', wdisc))} active={hud?.placement === 'mosque'} tip={bldStats('mosque')} onClick={() => g()?.enterPlacement('mosque')} />
+                  <TrainBtn label="Юрта" icon="yurt" key_="Q" cost={bldCostOf('house', wdisc)} ok={canAfford(bldCostOf('house', wdisc))} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
+                  <TrainBtn label="Казармы" icon="hammerpick" key_="E" cost={bldCostOf('barracks', wdisc)} ok={canAfford(bldCostOf('barracks', wdisc))} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
+                  <TrainBtn label="Башня" icon="tower" key_="R" cost={bldCostOf('tower', wdisc)} ok={canAfford(bldCostOf('tower', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
+                  <TrainBtn label="Пашня" icon="wheat" key_="F" cost={bldCostOf('farm', wdisc)} ok={canAfford(bldCostOf('farm', wdisc))} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
+                  <TrainBtn label="Склад" icon="box" key_="K" cost={bldCostOf('storehouse', wdisc)} ok={canAfford(bldCostOf('storehouse', wdisc))} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
+                  <TrainBtn label="Загон" icon="sheep" key_="H" cost={bldCostOf('pen', wdisc)} ok={canAfford(bldCostOf('pen', wdisc))} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
+                  <TrainBtn label="Конюшня" icon="horse" key_="Z" cost={bldCostOf('stable', wdisc)} ok={canAfford(bldCostOf('stable', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
+                  <TrainBtn label="Кузница" icon="hammer" key_="X" cost={bldCostOf('blacksmith', wdisc)} ok={canAfford(bldCostOf('blacksmith', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
+                  <TrainBtn label="Базар" icon="market" key_="C" cost={bldCostOf('market', wdisc)} ok={canAfford(bldCostOf('market', wdisc))} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
+                  <TrainBtn label="Мешіт" icon="mosque" key_="M" cost={bldCostOf('mosque', wdisc)} ok={canAfford(bldCostOf('mosque', wdisc))} active={hud?.placement === 'mosque'} tip={bldStats('mosque')} onClick={() => g()?.enterPlacement('mosque')} />
                   <div className="mx-0.5 w-px shrink-0 bg-white/10" />
-                  <TrainBtn label="Стена" icon="🧱" key_="B" cost={bldCostOf('wall', wdisc)} ok={canAfford(bldCostOf('wall', wdisc))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
-                  <TrainBtn label="Ворота" icon="🚪" key_="V" cost={bldCostOf('gate', wdisc)} ok={canAfford(bldCostOf('gate', wdisc))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
-                  <TrainBtn label="Мавзолей" icon="⭐" key_="W" cost={bldCostOf('wonder', wdisc)} ok={canAfford(bldCostOf('wonder', wdisc)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
+                  <TrainBtn label="Стена" icon="brick" key_="B" cost={bldCostOf('wall', wdisc)} ok={canAfford(bldCostOf('wall', wdisc))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
+                  <TrainBtn label="Ворота" icon="door" key_="V" cost={bldCostOf('gate', wdisc)} ok={canAfford(bldCostOf('gate', wdisc))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
+                  <TrainBtn label="Мавзолей" icon="star" key_="W" cost={bldCostOf('wonder', wdisc)} ok={canAfford(bldCostOf('wonder', wdisc)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
                 </>
               )}
             </div>
@@ -716,7 +718,7 @@ export default function App() {
           <p className="mt-1 text-sm text-slate-400">Ваша империя ждёт вашего возвращения, повелитель.</p>
           <div className="mt-5 grid w-full gap-2">
             <BigBtn onClick={() => setPaused(false)}><Play className="h-4 w-4" />Продолжить (Space)</BigBtn>
-            <MidBtn onClick={() => g()?.saveGame()}><span className="text-base">💾</span>Сохранить партию</MidBtn>
+            <MidBtn onClick={() => g()?.saveGame()}><span className="text-base"><Ico name="save" /></span>Сохранить партию</MidBtn>
             <div className="grid grid-cols-2 gap-2">
               <MidBtn onClick={() => { setPaused(false); startGame(difficulty); }}><RotateCcw className="h-4 w-4" />Заново</MidBtn>
               <MidBtn onClick={() => {
@@ -744,16 +746,16 @@ export default function App() {
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
           <div className="kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-5">
             <div className="mb-1 flex items-center gap-2.5">
-              <span className="text-3xl">{hud.event.icon}</span>
-              <div className="font-display text-lg font-black tracking-wide text-amber-200">{hud.event.title}</div>
+              <Ico name={hud.event.icon} className="h-9 w-9 text-amber-200" />
+              <div className="font-display text-lg font-black tracking-wide text-amber-200"><RT t={hud.event.title} /></div>
             </div>
-            <p className="mb-4 text-[12.5px] leading-relaxed text-slate-300">{hud.event.text}</p>
+            <p className="mb-4 text-[12.5px] leading-relaxed text-slate-300"><RT t={hud.event.text} /></p>
             <div className="grid gap-2">
               {hud.event.opts.map((o, i) => (
                 <button key={i} onClick={() => gameRef.current?.eventChoice(i)}
                   className="rounded-2xl border border-white/10 bg-white/5 p-2.5 text-left transition hover:border-amber-300/40 hover:bg-amber-400/10">
-                  <div className="text-[13px] font-black text-slate-100">{o.label}</div>
-                  <div className="text-[11px] text-slate-400">{o.desc}</div>
+                  <div className="text-[13px] font-black text-slate-100"><RT t={o.label} /></div>
+                  <div className="text-[11px] text-slate-400"><RT t={o.desc} /></div>
                 </button>
               ))}
             </div>
@@ -767,8 +769,8 @@ export default function App() {
           onClick={() => setShowGreats(false)}>
           <div className="kz-corners panel-iron w-full max-w-2xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
-              <div className="font-display text-lg font-black tracking-wide text-amber-200">✨ ВЕЛИКИЕ ЛЮДИ СТЕПИ</div>
-              <button onClick={() => setShowGreats(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10">✕</button>
+              <div className="font-display text-lg font-black tracking-wide text-amber-200"><Ico name="sparkle" /> ВЕЛИКИЕ ЛЮДИ СТЕПИ</div>
+              <button onClick={() => setShowGreats(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10"><Ico name="cross" /></button>
             </div>
             <p className="mb-3 text-[12px] leading-relaxed text-slate-400">
               Мудрость копят Мешіт-медресе, Мавзолей хана и найденные реликвии. Призванный бий
@@ -787,7 +789,7 @@ export default function App() {
                   <div className="mb-2 text-[11px] leading-snug text-slate-300">{gr.effect}</div>
                   {gr.called ? (
                     <div className="rounded-xl bg-lime-500/20 py-1.5 text-center text-[11px] font-black text-lime-200">
-                      ✓ В совете хана
+                      <Ico name="check" /> В совете хана
                     </div>
                   ) : (
                     <button onClick={() => { gameRef.current?.callGreat(gr.id as 'tole' | 'kazybek' | 'aiteke'); }}
@@ -795,7 +797,7 @@ export default function App() {
                       className={`w-full rounded-xl py-1.5 text-[11px] font-black transition ${
                         gr.afford ? 'bg-amber-400/25 text-amber-100 hover:bg-amber-400/40'
                           : 'cursor-not-allowed bg-black/40 text-slate-500'}`}>
-                      Призвать • {gr.cost} ✨
+                      Призвать • {gr.cost} <Ico name="sparkle" />
                     </button>
                   )}
                 </div>
@@ -822,11 +824,11 @@ export default function App() {
             </div>
 
             <div className="mb-2 grid grid-cols-3 gap-1.5">
-              {([['🪵', 'дерева', hud.ageReport.wood, 'text-lime-300'],
-                 ['🍖', 'еды', hud.ageReport.food, 'text-rose-300'],
-                 ['🪙', 'золота', hud.ageReport.gold, 'text-amber-300']] as const).map(([ic, lb, v, cls]) => (
+              {([['wood', 'дерева', hud.ageReport.wood, 'text-lime-300'],
+                 ['food', 'еды', hud.ageReport.food, 'text-rose-300'],
+                 ['gold', 'золота', hud.ageReport.gold, 'text-amber-300']] as const).map(([ic, lb, v, cls]) => (
                 <div key={lb} className="rounded-2xl bg-black/35 px-2 py-2 text-center">
-                  <div className="text-lg">{ic}</div>
+                  <Ico name={ic} className="mx-auto h-6 w-6" />
                   <div className={`text-base font-black ${cls}`}>{v}</div>
                   <div className="text-[10px] text-slate-400">{lb}</div>
                 </div>
@@ -834,11 +836,11 @@ export default function App() {
             </div>
 
             <div className="mb-3 grid grid-cols-4 gap-1.5 text-center">
-              {([['⚔️', 'врагов', hud.ageReport.kills], ['🔥', 'снесено', hud.ageReport.razed],
-                 ['🏗️', 'построек', hud.ageReport.built], ['🛡️', 'пик армии', hud.ageReport.peakArmy]] as const)
+              {([['swords', 'врагов', hud.ageReport.kills], ['fire', 'снесено', hud.ageReport.razed],
+                 ['crane', 'построек', hud.ageReport.built], ['shield', 'пик армии', hud.ageReport.peakArmy]] as const)
                 .map(([ic, lb, v]) => (
                   <div key={lb} className="rounded-xl bg-white/5 px-1 py-1.5">
-                    <div className="text-sm">{ic}</div>
+                    <Ico name={ic} className="mx-auto h-4 w-4" />
                     <div className="text-[13px] font-black text-slate-100">{v}</div>
                     <div className="text-[9px] text-slate-400">{lb}</div>
                   </div>
@@ -869,7 +871,7 @@ export default function App() {
                 <div className="mb-1 text-[10px] font-black tracking-widest text-amber-200/90">ОТКРЫЛОСЬ</div>
                 <div className="space-y-1">
                   {hud.ageReport.unlocks.map(u => (
-                    <div key={u} className="rounded-xl bg-lime-500/10 px-2.5 py-1 text-[12px] font-bold text-lime-200">{u}</div>
+                    <div key={u} className="rounded-xl bg-lime-500/10 px-2.5 py-1 text-[12px] font-bold text-lime-200"><RT t={u} /></div>
                   ))}
                 </div>
               </div>
@@ -903,20 +905,20 @@ export default function App() {
           actions={
             hud.audience.kind === 'rival'
               ? (hud.audience.atWar ? [
-                  { key: 'peace', label: '🕊 Предложить мир', desc: '120🪙' },
+                  { key: 'peace', label: '{i:dove} Предложить мир', desc: '120{i:gold}' },
                 ] : [
-                  { key: 'gift', label: '🎁 Послать дары', desc: '75🪙 · снизить неприязнь', gold: 75 },
-                  { key: 'trade', label: `🐪 Торговый договор`, desc: hud.tradeRoute ? 'действует' : hud.hasMarket ? '60🪙 · нужен Базар' : 'нужен Базар', disabled: hud.tradeRoute || !hud.hasMarket },
-                  { key: 'nap', label: '📜 Пакт о ненападении', desc: hud.napT ? `действует ${hud.napT}с` : '120🪙', disabled: hud.napT > 0 },
-                  { key: 'condemn', label: '📢 Осуждение', desc: hud.condemned ? 'джунгары осуждены' : 'лишить повода к войне', disabled: hud.condemned },
-                  { key: 'tribute', label: '💰 Потребовать дань', desc: 'нужно превосходство в силе' },
-                  { key: 'war', label: '⚔ Объявить войну', danger: true },
+                  { key: 'gift', label: '{i:gift} Послать дары', desc: '75{i:gold} · снизить неприязнь', gold: 75 },
+                  { key: 'trade', label: `{i:camel} Торговый договор`, desc: hud.tradeRoute ? 'действует' : hud.hasMarket ? '60{i:gold} · нужен Базар' : 'нужен Базар', disabled: hud.tradeRoute || !hud.hasMarket },
+                  { key: 'nap', label: '{i:scroll} Пакт о ненападении', desc: hud.napT ? `действует ${hud.napT}с` : '120{i:gold}', disabled: hud.napT > 0 },
+                  { key: 'condemn', label: '{i:megaphone} Осуждение', desc: hud.condemned ? 'джунгары осуждены' : 'лишить повода к войне', disabled: hud.condemned },
+                  { key: 'tribute', label: '{i:moneybag} Потребовать дань', desc: 'нужно превосходство в силе' },
+                  { key: 'war', label: '{i:swords} Объявить войну', danger: true },
                 ])
               : (hud.audience.atWar ? [
-                  { key: 'gift', label: '🎁 Задобрить дарами', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}🪙 · прекратить вражду`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
+                  { key: 'gift', label: '{i:gift} Задобрить дарами', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}{i:gold} · прекратить вражду`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
                 ] : [
-                  { key: 'gift', label: '🎁 Подарки и дары', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}🪙 · заключить дружбу`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
-                  { key: 'attack', label: '⚔ Потребовать ухода', desc: 'разозлить народ', danger: true },
+                  { key: 'gift', label: '{i:gift} Подарки и дары', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}{i:gold} · заключить дружбу`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
+                  { key: 'attack', label: '{i:swords} Потребовать ухода', desc: 'разозлить народ', danger: true },
                 ])
           }
           onAction={(act) => gameRef.current?.dipAction(hud.audience!.id, act)}
@@ -974,7 +976,7 @@ function unitStats(k: string): string {
   const d = UNIT_DEFS[k as keyof typeof UNIT_DEFS] as unknown as { hp: number; atk: number; range: number; speed: number; desc?: string };
   if (!d) return '';
   const melee = d.range <= 60;
-  return `${d.desc ? d.desc + '\n' : ''}❤ ${d.hp}  ⚔ ${d.atk}  ${melee ? 'ближний бой' : `🎯 дальность ${d.range}`}  👟 ${d.speed}`;
+  return `${d.desc ? d.desc + '\n' : ''}HP ${d.hp} · ATK ${d.atk} · ${melee ? 'ближний бой' : `дальность ${d.range}`} · скорость ${d.speed}`;
 }
 // цена постройки с учётом союзной скидки на дерево (ремесленные народы)
 function bldCostOf(k: keyof typeof BUILDING_DEFS, disc: number) {
@@ -984,7 +986,7 @@ function bldCostOf(k: keyof typeof BUILDING_DEFS, disc: number) {
 function bldStats(k: string): string {
   const d = BUILDING_DEFS[k as keyof typeof BUILDING_DEFS] as unknown as { hp: number; desc?: string };
   if (!d) return '';
-  return `${d.desc ? d.desc + '\n' : ''}❤ ${d.hp}`;
+  return `${d.desc ? d.desc + '\n' : ''}Прочность: ${d.hp}`;
 }
 function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: { label: string; icon: string; key_: string; cost: { wood: number; food: number; gold: number }; ok: boolean; onClick: () => void; active?: boolean; lock?: boolean; tip?: string }) {
   return (
@@ -993,7 +995,7 @@ function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: {
       title={tip}
       className={`relative flex w-[72px] shrink-0 flex-col items-center rounded-xl border px-1 py-1.5 transition active:scale-95 ${active ? 'border-amber-300 bg-amber-400/20' : ok && !lock ? 'btn-iron hover:border-amber-300/50' : 'border-white/5 bg-black/40 opacity-45'}`}
     >
-      <span className="text-xl leading-none">{lock ? '🔒' : icon}</span>
+      <Ico name={lock ? 'lock' : icon} className="h-6 w-6" />
       <span className="mt-0.5 text-[10px] font-black leading-none text-slate-100">{label}</span>
       <span className="mt-0.5 text-[8.5px] font-bold leading-none text-slate-400">{costStr(cost)}</span>
       <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[8px] font-black text-amber-200/90">{key_}</span>
@@ -1063,7 +1065,7 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
               onClick={() => updateSettings({ difficulty: d.id })}
               className={`rounded-2xl border p-2.5 text-center transition active:scale-95 ${settings.difficulty === d.id ? 'border-amber-300 bg-amber-400/15 shadow-[0_0_20px_rgba(245,158,11,.25)]' : 'border-white/10 bg-black/30 opacity-75 hover:opacity-100'}`}
             >
-              <div className="text-xl">{d.icon}</div>
+              <div className="flex justify-center text-amber-200"><Ico name={d.icon} className="h-6 w-6" /></div>
               <div className="mt-0.5 text-[12px] font-black text-amber-100">{d.name}</div>
             </button>
           ))}
@@ -1091,7 +1093,7 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
               onClick={() => updateSettings({ biome: bm.id })}
               className={`rounded-xl border py-2 text-center transition active:scale-95 ${settings.biome === bm.id ? 'border-amber-300 bg-amber-400/15' : 'border-white/10 bg-black/30 opacity-80 hover:opacity-100'}`}
             >
-              <div className="text-lg">{bm.icon}</div>
+              <div className="flex justify-center text-amber-200"><Ico name={bm.icon} className="h-5 w-5" /></div>
               <div className="text-[11px] font-bold text-slate-200">{bm.name}</div>
             </button>
           ))}
@@ -1103,7 +1105,7 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
           <Toggle on={settings.voices && !settings.muted} onClick={() => updateSettings({ voices: !settings.voices })} label="Голоса юнитов" desc="Короткие реплики воинов при выделении, приказах и атаке" />
           <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${settings.voices && !settings.muted ? 'bg-white/5' : 'bg-white/[0.02] opacity-50'}`}>
             <div className="min-w-0">
-              <div className="text-xs font-bold text-slate-100">🔊 Громкость фраз</div>
+              <div className="text-xs font-bold text-slate-100"><Ico name="speaker" /> Громкость фраз</div>
               <div className="text-[10px] text-slate-400">{Math.round((settings.voiceVolume ?? 0.3) * 100)}% — реплики юнитов</div>
             </div>
             <input type="range" min={0} max={1} step={0.05} value={settings.voiceVolume ?? 0.3} disabled={!settings.voices || settings.muted}
@@ -1128,7 +1130,7 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
         {settings.realAzan && (
           <div className="mt-3 rounded-2xl bg-black/30 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-[12px] font-black text-slate-200">🕌 Город намаза</div>
+              <div className="text-[12px] font-black text-slate-200"><Ico name="mosque" /> Город намаза</div>
               <div className="text-[10px] text-slate-500">времена считаются астрономически</div>
             </div>
             <div className="grid grid-cols-4 gap-1">
@@ -1183,7 +1185,7 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
         <div className="mb-4 flex items-center gap-1">
           {AGES.map((a, i) => (
             <div key={a.id} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-2 py-1.5 text-[11px] font-black ${i <= hud.age ? 'border-amber-300/50 bg-amber-400/10 text-amber-100' : 'border-white/10 bg-black/30 text-slate-500'}`}>
-              <span>{a.icon}</span><span className="hidden sm:inline">{a.name}</span>
+              <Ico name={a.icon} className="h-4 w-4" /><span className="hidden sm:inline">{a.name}</span>
               {i === hud.age && <span className="rounded-full bg-amber-400 px-1 text-[8px] text-black">ВЫ ЗДЕСЬ</span>}
             </div>
           ))}
@@ -1195,7 +1197,7 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
           return (
             <div key={age} className="mb-4">
               <div className={`mb-2 flex items-center gap-2 text-[12px] font-black tracking-widest ${locked ? 'text-slate-500' : 'text-amber-200'}`}>
-                <span>{AGES[age].icon}</span> {AGES[age].name}
+                <Ico name={AGES[age].icon} className="h-4 w-4" /> {AGES[age].name}
                 {locked && <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-bold text-slate-400">нужен переход в эпоху (T)</span>}
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -1206,7 +1208,7 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
                     : t.state === 'ready' ? 'border-amber-300/30 bg-white/5'
                     : 'border-white/10 bg-black/25 opacity-70'}`}>
                     <div className="flex items-start gap-2.5">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-black/30 text-2xl">{t.icon}</div>
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-black/30 text-amber-200"><Ico name={t.icon} className="h-6 w-6" /></div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 text-[13px] font-black text-slate-100">
                           {t.name}
@@ -1216,14 +1218,14 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
                         </div>
                         <div className="text-[11px] leading-snug text-slate-300">{t.desc}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-semibold text-slate-400">
-                          <span className="rounded bg-black/30 px-1.5 py-0.5">🏛 {t.bldName}</span>
-                          <span>⏱{t.time}с</span>
-                          <span className="text-amber-200/90">{t.cost}</span>
+                          <span className="rounded bg-black/30 px-1.5 py-0.5"><Ico name="column" /> {t.bldName}</span>
+                          <span><Ico name="clock" />{t.time}с</span>
+                          <span className="text-amber-200/90"><RT t={t.cost} /></span>
                         </div>
                       </div>
                     </div>
                     <div className="mt-2">
-                      {t.state === 'done' && <div className="rounded-lg bg-lime-500/15 py-1 text-center text-[11px] font-black text-lime-300">✓ Изучено</div>}
+                      {t.state === 'done' && <div className="rounded-lg bg-lime-500/15 py-1 text-center text-[11px] font-black text-lime-300"><Ico name="check" /> Изучено</div>}
                       {t.state === 'researching' && <div className="animate-pulse rounded-lg bg-sky-500/15 py-1 text-center text-[11px] font-black text-sky-300">Изучается…</div>}
                       {t.state === 'ready' && (
                         <button
@@ -1243,7 +1245,7 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
         })}
 
         <div className="rounded-xl bg-black/30 p-2.5 text-[10.5px] leading-snug text-slate-400">
-          💡 Бонусы технологий постоянны и действуют на всю армию/экономику. Начать исследование можно также, выбрав нужное здание. Переход в новую эпоху (клавиша T) открывает сильные техи и юнитов.
+          <Ico name="bulb" /> Бонусы технологий постоянны и действуют на всю армию/экономику. Начать исследование можно также, выбрав нужное здание. Переход в новую эпоху (клавиша T) открывает сильные техи и юнитов.
         </div>
       </div>
     </div>
@@ -1253,46 +1255,46 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
 function ControlsRecap() {
   return (
     <div className="mt-4 grid grid-cols-2 gap-1.5 text-left text-[10.5px] font-semibold text-slate-400">
-      <div className="rounded-lg bg-white/5 p-2">🖱️ <b className="text-slate-200">Выбор:</b> рамка / двойной клик по типу</div>
-      <div className="rounded-lg bg-white/5 p-2">⚔️ <b className="text-slate-200">Приказ:</b> правый клик / касание цели</div>
-      <div className="rounded-lg bg-white/5 p-2">⌨️ <b className="text-slate-200">Клавиши:</b> 1-8 тренировка • Q/E/R/F/K/Z/X/C стройка • B/V стена/ворота (зажмите и тяните — протяжка) • W Чудо • L дерево технологий • G атака-мув • Y патруль • Ctrl/Alt+1..5 группы</div>
-      <div className="rounded-lg bg-white/5 p-2">🐑 <b className="text-slate-200">Скот и дичь:</b> овцы, коровы и олени пасутся стадами и дают еду; волки и воины их вспугивают</div>
-      <div className="rounded-lg bg-white/5 p-2">📿 <b className="text-slate-200">Реликвии:</b> отправьте имама (или любого юнита) правым кликом на сияющий сундук — +золото и пассивный доход</div>
-      <div className="rounded-lg bg-white/5 p-2">📷 <b className="text-slate-200">Камера:</b> WASD • колесо • мини-карта • «.» прыжок к свободному шаруа</div>
+      <div className="rounded-lg bg-white/5 p-2"><Ico name="mouse" /> <b className="text-slate-200">Выбор:</b> рамка / двойной клик по типу</div>
+      <div className="rounded-lg bg-white/5 p-2"><Ico name="swords" /> <b className="text-slate-200">Приказ:</b> правый клик / касание цели</div>
+      <div className="rounded-lg bg-white/5 p-2"><Ico name="keyboard" /> <b className="text-slate-200">Клавиши:</b> 1-8 тренировка • Q/E/R/F/K/Z/X/C стройка • B/V стена/ворота (зажмите и тяните — протяжка) • W Чудо • L дерево технологий • G атака-мув • Y патруль • Ctrl/Alt+1..5 группы</div>
+      <div className="rounded-lg bg-white/5 p-2"><Ico name="sheep" /> <b className="text-slate-200">Скот и дичь:</b> овцы, коровы и олени пасутся стадами и дают еду; волки и воины их вспугивают</div>
+      <div className="rounded-lg bg-white/5 p-2"><Ico name="beads" /> <b className="text-slate-200">Реликвии:</b> отправьте имама (или любого юнита) правым кликом на сияющий сундук — +золото и пассивный доход</div>
+      <div className="rounded-lg bg-white/5 p-2"><Ico name="camera" /> <b className="text-slate-200">Камера:</b> WASD • колесо • мини-карта • «.» прыжок к свободному шаруа</div>
     </div>
   );
 }
 function unitIcon(k: string) {
-  if (k === 'villager') return '🧑‍🌾';
-  if (k === 'swordsman') return '🗡️';
-  if (k === 'archer') return '🏹';
-  if (k === 'knight') return '🐎';
-  if (k === 'spearman') return '🔱';
-  if (k === 'cavalry') return '🏇';
-  if (k === 'catapult') return '🪨';
-  if (k === 'monk') return '🕌';
-  if (k === 'trader') return '🐫';
-  if (k === 'scout') return '🧭';
-  if (k === 'sheep') return '🐑';
-  if (k === 'cow') return '🐄';
-  if (k === 'deer') return '🦌';
-  return '❓';
+  if (k === 'villager') return 'farmer';
+  if (k === 'swordsman') return 'saber';
+  if (k === 'archer') return 'bow';
+  if (k === 'knight') return 'horse';
+  if (k === 'spearman') return 'spear';
+  if (k === 'cavalry') return 'rider';
+  if (k === 'catapult') return 'stone';
+  if (k === 'monk') return 'mosque';
+  if (k === 'trader') return 'camel';
+  if (k === 'scout') return 'compass';
+  if (k === 'sheep') return 'sheep';
+  if (k === 'cow') return 'cow';
+  if (k === 'deer') return 'deer';
+  return 'question';
 }
 function bldIcon(k: BuildingKey) {
-  if (k === 'towncenter') return '🏰';
-  if (k === 'house') return '⛺';
-  if (k === 'barracks') return '⚒️';
-  if (k === 'tower') return '🗼';
-  if (k === 'stable') return '🐴';
-  if (k === 'blacksmith') return '🔨';
-  if (k === 'market') return '🏪';
-  if (k === 'pen') return '🐑';
-  if (k === 'storehouse') return '📦';
-  if (k === 'mosque') return '🕌';
-  if (k === 'wonder') return '⭐';
-  if (k === 'wall') return '🧱';
-  if (k === 'gate') return '🚪';
-  return '🌾';
+  if (k === 'towncenter') return 'castle';
+  if (k === 'house') return 'yurt';
+  if (k === 'barracks') return 'hammerpick';
+  if (k === 'tower') return 'tower';
+  if (k === 'stable') return 'horse';
+  if (k === 'blacksmith') return 'hammer';
+  if (k === 'market') return 'market';
+  if (k === 'pen') return 'sheep';
+  if (k === 'storehouse') return 'box';
+  if (k === 'mosque') return 'mosque';
+  if (k === 'wonder') return 'star';
+  if (k === 'wall') return 'brick';
+  if (k === 'gate') return 'door';
+  return 'wheat';
 }
 
 /* ================= MENU ================= */
@@ -1331,18 +1333,30 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
       </div>
 
       <div className="relative mx-auto max-w-4xl px-4 pb-10 pt-8 sm:pt-12">
-        {/* hero art */}
+        {/* hero art: пункты-фичи живут НА самом баннере (нижняя лента поверх арта) */}
         <div className="kz-border-bottom relative overflow-hidden rounded-3xl border border-amber-200/25 shadow-[0_20px_80px_rgba(0,0,0,.55)]">
-          <img src={heroKhanate} alt="Казахское Ханство — степь, юрты и конница на рассвете" className="h-56 w-full object-cover sm:h-72" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/30 to-[#0c1410]/30" />
-          <div className="absolute left-1/2 top-3 -translate-x-1/2">
-            <div className="anim-floaty flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-300/50 bg-black/50 text-3xl backdrop-blur">🐎</div>
-          </div>
-          <div className="absolute bottom-2 left-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-black tracking-widest text-amber-200 backdrop-blur">
+          <img src={heroKhanate} alt="Казахское Ханство — степь, юрты и конница на рассвете" className="h-64 w-full object-cover sm:h-80" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/25 to-[#0c1410]/30" />
+          <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-black tracking-widest text-amber-200 backdrop-blur">
             <span className="relative flex h-2 w-2"><span className="absolute h-full w-full animate-ping rounded-full bg-lime-400 opacity-75" /><span className="h-2 w-2 rounded-full bg-lime-400" /></span>
             ВЕЛИКАЯ СТЕПЬ • ЖИВОЕ ПОЛЕ БОЯ • 60 КАДРОВ/С
           </div>
-          <div className="absolute bottom-2 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-slate-300 backdrop-blur">🐺 Набеги • 🐑 Скот • ⚔️ Батыры</div>
+          <div className="absolute right-3 top-3">
+            <div className="anim-floaty flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/50 bg-black/50 text-amber-200 backdrop-blur"><Ico name="horse" className="h-7 w-7" /></div>
+          </div>
+          {/* лента пунктов игры — поверх арта, а не отдельным блоком под баннером */}
+          <div className="absolute inset-x-2 bottom-2 grid grid-cols-2 gap-1.5 sm:inset-x-3 sm:grid-cols-4">
+            {([
+              { i: 'sheep', c: 'text-rose-200', t: 'Стада и загоны' },
+              { i: 'rider', c: 'text-red-300', t: 'Конница батыров' },
+              { i: 'crown', c: 'text-amber-300', t: '4 эпохи ханства' },
+              { i: 'handshake', c: 'text-sky-300', t: 'Дипломатия народов' },
+            ] as const).map(f => (
+              <div key={f.t} className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-200/25 bg-black/55 px-2 py-2 text-[11px] font-bold text-slate-100 backdrop-blur sm:text-xs">
+                <Ico name={f.i} className={`h-4 w-4 shrink-0 ${f.c}`} />{f.t}
+              </div>
+            ))}
+          </div>
         </div>
         <div className="mt-3 text-center">
           <div className="kz-divider mx-auto max-w-md text-[11px] font-black tracking-[0.35em] text-amber-300/80">
@@ -1352,21 +1366,9 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
             <span className="gold-text">КАЗАХСКОЕ</span> <span className="text-sky-100">ХАНСТВО</span>
           </h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-300 sm:text-[15px]">
-            Паси 🐑 скот в степи, дои коров в загонах, добывай 🪵🍖🪙 и собирай конницу батыров.
+            Паси <Ico name="sheep" /> скот в степи, дои коров в загонах, добывай <Ico name="wood" /><Ico name="food" /><Ico name="gold" /> и собирай конницу батыров.
             Развивай эпохи, веди дипломатию с народами и <b className="text-amber-200">сотри джунгарский стан</b>, пока не пала твоя орда.
           </p>
-        </div>
-
-        {/* feature strip */}
-        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[
-            { i: <span className="text-base leading-none">🐑</span>, t: 'Стада и загоны' },
-            { i: <Swords className="h-4 w-4 text-red-300" />, t: 'Конница батыров' },
-            { i: <Crown className="h-4 w-4 text-amber-300" />, t: '4 эпохи ханства' },
-            { i: <MessageCircle className="h-4 w-4 text-sky-300" />, t: 'Дипломатия народов' },
-          ].map((f, i) => (
-            <div key={i} className="panel-iron flex items-center justify-center gap-2 rounded-xl px-2 py-2.5 text-xs font-bold text-slate-200">{f.i}{f.t}</div>
-          ))}
         </div>
 
         {/* difficulty */}
@@ -1379,7 +1381,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
                 onClick={() => updateSettings({ difficulty: d.id })}
                 className={`rounded-2xl border p-3 text-center transition active:scale-95 ${difficulty === d.id ? 'border-amber-300 bg-amber-400/15 shadow-[0_0_24px_rgba(245,158,11,.3)]' : 'panel-iron opacity-70 hover:opacity-100'}`}
               >
-                <div className="text-2xl">{d.icon}</div>
+                <div className="flex justify-center text-amber-200"><Ico name={d.icon} className="h-7 w-7" /></div>
                 <div className="font-display mt-1 text-sm font-black text-amber-100">{d.name}</div>
                 <div className="mt-0.5 hidden text-[11px] leading-snug text-slate-400 sm:block">{d.desc}</div>
               </button>
@@ -1395,7 +1397,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
             </button>
             {hasSave && (
               <button onClick={onResume} className="btn-iron flex items-center gap-2 rounded-2xl px-5 py-4 text-sm font-black text-sky-200">
-                💾 Продолжить
+                <Ico name="save" /> Продолжить
               </button>
             )}
             <button
@@ -1406,7 +1408,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
               <SettingsIcon className="h-6 w-6" />
             </button>
           </div>
-          <div className="mt-2 text-[11px] font-bold text-slate-500">нажми <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-slate-300">Enter</kbd> для старта • ⚙️ — сложность, темп и эффекты • сразу в бой</div>
+          <div className="mt-2 text-[11px] font-bold text-slate-500">нажми <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-slate-300">Enter</kbd> для старта • <Ico name="gear" /> — сложность, темп и эффекты • сразу в бой</div>
         </div>
 
         {/* Устав и Зал легенд убраны в модалку: на экране меню они занимали
@@ -1415,17 +1417,17 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         <div className="mt-5 grid grid-cols-2 gap-2 sm:mx-auto sm:max-w-md">
           <button onClick={() => setInfoTab('how')}
             className="btn-iron flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-[13px] font-black text-amber-100">
-            <span className="text-base">📜</span>УСТАВ КОЧЕВНИКА
+            <span className="text-base"><Ico name="scroll" /></span>УСТАВ КОЧЕВНИКА
           </button>
           <button onClick={() => setInfoTab('scores')}
             className="btn-iron flex min-h-[52px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-[13px] font-black text-amber-100">
-            <span className="text-base">🏆</span>ЗАЛ ЛЕГЕНД
+            <span className="text-base"><Ico name="trophy" /></span>ЗАЛ ЛЕГЕНД
             {scores.length > 0 && <b className="rounded-full bg-amber-400/25 px-1.5 text-[10px]">{scores.length}</b>}
           </button>
         </div>
 
         <div className="mt-6 text-center text-[11px] font-semibold text-slate-600">
-          60 кадров/с • движок на Canvas • синтезированные звуки битвы • великая степь ждёт своего хана 🎇
+          60 кадров/с • движок на Canvas • синтезированные звуки битвы • великая степь ждёт своего хана <Ico name="spark" />
         </div>
       </div>
       {/* ===== ПОПАП: УСТАВ / ЗАЛ ЛЕГЕНД ===== */}
@@ -1436,28 +1438,28 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
             onClick={e => e.stopPropagation()}>
             {/* вкладки: переключение без закрытия окна */}
             <div className="flex items-center gap-1 border-b border-amber-300/15 p-3">
-              {([['how', '📜', 'УСТАВ КОЧЕВНИКА'], ['scores', '🏆', 'ЗАЛ ЛЕГЕНД']] as const).map(([id, ic, label]) => (
+              {([['how', 'scroll', 'УСТАВ КОЧЕВНИКА'], ['scores', 'trophy', 'ЗАЛ ЛЕГЕНД']] as const).map(([id, ic, label]) => (
                 <button key={id} onClick={() => setInfoTab(id)}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-black tracking-wide transition ${
                     infoTab === id ? 'bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/40' : 'text-slate-400 hover:bg-white/5'}`}>
-                  <span>{ic}</span><span className="hidden sm:inline">{label}</span>
+                  <Ico name={ic} className="h-4 w-4" /><span className="hidden sm:inline">{label}</span>
                   <span className="sm:hidden">{label.split(' ')[0]}</span>
                 </button>
               ))}
               <button onClick={() => setInfoTab(null)}
-                className="ml-1 rounded-xl px-3 py-2 text-slate-400 hover:bg-white/10">✕</button>
+                className="ml-1 rounded-xl px-3 py-2 text-slate-400 hover:bg-white/10"><Ico name="cross" /></button>
             </div>
 
             <div className="scroll-thin overflow-y-auto overscroll-contain p-4">
               {infoTab === 'how' ? (
                 <>
                   <div className="space-y-2 text-xs leading-relaxed text-slate-300">
-                    <HowRow n="1" t="Сарбазы уже выбраны — правый клик / касание по 🐺 волкам для первой крови (+🍖 +очки)." />
-                    <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев 🪵, ягод 🍖 или золота 🪙. Женщины в платках сами собирают урожай и доят коров." />
-                    <HowRow n="3" t="Загон (H): построй и нажми у рабочего «🐎 Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда. Склад (K) у дальней рощи — шаруа сдают добычу туда, а не в ставку." />
+                    <HowRow n="1" t="Сарбазы уже выбраны — правый клик / касание по {i:wolf} волкам для первой крови (+{i:food} +очки)." />
+                    <HowRow n="2" t="Шаруа и работницы добывают: коснись деревьев {i:wood}, ягод {i:food} или золота {i:gold}. Женщины в платках сами собирают урожай и доят коров." />
+                    <HowRow n="3" t="Загон (H): построй и нажми у рабочего «{i:horse} Пасти скот» — пастух верхом гонит овец и коров на дальний выпас и обратно в загон. Пашня (F) = бесконечная еда. Склад (K) у дальней рощи — шаруа сдают добычу туда, а не в ставку." />
                     <HowRow n="4" t="Юрта (Q) для населения → Казармы (E) → Сарбазы (2) и Мергены (3). Конюшня (Z) даёт жасауылов, кузница (X) — катапульты. Мешіт-медресе (M) готовит имамов-лекарей (8)." />
                     <HowRow n="5" t="Базар (C) шлёт көпес-торговцев (0) в становища друзей — караван возит золото сам. Новая эпоха (T) даёт +силу. Барлаушы (9) идёт на связь с народами." />
-                    <HowRow n="6" t="Дипломатия: шлите ✉️ посланников племенам — на 1/3/6 посланниках открываются бонусы (воины в дар, золото, скидки, урожай). Джунгары шлют своих: у кого больше — тот сюзерен. Победа — сжечь ставку хунтайджи!" />
+                    <HowRow n="6" t="Дипломатия: шлите {i:envelope} посланников племенам — на 1/3/6 посланниках открываются бонусы (воины в дар, золото, скидки, урожай). Джунгары шлют своих: у кого больше — тот сюзерен. Победа — сжечь ставку хунтайджи!" />
                   </div>
                   <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
                     <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 0-9 / QERFKMZXC / G / H / Space</div>
@@ -1475,7 +1477,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
                     <div className="space-y-1">
                       {scores.map((s2, i) => (
                         <div key={i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-bold ${i === 0 ? 'bg-amber-400/15 text-amber-200' : 'bg-white/5 text-slate-300'}`}>
-                          <span className="w-6 text-center">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}</span>
+                          <span className="flex w-6 justify-center">{i === 0 ? <Ico name="trophy" className="h-4 w-4 text-amber-300" /> : i === 1 ? <Ico name="medal" className="h-4 w-4 text-slate-300" /> : i === 2 ? <Ico name="medal" className="h-4 w-4 text-orange-300" /> : `${i + 1}.`}</span>
                           <span className="flex-1 truncate">{s2.name}</span>
                           <span className={`rounded px-1.5 py-0.5 text-[10px] ${s2.result === 'victory' ? 'bg-lime-500/20 text-lime-300' : 'bg-red-500/20 text-red-300'}`}>{s2.result === 'victory' ? 'ПОБЕДА' : 'ПАЛ'}</span>
                           <span className="tabular-nums text-amber-300">{s2.score}</span>
@@ -1504,7 +1506,7 @@ function HowRow({ n, t }: { n: string; t: string }) {
   return (
     <div className="flex gap-2">
       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400/20 text-[11px] font-black text-amber-200">{n}</span>
-      <span>{t}</span>
+      <RT t={t} />
     </div>
   );
 }
@@ -1573,9 +1575,9 @@ function LeaderAudience({ name, ruler, title, portrait, color, mood, atWar, quot
                       : 'border-amber-300/20 bg-amber-400/5 hover:border-amber-300/60 hover:bg-amber-400/15'
                   }`}
                 >
-                  <span className={`text-[13px] font-black ${a.danger ? 'text-red-100' : 'text-amber-50'}`}>{a.label}</span>
+                  <span className={`text-[13px] font-black ${a.danger ? 'text-red-100' : 'text-amber-50'}`}><RT t={a.label} /></span>
                   <span className="shrink-0 text-right text-[10px] font-semibold text-slate-400 group-hover:text-slate-300">
-                    {a.gold !== undefined && !afford(a) ? <span className="text-red-400">нужно {a.gold}🪙</span> : (a.desc ?? '')}
+                    {a.gold !== undefined && !afford(a) ? <span className="text-red-400">нужно {a.gold}<Ico name="gold" /></span> : <RT t={a.desc ?? ''} />}
                   </span>
                 </button>
               ))}
@@ -1587,7 +1589,7 @@ function LeaderAudience({ name, ruler, title, portrait, color, mood, atWar, quot
             onClick={onClose}
             className="mt-3 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[12px] font-black uppercase tracking-[0.15em] text-slate-300 transition hover:border-amber-300/50 hover:bg-amber-400/10 hover:text-amber-100 active:scale-[0.99]"
           >
-            🤝 Попрощаться
+            <Ico name="handshake" /> Попрощаться
           </button>
         </div>
       </div>
@@ -1604,7 +1606,7 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
   const relColor = (n: HudSnapshot['nations'][number]) =>
     n.atWar ? 'text-red-400' : n.rel === 'Дружба' ? 'text-emerald-300' : n.rel === 'Нейтралитет' ? 'text-slate-200' : 'text-slate-400';
   const relIcon = (n: HudSnapshot['nations'][number]) =>
-    n.atWar ? '⚔️' : n.rel === 'Дружба' ? '🤝' : n.rel === 'Нейтралитет' ? '🕊️' : '❔';
+    n.atWar ? 'swords' : n.rel === 'Дружба' ? 'handshake' : n.rel === 'Нейтралитет' ? 'dove' : 'question';
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <div className="kz-corners panel-iron anim-banner max-h-[88dvh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl p-4 sm:p-5">
@@ -1615,7 +1617,7 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
           <button onClick={onClose} className="rounded-full bg-white/10 p-1.5 text-slate-300 hover:bg-white/20 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         </div>
         <p className="mb-3 text-[11.5px] text-slate-400">
-          Народы не знают о существовании друг друга, пока не встретятся в степи — отправляйте барлаушы 🧭 открывать земли. Джунгар видно лишь после первого контакта.
+          Народы не знают о существовании друг друга, пока не встретятся в степи — отправляйте барлаушы <Ico name="compass" /> открывать земли. Джунгар видно лишь после первого контакта.
         </p>
         {/* наш хан */}
         <div className="mb-2.5 flex items-center gap-3 rounded-2xl border border-amber-300/30 bg-gradient-to-r from-amber-500/15 via-amber-400/5 to-transparent p-2.5">
@@ -1643,23 +1645,23 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
                   </div>
                   <div className="text-[11px] font-bold text-amber-200/90">{n.met ? `${n.title} ${n.ruler}` : 'Правитель не встречен'}</div>
                   <div className={`mt-0.5 text-[11px] font-black ${n.met ? relColor(n) : 'text-slate-500'}`}>
-                    {relIcon(n)} {n.met ? n.rel : '???'}
-                    {n.met && <span className="ml-2 font-medium text-slate-400">⚖️ сила {n.power}{n.kind === 'tribe' ? ` · лагерей ${n.camps}` : ''}</span>}
+                    <Ico name={relIcon(n)} /> {n.met ? n.rel : '???'}
+                    {n.met && <span className="ml-2 font-medium text-slate-400"><Ico name="scales" /> сила {n.power}{n.kind === 'tribe' ? ` · лагерей ${n.camps}` : ''}</span>}
                   </div>
                 </div>
               </div>
               {n.met && n.kind === 'tribe' && (
                 <div className="mt-2 rounded-xl border border-white/10 bg-black/25 p-2">
                   <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-[11px] font-black text-slate-200">{n.typeIcon} {n.typeLabel} народ</span>
-                    {n.suzerain === 'player' && <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-black text-amber-200">👑 вы сюзерен</span>}
-                    {n.suzerain === 'rival' && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-300">⚠️ под джунгарами</span>}
+                    <span className="flex items-center gap-1 text-[11px] font-black text-slate-200">{n.typeIcon ? <Ico name={n.typeIcon} /> : null}{n.typeLabel} народ</span>
+                    {n.suzerain === 'player' && <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-black text-amber-200"><Ico name="crown" /> вы сюзерен</span>}
+                    {n.suzerain === 'rival' && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-300"><Ico name="warn" /> под джунгарами</span>}
                   </div>
                   {/* шкала влияния: посланники игрока против джунгарских */}
                   <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold">
-                    <span className="text-emerald-300">🤝 вы: {n.envoys}</span>
+                    <span className="text-emerald-300"><Ico name="handshake" /> вы: {n.envoys}</span>
                     <span className="text-slate-500">против</span>
-                    <span className="text-red-300">☾ джунгары: {n.rivalEnvoys}</span>
+                    <span className="text-red-300"><Ico name="crescent" /> джунгары: {n.rivalEnvoys}</span>
                     {n.envoyNext > 0 && <span className="ml-auto text-slate-400">до ур.{n.envoyLevel + 1}: ещё {n.envoyNext}</span>}
                   </div>
                   {/* три уровня бонусов */}
@@ -1668,23 +1670,23 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
                       const active = n.envoyLevel >= i + 1 && n.suzerain !== 'rival';
                       return (
                         <div key={i} className={`flex items-start gap-1.5 text-[10.5px] ${active ? 'text-emerald-200' : 'text-slate-500'}`}>
-                          <span className="shrink-0 font-black">{active ? '✔' : `${[1, 3, 6][i]}·`}</span>
-                          <span>{p}</span>
+                          <span className="flex shrink-0 items-center font-black">{active ? <Ico name="check" className="h-3 w-3" /> : `${[1, 3, 6][i]}·`}</span>
+                          <RT t={p} />
                         </div>
                       );
                     })}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    <DiplBtn onClick={() => onEnvoy(n.id)} title={`Отправить посланника (${n.envoyCost}🪙) — растит влияние`}>
-                      ✉️ Посланник ({n.envoyCost}🪙)
+                    <DiplBtn onClick={() => onEnvoy(n.id)} title={plainRich(`Отправить посланника (${n.envoyCost}{i:gold}) — растит влияние`)}>
+                      <Ico name="envelope" /> Посланник ({n.envoyCost}<Ico name="gold" />)
                     </DiplBtn>
-                    <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем">💬 Переговоры</DiplBtn>
+                    <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем"><Ico name="speech" /> Переговоры</DiplBtn>
                   </div>
                 </div>
               )}
               {n.met && n.kind !== 'tribe' && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем">💬 Переговоры с правителем</DiplBtn>
+                  <DiplBtn onClick={() => onAudience(n.id)} title="Начать переговоры с правителем"><Ico name="speech" /> Переговоры с правителем</DiplBtn>
                 </div>
               )}
             </div>
@@ -1723,7 +1725,7 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm">
       <div className="kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-6 text-center">
-        <div className="text-5xl">{win ? '👑' : '💀'}</div>
+        <div className={`flex justify-center ${win ? 'text-amber-300' : 'text-red-400'}`}><Ico name={win ? 'crown' : 'skull'} className="h-14 w-14" /></div>
         <div className={`font-display mt-1 text-4xl font-black tracking-wide ${win ? '' : 'text-red-400'}`}>
           {win ? <span className="gold-text">ПОБЕДА!</span> : 'ПОРАЖЕНИЕ'}
         </div>

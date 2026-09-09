@@ -51,9 +51,9 @@ export const NATIONS: NationDef[] = [
     kind: 'rival',
     greet: 'Гром копыт моих туменов достиг твоих кочевий, степняк. Джунгария не делит пастбища — она их берёт. С чем пожаловал ты в мои земли: с данью или с войском?',
     choices: [
-      { id: 'warm', label: '🕊 Мы пришли с миром', desc: 'Дружелюбное приветствие — неприязнь снижается', act: 'warm' },
-      { id: 'giftBig', label: '🎁 Поднести дары (75🪙)', desc: 'Богатые дары заметно улучшают отношения', gold: 75, act: 'giftBig' },
-      { id: 'cold', label: '⚔️ Степь не твоя', desc: 'Дерзкий ответ — хунтайджи запомнит обиду', act: 'cold' },
+      { id: 'warm', label: '{i:dove} Мы пришли с миром', desc: 'Дружелюбное приветствие — неприязнь снижается', act: 'warm' },
+      { id: 'giftBig', label: '{i:gift} Поднести дары (75{i:gold})', desc: 'Богатые дары заметно улучшают отношения', gold: 75, act: 'giftBig' },
+      { id: 'cold', label: '{i:swords} Степь не твоя', desc: 'Дерзкий ответ — хунтайджи запомнит обиду', act: 'cold' },
     ],
   },
   {
@@ -66,9 +66,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'Мои волки почуяли ваш след раньше, чем вы увидели наши костры. Степь широка — хватит ли в ней места для обоих народов?',
     choices: [
-      { id: 'greet', label: '🤝 Поприветствовать хана', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Дары (40🪙)', desc: 'Племя становится дружественным и не нападает', gold: 40, act: 'gift' },
-      { id: 'threat', label: '⚡ Пригрозить', desc: 'Племя затаит зло и будет враждебным', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Поприветствовать хана', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Дары (40{i:gold})', desc: 'Племя становится дружественным и не нападает', gold: 40, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Пригрозить', desc: 'Племя затаит зло и будет враждебным', act: 'threat' },
     ],
   },
   {
@@ -81,9 +81,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'Гости из-за холмов! Мой шатёр открыт для друзей, огонь горит — присядьте к казану. О чём попросит ваш народ?',
     choices: [
-      { id: 'greet', label: '🤝 Поприветствовать ябгу', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Дары (40🪙)', desc: 'Племя становится дружественным и не нападает', gold: 40, act: 'gift' },
-      { id: 'threat', label: '⚡ Пригрозить', desc: 'Племя затаит зло и будет враждебным', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Поприветствовать ябгу', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Дары (40{i:gold})', desc: 'Племя становится дружественным и не нападает', gold: 40, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Пригрозить', desc: 'Племя затаит зло и будет враждебным', act: 'threat' },
     ],
   },
   {
@@ -96,9 +96,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'Караваны уже доносят вести о вашем народе. Богатства Хорезма не знают счёта... чего желает ваш вождь взамен дружбы шаха?',
     choices: [
-      { id: 'greet', label: '🤝 Поприветствовать шаха', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Дары (40🪙)', desc: 'Племя становится дружественным и не нападает', gold: 40, act: 'gift' },
-      { id: 'threat', label: '⚡ Пригрозить', desc: 'Племя затаит зло и будет враждебным', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Поприветствовать шаха', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Дары (40{i:gold})', desc: 'Племя становится дружественным и не нападает', gold: 40, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Пригрозить', desc: 'Племя затаит зло и будет враждебным', act: 'threat' },
     ],
   },
   {
@@ -111,9 +111,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'Мои дозоры заметили ваших всадников у северных рубежей. Я — Ратибор, князь этого народа. Меха, мёд и железо — вот чем богаты мои земли. С чем пришли: с мечом или с добром?',
     choices: [
-      { id: 'greet', label: '🤝 Поприветствовать князя', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Дары (50🪙)', desc: 'Княжество становится дружественным', gold: 50, act: 'gift' },
-      { id: 'threat', label: '⚡ Пригрозить', desc: 'Князь затаит обиду', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Поприветствовать князя', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Дары (50{i:gold})', desc: 'Княжество становится дружественным', gold: 50, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Пригрозить', desc: 'Князь затаит обиду', act: 'threat' },
     ],
   },
   {
@@ -126,9 +126,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'Добро пожаловать в сени моих дворцов, гость. В Коканде шёлк тоньше паутины, а казна полна серебра. Подарите нам дружбу — и наши базары откроются для ваших людей.',
     choices: [
-      { id: 'greet', label: '🤝 Поприветствовать хана', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Дары (50🪙)', desc: 'Ханат становится дружественным', gold: 50, act: 'gift' },
-      { id: 'threat', label: '⚡ Пригрозить', desc: 'Хан затаит обиду', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Поприветствовать хана', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Дары (50{i:gold})', desc: 'Ханат становится дружественным', gold: 50, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Пригрозить', desc: 'Хан затаит обиду', act: 'threat' },
     ],
   },
   {
@@ -141,9 +141,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'Мудрость старше любого клинка, юный правитель. Медресе Бухары помнят рождение и гибель империй. Скажи — с чем пришёл твой караван к воротам города учёных?',
     choices: [
-      { id: 'greet', label: '🤝 Мир эмиру', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Дары (50🪙)', desc: 'Эмират становится дружественным', gold: 50, act: 'gift' },
-      { id: 'threat', label: '⚡ Пригрозить', desc: 'Эмир затаит обиду', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Мир эмиру', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Дары (50{i:gold})', desc: 'Эмират становится дружественным', gold: 50, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Пригрозить', desc: 'Эмир затаит обиду', act: 'threat' },
     ],
   },
   {
@@ -156,9 +156,9 @@ export const NATIONS: NationDef[] = [
     kind: 'tribe',
     greet: 'До двора Санкт-Петербурга дошли вести о степном хане. Моя империя простирается от Балтики до самых ваших пределов. Я предлагаю вам дружбу великой державы — и торговлю, что умножит вашу казну.',
     choices: [
-      { id: 'greet', label: '🤝 Поклониться императрице', desc: 'Нейтральное знакомство', act: 'greet' },
-      { id: 'gift', label: '🎁 Посольские дары (60🪙)', desc: 'Империя становится дружественной', gold: 60, act: 'gift' },
-      { id: 'threat', label: '⚡ Держаться гордо', desc: 'Дерзость запомнят при дворе', act: 'threat' },
+      { id: 'greet', label: '{i:handshake} Поклониться императрице', desc: 'Нейтральное знакомство', act: 'greet' },
+      { id: 'gift', label: '{i:gift} Посольские дары (60{i:gold})', desc: 'Империя становится дружественной', gold: 60, act: 'gift' },
+      { id: 'threat', label: '{i:spark} Держаться гордо', desc: 'Дерзость запомнят при дворе', act: 'threat' },
     ],
   },
 ];
@@ -177,27 +177,27 @@ export interface TribeTypeDef {
 }
 
 export const TRIBE_TYPES: Record<TribeKind, TribeTypeDef> = {
-  military: { kind: 'military', label: 'Военный', icon: '⚔️', levels: [
+  military: { kind: 'military', label: 'Военный', icon: 'swords', levels: [
     '+10% HP вашим войскам',
     'Раз в 3 мин племя присылает воина в дар',
     'Дары чаще и сильнее (батыр/жасауыл)',
   ] },
-  trade: { kind: 'trade', label: 'Торговый', icon: '🪙', levels: [
-    'Пассивный доход +3🪙 каждые 8 с',
+  trade: { kind: 'trade', label: 'Торговый', icon: 'gold', levels: [
+    'Пассивный доход +3{i:gold} каждые 8 с',
     'Обмен на базаре дешевле на 15%',
     'Караваны көпес приносят +50% выручки',
   ] },
-  science: { kind: 'science', label: 'Научный', icon: '📜', levels: [
+  science: { kind: 'science', label: 'Научный', icon: 'scroll', levels: [
     'Исследования быстрее на 10%',
     'Исследования быстрее на 25%',
     'Постройки возводятся на 20% быстрее',
   ] },
-  farm: { kind: 'farm', label: 'Аграрный', icon: '🌾', levels: [
+  farm: { kind: 'farm', label: 'Аграрный', icon: 'wheat', levels: [
     'Пашни дают +15% еды',
     'Стада в загонах растут быстрее',
     'Пашни дают +35% еды, дойка щедрее',
   ] },
-  craft: { kind: 'craft', label: 'Ремесленный', icon: '🪵', levels: [
+  craft: { kind: 'craft', label: 'Ремесленный', icon: 'wood', levels: [
     'Постройки дешевле на 10% дерева',
     'Постройки дешевле на 20% дерева',
     'Шаруа добывают на 15% быстрее',

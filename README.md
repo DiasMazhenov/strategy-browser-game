@@ -17,7 +17,7 @@
 
 ---
 
-## ✨ Что внутри (Вариант A)
+## Что внутри (Вариант A)
 
 ### Геймплей
 - 3 ресурса: 🪵 дерево / 🍖 еда / 🪙 золото
@@ -43,7 +43,7 @@
 
 ---
 
-## 🗂️ Структура проекта
+## Структура проекта
 
 ```
 src/
@@ -53,6 +53,8 @@ src/
   assets/
     hero-battle.jpg    # кей-арт для меню
   game/
+    iconset.ts         # векторные иконки (реестр path-данных) + canvas-рендер строк с токенами
+    Ico.tsx            # React-обёртки <Ico/> и <RT/> (строки с токенами {i:name})
     config.ts          # WORLD, AGES, UNIT_DEFS, BUILDING_DEFS, DIFF, SCORE
     audio.ts           # SoundBank (WebAudio synth)
     iso.ts             # ⭐ Вариант A: изометрические хелперы, кэшированные тайлы, isoBox, isoRoof, drawIsoTree/Gold/Berries
