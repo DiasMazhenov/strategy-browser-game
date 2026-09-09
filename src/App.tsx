@@ -549,7 +549,7 @@ export default function App() {
                       {hud.sel.techs!.map(t => (
                         <button
                           key={t.id}
-                          title={`${t.name}\n${t.desc}\n${t.cost}`}
+                          title={plainRich(`${t.name}\n${t.desc}\n${t.cost}`)}
                           disabled={t.done || t.busy}
                           onClick={() => g()?.research(t.id)}
                           className={`flex items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[10px] font-bold transition ${t.done ? 'border-lime-400/40 bg-lime-500/15 text-lime-300' : t.available && !t.busy ? 'border-sky-400/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/30' : 'border-white/10 bg-black/30 text-slate-400'}`}
@@ -565,7 +565,7 @@ export default function App() {
                       {hud.sel.upgrades!.map(u => (
                         <button
                           key={u.id}
-                          title={`${u.name}\n${u.desc}\n${u.cost}${u.locked ? '\n(нужна предыдущая ступень или эпоха)' : ''}`}
+                          title={plainRich(`${u.name}\n${u.desc}\n${u.cost}${u.locked ? '\n(нужна предыдущая ступень или эпоха)' : ''}`)}
                           disabled={u.done || !u.available}
                           onClick={() => g()?.research(u.id)}
                           className={`flex items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[10px] font-black transition ${u.done ? 'border-amber-400/50 bg-amber-500/20 text-amber-200' : u.available ? 'border-violet-400/50 bg-violet-500/20 text-violet-100 hover:bg-violet-500/40' : 'border-white/10 bg-black/30 text-slate-500'}`}
@@ -998,12 +998,12 @@ function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: {
   return (
     <button
       onClick={onClick}
-      title={tip}
+      title={tip ? plainRich(tip) : undefined}
       className={`relative flex w-[72px] shrink-0 flex-col items-center rounded-xl border px-1 py-1.5 transition active:scale-95 ${active ? 'border-amber-300 bg-amber-400/20' : ok && !lock ? 'btn-iron hover:border-amber-300/50' : 'border-white/5 bg-black/40 opacity-45'}`}
     >
       <Ico name={lock ? 'lock' : icon} className="h-6 w-6" />
       <span className="mt-0.5 text-[10px] font-black leading-none text-slate-100">{label}</span>
-      <span className="mt-0.5 text-[8.5px] font-bold leading-none text-slate-400">{costStr(cost)}</span>
+      <span className="mt-0.5 flex items-center justify-center gap-0.5 text-[8.5px] font-bold leading-none text-slate-400"><RT t={costStr(cost)} /></span>
       <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[8px] font-black text-amber-200/90">{key_}</span>
       {!ok && !lock && <span className="absolute inset-x-2 bottom-6 h-0.5 rounded bg-red-500/70" />}
     </button>
