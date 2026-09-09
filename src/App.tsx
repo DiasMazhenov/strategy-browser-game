@@ -19,7 +19,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.088';
+export const GAME_VERSION = '1.0.089';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -191,7 +191,7 @@ export default function App() {
       <div className="safe-top pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="flex items-start justify-between gap-2 p-2 sm:p-3">
           {/* resources */}
-          <div className="panel-iron pointer-events-auto flex items-center gap-1 rounded-xl px-2 py-1.5 sm:gap-2 sm:px-3">
+          <div className="kz-border-bottom panel-iron pointer-events-auto flex items-center gap-1 rounded-xl px-2 py-1.5 sm:gap-2 sm:px-3">
             <Res icon={<TreePine className="h-4 w-4 text-lime-300" />} val={hud?.wood ?? 0} />
             <Res icon={<Drumstick className="h-4 w-4 text-rose-300" />} val={hud?.food ?? 0} />
             <Res icon={<Coins className="h-4 w-4 text-yellow-300" />} val={hud?.gold ?? 0} />
@@ -742,7 +742,7 @@ export default function App() {
       {/* ===== СЛУЧАЙНОЕ СОБЫТИЕ СТЕПИ (выбор реакции, Civ-стиль) ===== */}
       {hud?.event && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="panel-iron anim-banner w-full max-w-md rounded-3xl p-5">
+          <div className="kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-5">
             <div className="mb-1 flex items-center gap-2.5">
               <span className="text-3xl">{hud.event.icon}</span>
               <div className="font-display text-lg font-black tracking-wide text-amber-200">{hud.event.title}</div>
@@ -765,7 +765,7 @@ export default function App() {
       {showGreats && hud && (
         <div className="absolute inset-0 z-[61] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={() => setShowGreats(false)}>
-          <div className="panel-iron w-full max-w-2xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+          <div className="kz-corners panel-iron w-full max-w-2xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
               <div className="font-display text-lg font-black tracking-wide text-amber-200">✨ ВЕЛИКИЕ ЛЮДИ СТЕПИ</div>
               <button onClick={() => setShowGreats(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10">✕</button>
@@ -808,7 +808,7 @@ export default function App() {
       {/* ===== ИТОГИ ЭПОХИ ===== */}
       {hud?.ageReport && (
         <div className="absolute inset-0 z-[62] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="panel-iron anim-banner w-full max-w-lg rounded-3xl p-5">
+          <div className="kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-5">
             <div className="mb-3 text-center">
               <div className="text-[11px] font-black tracking-[0.2em] text-slate-400">ЭПОХА ЗАВЕРШЕНА</div>
               <div className="font-display mt-1 flex items-center justify-center gap-2 text-lg font-black text-amber-200">
@@ -1004,7 +1004,7 @@ function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: {
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="panel-iron anim-banner w-full max-w-md rounded-3xl p-6 text-center">{children}</div>
+      <div className="kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-6 text-center">{children}</div>
     </div>
   );
 }
@@ -1046,7 +1046,7 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
   })();
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="panel-iron anim-banner max-h-[88dvh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl p-5 text-slate-100">
+      <div className="kz-corners panel-iron anim-banner max-h-[88dvh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl p-5 text-slate-100">
         <div className="mb-4 flex items-center justify-between">
           <div className="font-display flex items-center gap-2 text-lg font-black tracking-wide text-amber-100">
             <SettingsIcon className="h-5 w-5 text-amber-300" /> Настройки
@@ -1172,7 +1172,7 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
   const busy = hud.techTree.some(t => t.state === 'researching');
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="panel-iron anim-banner relative max-h-[88dvh] w-[min(94vw,820px)] overflow-y-auto scroll-thin rounded-3xl p-4 text-slate-100 sm:p-5">
+      <div className="kz-corners panel-iron anim-banner relative max-h-[88dvh] w-[min(94vw,820px)] overflow-y-auto scroll-thin rounded-3xl p-4 text-slate-100 sm:p-5">
         <button onClick={onClose} className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-300 hover:bg-white/10 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
         <div className="mb-1 flex items-center gap-2 font-display text-lg font-black tracking-wide text-amber-200 sm:text-xl">
           <ScrollText className="h-5 w-5" /> Дерево технологий
@@ -1313,12 +1313,17 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         <div className="absolute -top-32 left-1/2 h-96 w-[700px] -translate-x-1/2 rounded-full bg-amber-500/15 blur-[100px]" />
         <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-emerald-600/15 blur-[90px]" />
         <div className="absolute bottom-10 right-0 h-72 w-72 rounded-full bg-red-600/10 blur-[90px]" />
-        <div className="absolute inset-0 opacity-[0.13]" style={{ backgroundImage: 'linear-gradient(rgba(253,230,138,.4) 1px, transparent 1px), linear-gradient(90deg, rgba(253,230,138,.4) 1px, transparent 1px)', backgroundSize: '44px 44px' }} />
+        {/* Фон — казахский орнамент вместо офисной клетки: тот же ритм,
+            но мотив кошкар-мүйіз («бараньи рога») вместо линейной сетки. */}
+        <div className="absolute inset-0 opacity-[0.10]" style={{
+          backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='88' height='88' viewBox='0 0 88 88'%3E%3Cg stroke='%23fde68a' stroke-width='1.3' fill='none' stroke-linecap='round'%3E%3Cpath d='M44 20c-9 0-15 6-15 13 0 5 4 9 9 9 4 0 6-3 6-6 0-2-2-4-4-4'/%3E%3Cpath d='M44 20c9 0 15 6 15 13 0 5-4 9-9 9-4 0-6-3-6-6 0-2 2-4 4-4'/%3E%3Cpath d='M44 46v18M30 64h28'/%3E%3Ccircle cx='44' cy='72' r='4'/%3E%3C/g%3E%3C/svg%3E\")",
+          backgroundSize: '88px 88px',
+        }} />
       </div>
 
       <div className="relative mx-auto max-w-4xl px-4 pb-10 pt-8 sm:pt-12">
         {/* hero art */}
-        <div className="relative overflow-hidden rounded-3xl border border-amber-200/25 shadow-[0_20px_80px_rgba(0,0,0,.55)]">
+        <div className="kz-border-bottom relative overflow-hidden rounded-3xl border border-amber-200/25 shadow-[0_20px_80px_rgba(0,0,0,.55)]">
           <img src={heroKhanate} alt="Казахское Ханство — степь, юрты и конница на рассвете" className="h-56 w-full object-cover sm:h-72" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/30 to-[#0c1410]/30" />
           <div className="absolute left-1/2 top-3 -translate-x-1/2">
@@ -1331,7 +1336,9 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
           <div className="absolute bottom-2 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-slate-300 backdrop-blur">🐺 Набеги • 🐑 Скот • ⚔️ Батыры</div>
         </div>
         <div className="mt-3 text-center">
-          <div className="text-[11px] font-black tracking-[0.35em] text-amber-300/80">СТРАТЕГИЯ ВЕЛИКОЙ СТЕПИ · ЭПОХА АБЫЛАЙ ХАНА</div>
+          <div className="kz-divider mx-auto max-w-md text-[11px] font-black tracking-[0.35em] text-amber-300/80">
+            <span className="whitespace-nowrap px-1 text-[10px] sm:text-[11px]">ЭПОХА АБЫЛАЙ ХАНА</span>
+          </div>
           <h1 className="font-display mt-1 text-4xl font-black leading-tight sm:text-6xl">
             <span className="gold-text">КАЗАХСКОЕ</span> <span className="text-sky-100">ХАНСТВО</span>
           </h1>
@@ -1556,7 +1563,7 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
     n.atWar ? '⚔️' : n.rel === 'Дружба' ? '🤝' : n.rel === 'Нейтралитет' ? '🕊️' : '❔';
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="panel-iron anim-banner max-h-[88dvh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl p-4 sm:p-5">
+      <div className="kz-corners panel-iron anim-banner max-h-[88dvh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl p-4 sm:p-5">
         <div className="mb-3 flex items-center justify-between">
           <div className="font-display flex items-center gap-2 text-lg font-black tracking-wide text-amber-200 sm:text-xl">
             <Landmark className="h-5 w-5" /> Дипломатия
@@ -1671,7 +1678,7 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
   const win = over.result === 'victory';
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm">
-      <div className="panel-iron anim-banner w-full max-w-lg rounded-3xl p-6 text-center">
+      <div className="kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-6 text-center">
         <div className="text-5xl">{win ? '👑' : '💀'}</div>
         <div className={`font-display mt-1 text-4xl font-black tracking-wide ${win ? '' : 'text-red-400'}`}>
           {win ? <span className="gold-text">ПОБЕДА!</span> : 'ПОРАЖЕНИЕ'}

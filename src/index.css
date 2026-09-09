@@ -43,6 +43,54 @@ button, .btn-iron, .btn-gold { touch-action: manipulation; }
   .panel-iron { padding-top: .35rem; padding-bottom: .35rem; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   КАЗАХСКИЙ ОРНАМЕНТ — ядро оформления
+   Узоры зашиты как SVG в data-URI: не тащим файлы, не ждём загрузки, цвет
+   меняется правкой одной строки. Основной мотив — кошкар-мүйіз («бараньи
+   рога»), базовый элемент казахского орнамента; в бордюрах — ирек (зигзаг).
+   ═══════════════════════════════════════════════════════════════════════════ */
+@theme {
+  --kz-gold: #f6d47c;
+  --kz-gold-deep: #d4a017;
+  --kz-felt: #1c2621;      /* войлок кошмы */
+  --kz-leather: #24170f;   /* тиснёная кожа */
+}
+
+/* Бордюр «кошкар-мүйіз»: повторяющаяся лента бараньих рогов.
+   Кладём как background-image на псевдоэлемент, чтобы не мешать содержимому. */
+.kz-border-top::before,
+.kz-border-bottom::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  height: 7px;
+  pointer-events: none;
+  background-repeat: repeat-x;
+  background-size: 28px 7px;
+  opacity: .55;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='7' viewBox='0 0 28 7'%3E%3Cpath d='M2 5c0-2 1.6-3.4 3.2-3.4C6.6 1.6 7.4 2.6 7.4 3.6c0 .8-.6 1.4-1.3 1.4-.6 0-1-.4-1-.9 0-.4.3-.7.7-.7M26 5c0-2-1.6-3.4-3.2-3.4-1.4 0-2.2 1-2.2 2 0 .8.6 1.4 1.3 1.4.6 0 1-.4 1-.9 0-.4-.3-.7-.7-.7M11 5.2h6' stroke='%23f6d47c' stroke-width='1.1' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.kz-border-top::before { top: 0; }
+.kz-border-bottom::after { bottom: 0; transform: scaleY(-1); }
+
+/* Уголковый завиток — ставится в углы крупных панелей и модалок */
+.kz-corners {
+  position: relative;
+}
+.kz-corners::before,
+.kz-corners::after {
+  content: "";
+  position: absolute;
+  width: 26px; height: 26px;
+  pointer-events: none;
+  opacity: .5;
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cpath d='M2 24V9C2 5 5 2 9 2h15' stroke='%23f6d47c' stroke-width='1.4' fill='none'/%3E%3Cpath d='M7 24v-13c0-3 2-5 5-5h12' stroke='%23f6d47c' stroke-width='.9' fill='none' opacity='.6'/%3E%3Cpath d='M4 20c2.6 0 4.6-2 4.6-4.4 0-1.6-1-2.7-2.3-2.7-1 0-1.8.7-1.8 1.6 0 .7.5 1.2 1.1 1.2' stroke='%23f6d47c' stroke-width='1' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.kz-corners::before { top: 3px; left: 3px; }
+.kz-corners::after  { bottom: 3px; right: 3px; transform: rotate(180deg); }
+
 /* Parchment + gold theme helpers */
 .gold-text {
   background: linear-gradient(180deg, #fde68a 0%, #f59e0b 45%, #b45309 70%, #fde68a 100%);
@@ -55,30 +103,99 @@ button, .btn-iron, .btn-gold { touch-action: manipulation; }
     radial-gradient(1200px 400px at 50% -10%, rgba(253,230,138,.14), transparent 60%),
     linear-gradient(180deg, #1a2420 0%, #101915 100%);
 }
+
+/* ПАНЕЛЬ: войлок кошмы вместо плоской заливки.
+   Три слоя — тканый шум, мягкое золотое свечение сверху, базовый градиент.
+   Тканая текстура сделана диагональными штрихами: на глаз читается как
+   войлок, но весит десяток байт против растровой картинки. */
 .panel-iron {
-  background: linear-gradient(180deg, rgba(24,32,28,.96), rgba(12,18,15,.97));
-  border: 1px solid rgba(212,175,55,.22);
-  box-shadow: 0 10px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+  position: relative;
+  background:
+    repeating-linear-gradient(58deg, rgba(246,212,124,.028) 0 2px, transparent 2px 5px),
+    radial-gradient(120% 80% at 50% -20%, rgba(246,212,124,.09), transparent 62%),
+    linear-gradient(180deg, rgba(28,38,33,.97), rgba(14,20,17,.98));
+  border: 1px solid rgba(212,175,55,.28);
+  box-shadow:
+    0 10px 40px rgba(0,0,0,.55),
+    inset 0 1px 0 rgba(255,255,255,.07),
+    inset 0 0 22px rgba(246,212,124,.045);
   backdrop-filter: blur(10px);
 }
+/* Тонкая золотая нить по верхней кромке — «прошивка» кошмы */
+.panel-iron::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(246,212,124,.5) 18%, rgba(246,212,124,.5) 82%, transparent);
+  pointer-events: none;
+}
+
+/* КНОПКА ЗОЛОТАЯ: тиснение + блик, как на парадной сбруе */
 .btn-gold {
-  background: linear-gradient(180deg, #f6d47c 0%, #d4a017 45%, #8a5f06 100%);
-  box-shadow: 0 4px 0 #5c3f04, 0 8px 24px rgba(212,160,23,.35), inset 0 1px 0 rgba(255,255,255,.6);
+  position: relative;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, #fbe4a6 0%, #f6d47c 22%, #d4a017 55%, #8a5f06 100%);
+  box-shadow:
+    0 4px 0 #5c3f04,
+    0 8px 24px rgba(212,160,23,.38),
+    inset 0 1px 0 rgba(255,255,255,.65),
+    inset 0 -2px 6px rgba(92,63,4,.4);
   color: #1c1206;
-  transition: transform .08s ease, filter .15s ease;
+  text-shadow: 0 1px 0 rgba(255,255,255,.35);
+  transition: transform .08s ease, filter .15s ease, box-shadow .15s ease;
 }
-.btn-gold:hover { filter: brightness(1.07); }
+/* Пробегающий блик — оживляет главные кнопки, не отвлекая в бою */
+.btn-gold::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.45) 50%, transparent 65%);
+  background-size: 300% 100%;
+  animation: gold-sheen 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes gold-sheen {
+  0%, 70% { background-position: 180% 0; }
+  100%    { background-position: -80% 0; }
+}
+.btn-gold:hover { filter: brightness(1.08); box-shadow: 0 4px 0 #5c3f04, 0 10px 30px rgba(212,160,23,.5), inset 0 1px 0 rgba(255,255,255,.7); }
 .btn-gold:active { transform: translateY(3px); box-shadow: 0 1px 0 #5c3f04, 0 4px 12px rgba(212,160,23,.3); }
+
+/* КНОПКА ЖЕЛЕЗНАЯ: кожа с тиснением */
 .btn-iron {
-  background: linear-gradient(180deg, #2b3831, #141c18);
-  border: 1px solid rgba(255,255,255,.1);
-  box-shadow: 0 3px 0 rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
-  transition: transform .08s ease, filter .15s;
+  background:
+    repeating-linear-gradient(45deg, rgba(246,212,124,.02) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, #303f37, #151d19);
+  border: 1px solid rgba(246,212,124,.16);
+  box-shadow: 0 3px 0 rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.09);
+  transition: transform .08s ease, filter .15s, border-color .15s, box-shadow .15s;
 }
+.btn-iron:hover { border-color: rgba(246,212,124,.4); filter: brightness(1.1); }
 .btn-iron:active { transform: translateY(2px); }
 .btn-iron.active {
-  border-color: rgba(246,212,124,.7);
-  box-shadow: 0 0 0 1px rgba(246,212,124,.5), 0 0 18px rgba(246,212,124,.25);
+  border-color: rgba(246,212,124,.75);
+  background:
+    repeating-linear-gradient(45deg, rgba(246,212,124,.05) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, #3c4a3c, #1d2620);
+  box-shadow: 0 0 0 1px rgba(246,212,124,.55), 0 0 20px rgba(246,212,124,.3), inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+/* Орнаментальный разделитель: ромб-шаңырақ между двумя нитями */
+.kz-divider {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  color: rgba(246,212,124,.5);
+}
+.kz-divider::before,
+.kz-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(246,212,124,.45), transparent);
 }
 
 @keyframes floaty { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-8px);} }
