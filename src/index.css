@@ -92,8 +92,8 @@ button, .btn-iron, .btn-gold { touch-action: manipulation; }
   background-image: none;
   background-color: var(--kz-gold);
   opacity: .55;
-  -webkit-mask-image: url("../assets/path76.svg");
-          mask-image: url("../assets/path76.svg");
+  -webkit-mask-image: url("@/assets/path76.svg");
+          mask-image: url("@/assets/path76.svg");
   -webkit-mask-repeat: repeat-x;
           mask-repeat: repeat-x;
   -webkit-mask-size: auto 100%;
