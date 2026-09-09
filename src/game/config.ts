@@ -119,6 +119,7 @@ export interface Settings {
   particles: boolean;      // частицы и пыль
   damageNumbers: boolean;  // всплывающие числа урона/лечения
   autoPauseOnBlur: boolean;// пауза при потере фокуса
+  autosave: boolean;       // автосохранение партии (переживает перезагрузку страницы)
   realAzan: boolean;       // азан по РЕАЛЬНОМУ времени намаза, а не по игровым суткам
   azanCity: string;        // город для расчёта времён (id из CITIES в prayer-times.ts)
 }
@@ -142,6 +143,9 @@ export const DEFAULT_SETTINGS: Settings = {
   particles: true,
   damageNumbers: true,
   autoPauseOnBlur: true,
+  // Автосохранение ВКЛ по умолчанию: случайно закрытая вкладка не должна
+  // стоить партии. Отключается для тех, кто хочет играть «с нуля».
+  autosave: true,
   // По умолчанию ВЫКЛ: старое поведение (азан по игровым суткам) остаётся
   // основным, реальные времена — осознанный выбор игрока.
   realAzan: false,

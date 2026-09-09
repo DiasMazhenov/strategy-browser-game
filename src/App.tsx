@@ -19,7 +19,7 @@ const LS_KEY = 'empires-dawn-highscores-v1';
 const LS_SETTINGS = 'empires-dawn-settings-v1';
 // версия игры — единый источник для показа в меню.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.086';
+export const GAME_VERSION = '1.0.087';
 // Таймеры HUD: при 30-минутных сутках благодать держится ~6 минут, и «360с»
 // читается плохо — переводим в м:сс, секунды оставляем как есть.
 const mmss = (sec: number) => {
@@ -100,6 +100,19 @@ export default function App() {
     });
   }, []);
 
+  // Перезагрузили страницу прямо посреди боя — возвращаем в партию, не в меню.
+  // Партия пишется в localStorage (cookies не годятся: сохранение ~100 КБ при
+  // лимите куки 4 КБ), автосохранение идёт раз в 20 с и при уходе со страницы.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    if (!Game.wasInGame()) return;
+    setLoadSave(true);
+    setScreen('game');
+    setGameId(g => g + 1);
+  }, []);
+
   const startGame = useCallback((d?: Difficulty, resume = false) => {
     if (d) setSettings(prev => { const next = { ...prev, difficulty: d }; try { localStorage.setItem(LS_SETTINGS, JSON.stringify(next)); } catch { /* noop */ } return next; });
     setLoadSave(resume);
@@ -107,6 +120,7 @@ export default function App() {
     setDockTab('units');
     setScreen('game');
     setGameId(g => g + 1);
+    Game.setInGame(true);      // метка: страница закрыта во время партии → вернём в бой
   }, []);
 
   // create / destroy engine
@@ -702,7 +716,13 @@ export default function App() {
             <MidBtn onClick={() => g()?.saveGame()}><span className="text-base">💾</span>Сохранить партию</MidBtn>
             <div className="grid grid-cols-2 gap-2">
               <MidBtn onClick={() => { setPaused(false); startGame(difficulty); }}><RotateCcw className="h-4 w-4" />Заново</MidBtn>
-              <MidBtn onClick={() => { gameRef.current?.destroy(); setScreen('menu'); setPaused(false); }}><Home className="h-4 w-4" />Меню</MidBtn>
+              <MidBtn onClick={() => {
+                // Уходя в меню, дописываем партию и снимаем метку: после F5
+                // игрок попадёт в меню (с кнопкой «Продолжить»), а не обратно в бой.
+                gameRef.current?.saveOnExit();
+                Game.setInGame(false);
+                gameRef.current?.destroy(); setScreen('menu'); setPaused(false);
+              }}><Home className="h-4 w-4" />Меню</MidBtn>
             </div>
             <MidBtn onClick={() => setShowSettings(true)}><SettingsIcon className="h-4 w-4" />Настройки</MidBtn>
             <MidBtn onClick={() => g()?.toggleMute()}>{hud?.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}{hud?.muted ? 'Включить звук' : 'Выключить звук'} (M)</MidBtn>
@@ -914,7 +934,7 @@ export default function App() {
       )}
 
       {/* ===== GAME OVER ===== */}
-      {over && <GameOverScreen over={over} scores={scores} name={name} setName={setName} saved={saved} onSave={saveScore} onRestart={() => startGame(difficulty)} onMenu={() => { setOver(null); setScreen('menu'); }} />}
+      {over && <GameOverScreen over={over} scores={scores} name={name} setName={setName} saved={saved} onSave={saveScore} onRestart={() => startGame(difficulty)} onMenu={() => { Game.setInGame(false); setOver(null); setScreen('menu'); }} />}
     </div>
   );
 }
@@ -1090,6 +1110,9 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
           <Toggle on={settings.particles} onClick={() => updateSettings({ particles: !settings.particles })} label="Частицы" desc="Искры, дым, пыль из-под ног" />
           <Toggle on={settings.damageNumbers} onClick={() => updateSettings({ damageNumbers: !settings.damageNumbers })} label="Числа урона и очков" desc="Всплывающие +очки и награды" />
           <Toggle on={settings.autoPauseOnBlur} onClick={() => updateSettings({ autoPauseOnBlur: !settings.autoPauseOnBlur })} label="Авто-пауза" desc="Ставить игру на паузу при сворачивании вкладки" />
+          <Toggle on={settings.autosave} onClick={() => updateSettings({ autosave: !settings.autosave })}
+            label="Автосохранение"
+            desc="Партия пишется каждые 20 секунд и при закрытии вкладки — перезагрузка страницы её не потеряет" />
           <Toggle on={settings.realAzan} onClick={() => updateSettings({ realAzan: !settings.realAzan })}
             label="Азан по реальному времени"
             desc="Призыв звучит в то же время, что и в настоящей мечети выбранного города" />

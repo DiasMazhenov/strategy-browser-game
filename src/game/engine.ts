@@ -316,7 +316,8 @@ export interface HudSnapshot {
   dmgFlash: number; ageAfford: boolean; ageCost: string;
   hint: string;
   ageReport: AgeReport | null;
-  prayerTruce: boolean;   // идёт азан — враг не атакует   // экран итогов эпохи (null — закрыт)
+  prayerTruce: boolean;   // идёт азан — враг не атакует
+  savedAgo: number;       // сколько игровых секунд назад сохранялась партия (-1 — ни разу)   // экран итогов эпохи (null — закрыт)
   atWar: boolean; grievance: number; casusBelli: number; morale: number;
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   woodDiscount: number;   // множитель цены дерева от союза с ремесленниками (1 = без скидки)
@@ -507,6 +508,10 @@ export class Game {
   azanPhase: number[] = [];      // фазы суток, на которых звучит азан
   azanDone: number[] = [];       // какие намазы уже прозвучали в этих сутках
   prayerCount = 0;               // сколько намазов совершено за партию
+  // ── автосохранение партии ──
+  readonly AUTOSAVE_SEC = 20;    // как часто писать партию в localStorage
+  autosaveT = 0;
+  lastSaveT = -1;                // игровое время последнего сохранения
   // ── АЗАН ПО РЕАЛЬНОМУ ВРЕМЕНИ (настройка realAzan) ──
   // Ключи намазов, уже прозвучавших сегодня по реальным часам. Дата хранится,
   // чтобы после полуночи список сам сбросился.
@@ -1508,13 +1513,31 @@ export class Game {
   };
   onKeyUp = (e: KeyboardEvent) => { this.keys.delete(e.key.toLowerCase()); };
   onResize = () => this.resize();
-  onVis = () => { if (this.settings.autoPauseOnBlur && document.hidden && !this.paused && !this.over) this.onPauseRequest(); };
+  onVis = () => {
+    // Вкладку прячут (свернули, переключились, на мобильном — ушли из браузера):
+    // это последний надёжный момент, чтобы записать партию. На мобильных
+    // 'beforeunload' часто НЕ срабатывает вовсе, а visibilitychange — да.
+    if (document.hidden) this.saveOnExit();
+    if (this.settings.autoPauseOnBlur && document.hidden && !this.paused && !this.over) this.onPauseRequest();
+  };
+  // Уход со страницы: перезагрузка, закрытие, переход по ссылке.
+  onExit = () => { this.saveOnExit(); };
+  // Сохраняем только живую партию: записывать проигранную бессмысленно —
+  // при следующем заходе игрок попал бы сразу на экран поражения.
+  saveOnExit() {
+    if (this.over || this.destroyed || !this.settings.autosave) return;
+    this.saveTo();
+  }
 
   bind() {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('resize', this.onResize);
     document.addEventListener('visibilitychange', this.onVis);
+    // pagehide срабатывает и при закрытии, и при переходе в bfcache —
+    // в отличие от beforeunload, который Safari/мобильные часто пропускают
+    window.addEventListener('pagehide', this.onExit);
+    window.addEventListener('beforeunload', this.onExit);
     const c = this.canvas;
     c.addEventListener('pointerdown', this.pDown);
     c.addEventListener('pointermove', this.pMove);
@@ -1532,6 +1555,8 @@ export class Game {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('resize', this.onResize);
     document.removeEventListener('visibilitychange', this.onVis);
+    window.removeEventListener('pagehide', this.onExit);
+    window.removeEventListener('beforeunload', this.onExit);
     const c = this.canvas;
     c.removeEventListener('pointerdown', this.pDown);
     c.removeEventListener('pointermove', this.pMove);
@@ -2412,9 +2437,59 @@ export class Game {
   static hasSave(): boolean {
     try { return !!localStorage.getItem('empires-dawn-savegame-v1'); } catch { return false; }
   }
-  static clearSave() { try { localStorage.removeItem('empires-dawn-savegame-v1'); } catch { /* noop */ } }
+  static clearSave() {
+    try {
+      localStorage.removeItem('empires-dawn-savegame-v1');
+      localStorage.removeItem('empires-dawn-ingame-v1');
+    } catch { /* noop */ }
+  }
+
+  /**
+   * Была ли страница закрыта ПРЯМО во время партии. По этой метке App
+   * возвращает игрока в бой после F5, не спрашивая. Метку ставим при входе
+   * в игру и снимаем при выходе в меню и при поражении/победе.
+   */
+  static wasInGame(): boolean {
+    try { return localStorage.getItem('empires-dawn-ingame-v1') === '1' && Game.hasSave(); }
+    catch { return false; }
+  }
+  static setInGame(on: boolean) {
+    try {
+      if (on) localStorage.setItem('empires-dawn-ingame-v1', '1');
+      else localStorage.removeItem('empires-dawn-ingame-v1');
+    } catch { /* noop */ }
+  }
   saveGame() {
-    try { localStorage.setItem('empires-dawn-savegame-v1', this.serialize()); this.floater(this.cam.x, this.cam.y - 80, '💾 Партия сохранена', '#a3e635', 16); } catch { /* noop */ }
+    if (this.saveTo()) this.floater(this.cam.x, this.cam.y - 80, '💾 Партия сохранена', '#a3e635', 16);
+  }
+
+  /**
+   * Запись партии в localStorage. Возвращает false, если не вышло
+   * (переполнение квоты, приватный режим Safari).
+   *
+   * Cookies для этого НЕ годятся: партия весит ~100 КБ, а лимит куки 4 КБ —
+   * не влезает в 25 раз. Плюс куки уходят на сервер при каждом запросе.
+   * localStorage даёт 5-10 МБ и остаётся в браузере.
+   */
+  saveTo(): boolean {
+    try {
+      localStorage.setItem('empires-dawn-savegame-v1', this.serialize());
+      this.lastSaveT = this.time;
+      return true;
+    } catch { return false; }
+  }
+
+  /**
+   * Автосохранение: раз в AUTOSAVE_SEC игрового времени и по уходу со
+   * страницы. Пишем НЕ каждый кадр — сериализация ~100 КБ заметно дороже
+   * обычного тика, на слабой машине это дало бы рывок.
+   */
+  updateAutosave(dt: number) {
+    if (this.over || !this.settings.autosave) return;
+    this.autosaveT += dt;
+    if (this.autosaveT < this.AUTOSAVE_SEC) return;
+    this.autosaveT = 0;
+    this.saveTo();
   }
   loadFromSave(): boolean {
     let raw: string | null = null;
@@ -3774,6 +3849,8 @@ export class Game {
     if (!this.over) this.updateUnite(dt);
     // ── мудрость для призыва великих людей ──
     if (!this.over) this.updateWisdom(dt);
+    // ── автосохранение партии ──
+    this.updateAutosave(dt);
 
     // AI tick
     this.aiT += dt;
@@ -6324,7 +6401,7 @@ export class Game {
       age: this.age, result, difficulty: this.difficulty,
       peakPop: this.peakPop, peakArmy: this.peakArmy, built: this.builtCount, history: this.history.slice(-24),
     };
-    try { localStorage.removeItem('empires-dawn-savegame-v1'); } catch { /* noop */ }
+    Game.clearSave();   // партия окончена: снимаем и сохранение, и метку «в игре»
     setTimeout(() => this.onGameOver(stats), 900);
   }
 
@@ -6390,6 +6467,7 @@ export class Game {
       hint: this.hint,
       ageReport: this.ageReport,
       prayerTruce: this.prayerTruce(),
+      savedAgo: this.lastSaveT < 0 ? -1 : Math.max(0, Math.floor(this.time - this.lastSaveT)),
       atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale,
       tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
       hasMarket: this.marketCount() > 0,
