@@ -1350,7 +1350,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
             <div className="anim-floaty flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/50 bg-black/50 text-amber-200 backdrop-blur"><Ico name="horse" className="h-7 w-7" /></div>
           </div>
           {/* лента пунктов игры — поверх арта, а не отдельным блоком под баннером */}
-          <div className="absolute inset-x-2 bottom-2 grid grid-cols-2 gap-1.5 sm:inset-x-3 sm:grid-cols-4">
+          <div className="absolute inset-x-2 bottom-5 grid grid-cols-2 gap-1.5 sm:inset-x-3 sm:grid-cols-4">
             {([
               { i: 'sheep', c: 'text-rose-200', t: 'Стада и загоны' },
               { i: 'rider', c: 'text-red-300', t: 'Конница батыров' },
