@@ -240,11 +240,36 @@ function armorClass(k: UnitKey): 'inf' | 'cav' | 'siege' | 'soft' {
 function dmgMult(att: UnitKey, target: UnitKey): number {
   const a = dmgType(att), t = armorClass(target);
   if (a === 'pierce' && t === 'cav') return 1.6;   // копья/стрелы против конницы
-  if (a === 'blade' && (t === 'soft')) return 1.35; // мечники/конница рубят лучников и беззащитных
-  if (att === 'cavalry' && t === 'inf') return 1.3; // конница сметает пехоту
-  if (a === 'blunt' && t === 'siege') return 1.5;   // осадный по осаде
+  if (a === 'pierce' && t === 'soft') return 1.2;   // стрелы косят беззащитных
   if (a === 'pierce' && t === 'inf') return 0.85;   // пехота лучше держит уколы
+  if (a === 'blade' && t === 'soft') return 1.35;   // мечники/конница рубят лучников и беззащитных
+  if ((att === 'cavalry' || att === 'knight') && target === 'spearman') return 0.8; // напороться на найзу
+  if (att === 'cavalry' && t === 'inf') return 1.3; // жасауыл сметает пехоту
+  if ((att === 'swordsman' || att === 'villager') && t === 'cav') return 0.8; // пешим конницу не удержать
+  if (a === 'blunt' && t === 'siege') return 1.5;   // осадный по осаде
+  if (a === 'blunt' && t !== 'siege') return 0.7;   // катапульта по живому неэффективна
   return 1;
+}
+// какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
+const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'catapult'];
+export function counterText(k: UnitKey): string {
+  if (k === 'villager' || k === 'monk' || k === 'trader') return '';
+  const parts: string[] = [];
+  for (const t of COUNTER_SHOW) {
+    if (t === k) continue;
+    const m = dmgMult(k, t);
+    if (m >= 1.15) parts.push(`×${(Math.round(m * 10) / 10).toString().replace(/^1\.0$/, '1')} ${UNIT_DEFS[t].name.toLowerCase()}`);
+  }
+  if (k === 'catapult') parts.push('×1.7 постройки');
+  // кто опасен для нас: контра в обратную сторону
+  const threats: string[] = [];
+  for (const t of COUNTER_SHOW) {
+    if (t === k) continue;
+    if (dmgMult(t, k) >= 1.5) threats.push(UNIT_DEFS[t].name.toLowerCase());
+  }
+  let out = parts.join(' · ');
+  if (threats.length) out += `${out ? '\n' : ''}Опасны: ${threats.join(', ')}`;
+  return out;
 }
 interface Bld {
   id: number; key: BuildingKey; owner: 'player' | 'enemy' | 'neutral';
@@ -272,7 +297,7 @@ interface Decor { x: number; y: number; k: number; s: number; c: string }
 
 export interface SelSnapshot {
   kind: 'none' | 'units' | 'building';
-  count?: number; types?: { key: string; label: string; count: number; level?: number; kills?: number }[];
+  count?: number; types?: { key: string; label: string; count: number; level?: number; kills?: number; counter?: string }[];
   avgHp?: number; maxHp?: number; canGather?: boolean;
   maxLevel?: number; totalKills?: number; stance?: string | null;
   bkey?: BuildingKey; blabel?: string; hp?: number; bmax?: number; done?: number;
@@ -5855,8 +5880,7 @@ export class Game {
       if (isCata) { this.sound.boom(); this.trauma = Math.min(1, this.trauma + 0.12); this.burst(att.x, att.y - 26, 8, ['#a8a29e', '#78716c'], 120, 0.5); }
       else { this.sound.arrow(att); this.spark(att.x, att.y - 14, '#fef3c7'); }
     } else {
-      // копейщик бьёт конницу с бонусом
-      if (att.key === 'spearman' && tu && (tu.key === 'knight' || tu.key === 'cavalry')) dmg *= 1.8;
+      // контры уже применены единой таблицей dmgMult (без дубля ×1.8 у копейщика)
       if (tu) this.damageUnit(tu, dmg, att);
       if (tb) this.damageBld(tb, dmg, att.owner);
       this.sound.sword(att);
@@ -6792,7 +6816,7 @@ export class Game {
     }
     return {
       kind: 'units', count: us.length,
-      types: [...map.entries()].map(([key, e]) => ({ key, label: this.unitName(key as UnitKey, 'player'), count: e.count, level: e.level, kills: e.kills })),
+      types: [...map.entries()].map(([key, e]) => ({ key, label: this.unitName(key as UnitKey, 'player'), count: e.count, level: e.level, kills: e.kills, counter: counterText(key as UnitKey) || undefined })),
       avgHp: hp, maxHp: max, maxLevel, totalKills, stance: this.selStance,
       canGather: us.some(u => u.key === 'villager'),
     };

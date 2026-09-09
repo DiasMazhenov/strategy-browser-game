@@ -5,7 +5,7 @@ import {
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
-import { Game, type GameStats, type HudSnapshot } from './game/engine';
+import { Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
 import { PLAYER_NATION } from './game/nations';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
@@ -497,6 +497,11 @@ export default function App() {
                   {(hud.sel.maxLevel ?? 1) >= 2 && (
                     <div className="mt-0.5 text-[10px] font-bold text-amber-300">
                       <Ico name="star" /> Ветеран: ранг {hud.sel.maxLevel} · убийств {hud.sel.totalKills}
+                    </div>
+                  )}
+                  {(hud.sel.types?.some(t => t.counter) ?? false) && (
+                    <div className="mt-0.5 text-[10px] font-semibold text-amber-200/85">
+                      <Ico name="swords" className="mr-1 inline h-3 w-3" />Контра: {[...new Set(hud.sel.types!.map(t => t.counter).filter(Boolean))].join(' · ')}
                     </div>
                   )}
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -1031,7 +1036,9 @@ function unitStats(k: string): string {
   const d = UNIT_DEFS[k as keyof typeof UNIT_DEFS] as unknown as { hp: number; atk: number; range: number; speed: number; desc?: string };
   if (!d) return '';
   const melee = d.range <= 60;
-  return `${d.desc ? d.desc + '\n' : ''}HP ${d.hp} · ATK ${d.atk} · ${melee ? 'ближний бой' : `дальность ${d.range}`} · скорость ${d.speed}`;
+  const base = `${d.desc ? d.desc + '\n' : ''}HP ${d.hp} · ATK ${d.atk} · ${melee ? 'ближний бой' : `дальность ${d.range}`} · скорость ${d.speed}`;
+  const ct = counterText(k as Parameters<typeof counterText>[0]);   // контры из единой боевой таблицы (п.21)
+  return ct ? `${base}\nКонтра: ${ct}` : base;
 }
 // цена постройки с учётом союзной скидки на дерево (ремесленные народы)
 function bldCostOf(k: keyof typeof BUILDING_DEFS, disc: number) {
