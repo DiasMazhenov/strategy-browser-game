@@ -1343,7 +1343,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
         {/* hero art: пункты-фичи живут НА самом баннере (нижняя лента поверх арта) */}
         <div className="kz-border-bottom relative overflow-hidden rounded-3xl border border-amber-200/25 shadow-[0_20px_80px_rgba(0,0,0,.55)]">
           <img src={heroKhanate} alt="Казахское Ханство — степь, юрты и конница на рассвете" className="h-64 w-full object-cover sm:h-80" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410] via-[#0c1410]/25 to-[#0c1410]/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1410]/70 via-[#0c1410]/25 to-[#0c1410]/30" />
           <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-black tracking-widest text-amber-200 backdrop-blur">
             <span className="relative flex h-2 w-2"><span className="absolute h-full w-full animate-ping rounded-full bg-lime-400 opacity-75" /><span className="h-2 w-2 rounded-full bg-lime-400" /></span>
             ВЕЛИКАЯ СТЕПЬ • ЖИВОЕ ПОЛЕ БОЯ • 60 КАДРОВ/С
@@ -1359,7 +1359,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
               { i: 'crown', c: 'text-amber-300', t: '4 эпохи ханства' },
               { i: 'handshake', c: 'text-sky-300', t: 'Дипломатия народов' },
             ] as const).map(f => (
-              <div key={f.t} className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-200/25 bg-black/30 px-2 py-2 text-[11px] font-bold text-slate-100 backdrop-blur sm:text-xs">
+              <div key={f.t} className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-200/25 bg-black/15 px-2 py-2 text-[11px] font-bold text-slate-100 backdrop-blur sm:text-xs">
                 <Ico name={f.i} className={`h-4 w-4 shrink-0 ${f.c}`} />{f.t}
               </div>
             ))}
