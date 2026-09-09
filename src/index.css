@@ -80,7 +80,25 @@ button, .btn-iron, .btn-gold { touch-action: manipulation; }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='10' viewBox='0 0 20 10'%3E%3Cg fill='%23f6d47c'%3E%3Cpath d='M1 1h1.4v8h-1.4z'/%3E%3Cpath d='M1 7.6h6v1.4h-6z'/%3E%3Cpath d='M5.6 3.4h1.4v4.2h-1.4z'/%3E%3Cpath d='M3 3.4h2.6v1.4h-2.6z'/%3E%3Cpath d='M17.6 1h1.4v8h-1.4z'/%3E%3Cpath d='M13 7.6h6v1.4h-6z'/%3E%3Cpath d='M13 3.4h1.4v4.2h-1.4z'/%3E%3Cpath d='M14.4 3.4h2.6v1.4h-2.6z'/%3E%3C/g%3E%3C/svg%3E");
 }
 .kz-border-top::before { top: 0; }
-.kz-border-bottom::after { bottom: 0; transform: scaleY(-1); }
+
+/* Нижняя кромка — авторский орнамент path76.svg (белое кружево на прозрачном
+   фоне): кладём файл как mask-image и заливаем золотом темы, чтобы узор
+   совпадал по цвету с остальной ковровой отделкой. Плитка 107×67 стыкуется
+   по горизонтали без шва; сплошная нить ленты ложится точно на кромку
+   панели, завитки поднимаются внутрь — поэтому без scaleY(-1). */
+.kz-border-bottom::after {
+  bottom: 0;
+  height: 16px;
+  background-image: none;
+  background-color: var(--kz-gold);
+  opacity: .55;
+  -webkit-mask-image: url("../assets/path76.svg");
+          mask-image: url("../assets/path76.svg");
+  -webkit-mask-repeat: repeat-x;
+          mask-repeat: repeat-x;
+  -webkit-mask-size: auto 100%;
+          mask-size: auto 100%;
+}
 
 /* Угол ҚОШҚАР МҮЙІЗ: пара встречных спиралей — «бараньи рога».
    Заливные каплевидные завитки, как на войлочных коврах (сырмақ). */
