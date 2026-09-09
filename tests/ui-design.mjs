@@ -51,6 +51,19 @@ console.log('\n=== 2b. Орнаменты — подлинные мотивы, �
   const cornerUri = /\.kz-corners::before,[\s\S]{0,900}?url\("data:image\/svg\+xml,([^"]+)"\)/.exec(css);
   ok(cornerUri && cornerUri[1].length > 900,
     `угловой мотив детализирован (${cornerUri ? cornerUri[1].length : 0} симв. пути)`);
+
+  // ГЛАВНЫЙ признак подлинности: рог — НЕПРЕРЫВНАЯ ЛЕНТА из общего основания,
+  // а не два оборванных полумесяца. Лента строится обводкой осевой линии
+  // (ribbon вокруг hornAxis); заливка сектора давала обрубки.
+  ok(/function ribbon/.test(gen) && /function hornAxis/.test(gen),
+    'рог = лента вокруг осевой линии (а не заливка сектора)');
+  ok(/hornAxis\(bx, by/.test(gen),
+    'оба рога выходят из ОБЩЕГО основания — фигура связанная');
+  ok(/function leaf/.test(gen), 'между рогами листик жапырақ, как на образцах');
+  // у ленты постоянной ширины путь длинный: осевая ~50 точек × 2 стороны
+  const decoded = cornerUri ? decodeURIComponent(cornerUri[1]) : '';
+  const pts = (decoded.match(/L/g) || []).length;
+  ok(pts > 150, `контур ленты плотный (${pts} узлов) — спираль гладкая, без углов`);
 }
 
 console.log('\n=== 3. Панели и кнопки получили фактуру ===');
