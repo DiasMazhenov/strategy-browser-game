@@ -250,6 +250,14 @@ function dmgMult(att: UnitKey, target: UnitKey): number {
   if (a === 'blunt' && t !== 'siege') return 0.7;   // катапульта по живому неэффективна
   return 1;
 }
+// ── Золотой/Тёмный век (п.22 плана): посвящения и пороги счёта эпохи ──
+export const DEDICATIONS = [
+  { id: 'kosh', name: 'Ұлы көш', icon: 'camel', desc: 'көш на 30% быстрее, войска на 5% быстрее' },
+  { id: 'daulet', name: 'Дәулет', icon: 'gold', desc: 'добыча ресурсов +15%, торговый доход +15%' },
+  { id: 'iman', name: 'Иман', icon: 'mosque', desc: 'мудрость +30%, имамы лечат и камлают на 25% быстрее' },
+] as const;
+export type DedicationId = typeof DEDICATIONS[number]['id'];
+const ERA_THRESHOLD = [0, 45, 70, 100];           // порог золотого века по номеру новой эпохи
 // какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
 const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'catapult'];
 export function counterText(k: UnitKey): string {
@@ -325,6 +333,8 @@ export interface AgeReport {
   powP: number; powE: number;                     // расклад сил с джунгарами
   unlocks: string[];                              // что открылось в новой эпохе
   score: number;                                  // очков набрано за эпоху
+  era: 'golden' | 'normal' | 'dark';              // век наступившей эпохи (п.22)
+  eraScore: number; eraThreshold: number; eraHeroic: boolean;
 }
 
 export interface HudSnapshot {
@@ -358,6 +368,8 @@ export interface HudSnapshot {
   unite: { have: number; need: number; t: number; hold: number };
   // великие люди: мудрость и карточки призыва
   wisdom: number; wisdomRate: number;
+  era: { state: 'normal' | 'golden' | 'dark'; heroic: boolean; dedication: string | null;
+         dedName: string; dedIcon: string; dedDesc: string };
   // азан по реальному времени: расписание на сегодня и ближайший намаз
   realAzan: { on: boolean; city: string; next: string; nextAt: string; inMin: number;
     times: { key: string; name: string; at: string; done: boolean }[] } | null;
@@ -494,6 +506,11 @@ export class Game {
   peaceT = 0;                    // время с прошлой войны (для требований мира)
   dipTimer = 0;                  // накопитель пересчёта
   morale = 1;                    // боевой дух армии ИИ (штраф за несправедливую войну)
+  // ── век эпохи (п.22 плана): назначается на переходе эпох по счёту деяний ──
+  eraState: 'normal' | 'golden' | 'dark' = 'normal';
+  eraDedication: DedicationId | null = null;       // выбранное посвящение золотого века
+  eraHeroic = false;                               // нынешний золотой век — героический (×1.5)
+  eraHeroicCharge = 0;                             // свершения, накопленные в тёмный век
   // ── расширенная дипломатия ──
   tradeRoute = false;            // действующий торговый договор с соседом
   tradeT = 0;                    // таймер начисления дохода с торговли
@@ -1106,10 +1123,21 @@ export class Game {
     r += this.relicsHeld * 0.8;
     // призванный Айтеке би ускоряет и саму «культурную» линию
     if (this.hasGreat('aiteke')) r *= 1.15;
-    return r;
+    return r * this.eraWisdomMult();        // Иман/тёмный век (п.22)
   }
 
   hasGreat(id: GreatId): boolean { return this.greatsCalled.includes(id); }
+
+  // ── множители века (п.22 плана) ──
+  private ded(id: DedicationId): number {
+    if (this.eraState !== 'golden' || this.eraDedication !== id) return 0;
+    return this.eraHeroic ? 1.5 : 1;               // героический век усиливает посвящение в полтора раза
+  }
+  eraGatherMult(): number { return this.eraState === 'dark' ? 0.9 : 1 + 0.15 * this.ded('daulet'); }
+  eraKoshMult(): number { return this.eraState === 'dark' ? 1.25 : 1 - 0.3 * this.ded('kosh'); }
+  eraWisdomMult(): number { return this.eraState === 'dark' ? 0.9 : 1 + 0.3 * this.ded('iman'); }
+  eraSpeedMult(): number { return this.eraState === 'dark' ? 0.97 : 1 + 0.05 * this.ded('kosh'); }
+  eraImanMult(): number { return 1 + 0.25 * this.ded('iman'); }
 
   updateWisdom(dt: number) {
     const rate = this.wisdomRate();
@@ -1295,7 +1323,7 @@ export class Game {
       if (this.tribeGoldT >= 8) {
         this.tribeGoldT = 0;
         // Казыбек би («торговля»): караваны идут чаще и с большим прибытком
-        this.res.gold += this.hasGreat('kazybek') ? 6 : 3;
+        this.res.gold += (this.hasGreat('kazybek') ? 6 : 3) * (1 + 0.15 * this.ded('daulet'));
         if (Math.random() < 0.35) this.sound.coin();
       }
     }
@@ -2490,6 +2518,7 @@ export class Game {
       dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT,
         uniteT: this.uniteT, uniteAnn: this.uniteAnn },
+      era: { s: this.eraState, d: this.eraDedication, h: this.eraHeroic, c: this.eraHeroicCharge },
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
@@ -2600,6 +2629,8 @@ export class Game {
       // добычу «с нуля» и следующий отчёт получился бы завышенным
       this.gotWood = d.gotWood || 0; this.gotFood = d.gotFood || 0; this.gotGold = d.gotGold || 0;
       if (d.ageMark) this.ageMark = d.ageMark;
+      if (d.era) { this.eraState = d.era.s ?? 'normal'; this.eraDedication = d.era.d ?? null;
+        this.eraHeroic = !!d.era.h; this.eraHeroicCharge = d.era.c ?? 0; }
       this.soldiersTrained = d.soldiersTrained || 0; this.barracksBuilt = d.barracksBuilt || 0; this.wolvesSlain = d.wolvesSlain || 0;
       this.relicsHeld = d.relicsHeld || 0;
       this.wisdom = d.wisdom || 0;
@@ -3338,7 +3369,7 @@ export class Game {
   }
   startKosh(i: number) {
     if (this.mode !== 'nomad' || this.migrating > 0 || i === this.siteI || !this.sites[i]) return;
-    this.migrating = 20; this.koshTarget = i;
+    this.migrating = Math.max(5, Math.round(20 * this.eraKoshMult())); this.koshTarget = i; // Ұлы көш (п.22)
     this.pushBanner('{i:camel} Аттан! Көш собирается', 'Производство и стройка паузятся на 20 секунд марша');
   }
   private doKosh() {
@@ -3700,6 +3731,24 @@ export class Game {
     this.pushBanner(`{i:${next.icon}} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
     this.burst(HOME.x, HOME.y, 40, ['#f6d47c', '#fff'], 160);
     this.checkQuests();
+    // ── ВЕК ЭПОХИ (п.22 плана): золотой / ровный / тёмный по счёту деяний ──
+    const eraScore = Math.max(0, Math.round((this.kills - this.ageMark.kills) * 3
+      + (this.builtCount - this.ageMark.built) * 2
+      + (this.razed - this.ageMark.razed) * 4
+      + (this.gotGold - this.ageMark.gold) / 40
+      + Math.max(0, this.score - this.ageMark.score - SCORE.ageUp * this.age) / 12));
+    const eraThreshold = ERA_THRESHOLD[this.age] ?? 100;
+    let eraState: 'golden' | 'normal' | 'dark' = eraScore >= eraThreshold ? 'golden'
+      : eraScore >= eraThreshold * 0.5 ? 'normal' : 'dark';
+    let eraHeroic = false;
+    if (this.eraState === 'dark') this.eraHeroicCharge += Math.round(eraScore * 0.6);
+    if (this.eraHeroicCharge >= eraThreshold * 0.8 && eraState !== 'dark') {
+      // свершения трудных лет выковали героический век
+      eraState = 'golden'; eraHeroic = true; this.eraHeroicCharge = 0;
+    } else if (eraState !== 'dark') this.eraHeroicCharge = 0;
+    this.eraState = eraState; this.eraHeroic = eraHeroic; this.eraDedication = null;
+    if (eraState === 'golden') this.pushBanner(`{i:${eraHeroic ? 'crown' : 'sun'}} ${eraHeroic ? 'ГЕРОИЧЕСКИЙ ВЕК!' : 'ЗОЛОТОЙ ВЕК!'}`, 'Выберите посвящение в свитке эпохи', 4);
+    else if (eraState === 'dark') this.pushBanner('{i:moon} Тёмный век', 'Добыча −10%, тропы тяжелы. Свершения куют героический век', 4);
     // ── ЭКРАН ИТОГОВ ЭПОХИ (пункт 10 плана) ──
     // Сводка за прожитую эпоху: всё считаем как разницу с меткой на её входе,
     // поэтому цифры относятся именно к этой эпохе, а не ко всей партии.
@@ -3723,6 +3772,7 @@ export class Game {
       powP: Math.round(this.milStrength('player')), powE: Math.round(this.milStrength('enemy')),
       unlocks: unlocks[this.age] ?? [],
       score: Math.round(this.score - this.ageMark.score),
+      era: eraState, eraScore, eraThreshold, eraHeroic,
     };
     // метка для следующей эпохи
     this.ageMark = { t: this.time, wood: this.gotWood, food: this.gotFood, gold: this.gotGold,
@@ -3731,7 +3781,19 @@ export class Game {
   }
 
   // Закрыть экран итогов эпохи (кнопка «Вести ханство дальше»).
-  closeAgeReport() { this.ageReport = null; this.sound.select(); this.pushHud(); }
+  closeAgeReport() {
+    // золотой век требует посвящения — свиток не закрывается, пока не выбрано (п.22)
+    if (this.ageReport?.era === 'golden' && this.eraState === 'golden' && !this.eraDedication) return;
+    this.ageReport = null; this.sound.select(); this.pushHud();
+  }
+  chooseDedication(id: DedicationId) {
+    if (this.eraState !== 'golden' || this.eraDedication) return;
+    this.eraDedication = id;
+    const d = DEDICATIONS.find(x => x.id === id);
+    if (d) this.pushBanner(`{i:${d.icon}} ${this.eraHeroic ? 'Героический век' : 'Золотой век'}: ${d.name}`, d.desc, 4);
+    this.sound.ageup();
+    this.closeAgeReport();
+  }
 
   // ---------- selection helpers ----------
   selUnits(): Unit[] {
@@ -3861,7 +3923,8 @@ export class Game {
   }
   deposit(v: Unit) {
     if (v.carry.amt <= 0) return;
-    const amt = Math.floor(v.carry.amt);
+    let amt = Math.floor(v.carry.amt);
+    if (v.owner === 'player') amt = Math.max(1, Math.round(amt * this.eraGatherMult())); // Дәулет/тёмный век (п.22)
     // ФИКС: сдача идёт в казну ВЛАДЕЛЬЦА. Раньше добыча вражеских шаруа капала игроку
     // (updateVillager крутится для обеих сторон, а deposit писал только в this.res).
     const bank = v.owner === 'enemy' ? this.eres : this.res;
@@ -4269,7 +4332,7 @@ export class Game {
     // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
     const midC = this.terrain.classAt(u.x + dx / 2, u.y + dy / 2);
     const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
-    const s = Math.min(u.speed * wade * dt, d);
+    const s = Math.min(u.speed * wade * this.eraSpeedMult() * dt, d);
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
     // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
     if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
@@ -5542,7 +5605,7 @@ export class Game {
           return;
         }
         // стоим и камлаем
-        u.convT = (u.convT ?? 0) + dt;
+        u.convT = (u.convT ?? 0) + dt * this.eraImanMult();
         t!.convertedBy = u.id;
         t!.convProg = Math.min(1, u.convT / this.CONV_TIME);
         u.atkAnim = Math.min(1, u.atkAnim + dt * 3);
@@ -5584,7 +5647,7 @@ export class Game {
       }
       if (best) {
         u.cd = 1.1;
-        const heal = 22;
+        const heal = Math.round(22 * this.eraImanMult());
         best.hp = Math.min(best.maxHp, best.hp + heal);
         u.atkAnim = 1; u.face = best.x >= u.x ? 1 : -1;
         this.sound.heal();
@@ -6691,6 +6754,11 @@ export class Game {
       unite: { have: this.uniteCount(), need: this.UNITE_NEED,
         t: Math.floor(this.uniteT), hold: this.UNITE_HOLD },
       wisdom: Math.floor(this.wisdom), wisdomRate: Math.round(this.wisdomRate() * 10) / 10,
+      era: (() => {
+        const d = this.eraDedication ? DEDICATIONS.find(x => x.id === this.eraDedication) : undefined;
+        return { state: this.eraState, heroic: this.eraHeroic, dedication: this.eraDedication,
+                 dedName: d?.name ?? '', dedIcon: d?.icon ?? '', dedDesc: d?.desc ?? '' };
+      })(),
       // ближнее время намаза показываем ВСЕГДА (справочно), on = включена ли механика
       realAzan: (() => {
         const nx = nextPrayer(new Date(), this.azanCity());

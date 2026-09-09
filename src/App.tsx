@@ -5,7 +5,7 @@ import {
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
-import { Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
+import { DEDICATIONS, Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
 import { PLAYER_NATION } from './game/nations';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
@@ -224,6 +224,17 @@ export default function App() {
             <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-xl px-4 py-1.5 text-xs font-bold">
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
               <span className="flex items-center gap-1 text-slate-300" title={`Реальное время партии: ${fmtTime(hud?.timeSec ?? 0)}`}><Clock className="h-3.5 w-3.5" />{gameClock(hud?.day?.phase ?? 0)}</span>
+              {hud?.era && hud.era.state !== 'normal' && (
+                <span className={`flex items-center gap-1 ${hud.era.state === 'golden' ? 'text-amber-300' : 'text-slate-400'}`}
+                      title={hud.era.state === 'golden'
+                        ? `${hud.era.heroic ? 'Героический' : 'Золотой'} век${hud.era.dedName ? ` · ${hud.era.dedName}: ${hud.era.dedDesc}` : ''}`
+                        : 'Тёмный век: добыча −10%, войска и көш медленнее. Свершения куют героический век'}>
+                  <Ico name={hud.era.state === 'golden' ? (hud.era.dedIcon || (hud.era.heroic ? 'crown' : 'sun')) : 'moon'} className="h-3.5 w-3.5" />
+                  {hud.era.state === 'golden'
+                    ? `${hud.era.heroic ? 'Героический' : 'Золотой'} век${hud.era.dedName ? ` · ${hud.era.dedName}` : ''}`
+                    : 'Тёмный век'}
+                </span>
+              )}
               {/* Счётчик волны — только во время войны. В мире набеги не идут
                   (движок крутит waveT лишь при atWar), и отсчёт до несуществующей
                   атаки только пугал игрока зря. */}
@@ -937,10 +948,42 @@ export default function App() {
               </div>
             )}
 
+            {/* ВЕК ЭПОХИ (п.22 плана): золотой — выбор посвящения, тёмный — тяготы */}
+            <div className={`mb-4 rounded-xl border px-3 py-2 ${hud.ageReport.era === 'golden' ? 'border-amber-300/50 bg-amber-400/10' : hud.ageReport.era === 'dark' ? 'border-slate-500/40 bg-slate-700/20' : 'border-white/10 bg-white/5'}`}>
+              {hud.ageReport.era === 'golden' ? (
+                <>
+                  <div className="mb-1 flex items-center gap-1.5 text-[12px] font-black tracking-widest text-amber-300">
+                    <Ico name={hud.ageReport.eraHeroic ? 'crown' : 'sun'} className="h-4 w-4" />
+                    {hud.ageReport.eraHeroic ? 'ГЕРОИЧЕСКИЙ ВЕК (×1.5)' : 'ЗОЛОТОЙ ВЕК'}
+                    <span className="ml-auto text-[10px] font-bold text-slate-300">счёт эпохи {hud.ageReport.eraScore}/{hud.ageReport.eraThreshold}</span>
+                  </div>
+                  <div className="mb-1.5 text-[10px] text-slate-300">Выберите посвящение — оно поведёт ханство до следующего перехода эпохи:</div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {DEDICATIONS.map(d => (
+                      <button key={d.id} onClick={() => gameRef.current?.chooseDedication(d.id)}
+                        className="rounded-lg border border-amber-300/40 bg-black/30 px-1.5 py-1.5 text-left transition hover:bg-amber-400/15">
+                        <div className="flex items-center gap-1 text-[11px] font-black text-amber-200"><Ico name={d.icon} className="h-3.5 w-3.5" />{d.name}</div>
+                        <div className="mt-0.5 text-[9px] leading-tight text-slate-400">{d.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : hud.ageReport.era === 'dark' ? (
+                <div className="flex items-start gap-2 text-[11px] leading-snug text-slate-300">
+                  <Ico name="moon" className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                  <span><b className="text-slate-200">Тёмный век</b> (счёт эпохи {hud.ageReport.eraScore}/{hud.ageReport.eraThreshold}): добыча −10%, войска и көш медленнее. Свершения в трудные годы куют <b className="text-amber-300">героический век</b> на следующем переходе.</span>
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400">Век ровный (счёт эпохи {hud.ageReport.eraScore}/{hud.ageReport.eraThreshold}) — ни славы золотого, ни тягот тёмного.</div>
+              )}
+            </div>
+
+            {hud.ageReport.era !== 'golden' && (
             <button onClick={() => gameRef.current?.closeAgeReport()}
               className="w-full rounded-2xl border border-amber-300/40 bg-amber-400/15 py-2.5 text-[13px] font-black tracking-wide text-amber-100 transition hover:bg-amber-400/25">
               Вести ханство дальше →
             </button>
+            )}
           </div>
         </div>
       )}
