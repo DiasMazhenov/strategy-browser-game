@@ -14,6 +14,22 @@ node tests/horsearcher-sim.mjs # атты-мерген: контры, кайт, 
 node tests/bandits-sim.mjs     # лагеря бандитов: набеги, лут, респавн, сейв (1.0.106)
 node tests/siege-sim.mjs       # таран: стены/ворота, стойкость к стрелам, ИИ (1.0.107)
 node tests/gunpowder-sim.mjs   # порох: мылтықшы без брони, фальконет сплеш (1.0.108)
+node tests/strategy-sim.mjs    # чудеса природы + кони/железо: аура, контроль, найм (1.0.109)
+node tests/caravan-bell-sim.mjs # колокол ставки + грабёж каравана: конвой, лут (1.0.110)
+node tests/yasa-eureka-sim.mjs  # яса: карточки политик + эврики техов (1.0.111)
+node tests/dynamic-ai-sim.mjs   # динамический ИИ: решимость, коалиции (1.0.112)
+node tests/faith-sim.mjs        # религиозная победа: вера, миссионеры (1.0.113)
+node tests/tribal-units-sim.mjs # уникальные юниты племён за сюзеренитет (1.0.114)
+node tests/orda-sim.mjs         # хан орда: мобильная столица кочевника (1.0.115)
+node tests/campaign-sim.mjs     # главы истории: сценарная кампания (1.0.116)
+node tests/kurultai-sim.mjs     # курултай: бии, законы, авторитет (1.0.117)
+node tests/tel-sim.mjs          # төл: приплод, выпас, шерсть и войлок (1.0.118)
+node tests/kys-sim.mjs          # қыс: зима, сезоны, войлочная изоляция (1.0.119)
+node tests/kerven-sim.mjs       # керуен: караваны, цены, засады (1.0.120)
+node tests/barlau-sim.mjs       # барлаушы: дозоры и саботаж (1.0.121)
+node tests/amanat-sim.mjs       # аманат, свадьбы, двор ханства (1.0.122)
+node tests/zhirau-sim.mjs       # жырау: дастан о партии (1.0.123)
+node tests/toy-sim.mjs          # той: байга, көкпар, асык (1.0.124)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —

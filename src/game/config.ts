@@ -20,13 +20,17 @@ export const UNIT_DEFS = {
   swordsman:   { name: 'Сарбаз',      hp: 110, atk: 11, range: 28,  speed: 132, cost: { food: 70, wood: 0, gold: 20 },  trainTime: 9,  pop: 1, gather: false, desc: 'Воин ханского ополчения с саблей', bld: 'barracks', ageReq: 0 },
   spearman:    { name: 'Найзагер',    hp: 150, atk: 13, range: 34,  speed: 118, cost: { food: 60, wood: 0, gold: 30 },  trainTime: 10, pop: 1, gather: false, desc: 'Копейщик — стена против конницы', bld: 'barracks', ageReq: 0 },
   archer:      { name: 'Мерген',      hp: 70,  atk: 9,  range: 175, speed: 126, cost: { food: 0, wood: 45, gold: 55 },  trainTime: 10, pop: 1, gather: false, desc: 'Меткий стрелок из степного лука', bld: 'barracks', ageReq: 0 },
-  knight:      { name: 'Батыр',       hp: 190, atk: 16, range: 30,  speed: 178, cost: { food: 90, wood: 0, gold: 70 },  trainTime: 13, pop: 1, gather: false, desc: 'Прославленный воин-богатырь на коне', bld: 'barracks', ageReq: 1 },
-  cavalry:     { name: 'Жасауыл',     hp: 250, atk: 19, range: 30,  speed: 200, cost: { food: 90, wood: 0, gold: 90 },  trainTime: 15, pop: 1, gather: false, desc: 'Тяжёлая конница — стремительный удар', bld: 'stable', ageReq: 1 },
-  horsearcher: { name: 'Атты-мерген', hp: 130, atk: 10, range: 150, speed: 205, cost: { food: 70, wood: 40, gold: 70 }, trainTime: 14, pop: 1, gather: false, desc: 'Конный лучник: стреляет на ходу, после залпа отскакивает от пехоты (жалған шегініс). Слаб вблизи, боится найзагеров', bld: 'stable', ageReq: 2 },
+  knight:      { name: 'Батыр',       hp: 190, atk: 16, range: 30,  speed: 178, cost: { food: 90, wood: 0, gold: 70 },  trainTime: 13, pop: 1, gather: false, desc: 'Прославленный воин-богатырь на коне. Нужны кони и железо', bld: 'barracks', ageReq: 1 },
+  cavalry:     { name: 'Жасауыл',     hp: 250, atk: 19, range: 30,  speed: 200, cost: { food: 90, wood: 0, gold: 90 },  trainTime: 15, pop: 1, gather: false, desc: 'Тяжёлая конница — стремительный удар. Нужен табун коней под контролем', bld: 'stable', ageReq: 1 },
+  horsearcher: { name: 'Атты-мерген', hp: 130, atk: 10, range: 150, speed: 205, cost: { food: 70, wood: 40, gold: 70 }, trainTime: 14, pop: 1, gather: false, desc: 'Конный лучник: стреляет на ходу, после залпа отскакивает от пехоты (жалған шегініс). Слаб вблизи, боится найзагеров. Нужен табун коней', bld: 'stable', ageReq: 2 },
   ram:         { name: 'Таран',       hp: 320, atk: 30, range: 34,  speed: 62,  cost: { food: 0, wood: 140, gold: 40 }, trainTime: 18, pop: 2, gather: false, desc: 'Осадный таран: ×3 по стенам и воротам, стрелы почти не берут (−60%). По живым бесполезен — прикрывайте пехотой', bld: 'blacksmith', ageReq: 1 },
-  musketeer:   { name: 'Мылтықшы',    hp: 95,  atk: 26, range: 200, speed: 120, cost: { food: 40, wood: 0, gold: 95 },  trainTime: 14, pop: 1, gather: false, desc: 'Стрелок с фитильным мылтық: тяжёлая пуля пробивает любую броню (контры не действуют), но заряжает долго и беспомощен вблизи', bld: 'barracks', ageReq: 3 },
-  falconet:    { name: 'Фальконет',   hp: 140, atk: 34, range: 240, speed: 64,  cost: { food: 0, wood: 90, gold: 180 }, trainTime: 22, pop: 2, gather: false, desc: 'Лёгкая пушка: ядро бьёт по площади — рвёт плотный строй, но по одиночкам и постройкам слаба', bld: 'blacksmith', ageReq: 3 },
+  musketeer:   { name: 'Мылтықшы',    hp: 95,  atk: 26, range: 200, speed: 120, cost: { food: 40, wood: 0, gold: 95 },  trainTime: 14, pop: 1, gather: false, desc: 'Стрелок с фитильным мылтық: тяжёлая пуля пробивает любую броню (контры не действуют), но заряжает долго и беспомощен вблизи. Нужно железо', bld: 'barracks', ageReq: 3 },
+  falconet:    { name: 'Фальконет',   hp: 140, atk: 34, range: 240, speed: 64,  cost: { food: 0, wood: 90, gold: 180 }, trainTime: 22, pop: 2, gather: false, desc: 'Лёгкая пушка: ядро бьёт по площади — рвёт плотный строй, но по одиночкам и постройкам слаба. Нужно железо', bld: 'blacksmith', ageReq: 3 },
   catapult:    { name: 'Катапульта',  hp: 160, atk: 46, range: 285, speed: 58,  cost: { food: 0, wood: 120, gold: 120 }, trainTime: 20, pop: 2, gather: false, desc: 'Осадная машина: сносит здания издалека', bld: 'blacksmith', ageReq: 2 },
+  camelry:     { name: 'Верблюжий лучник', hp: 145, atk: 11, range: 160, speed: 190, cost: { food: 80, wood: 40, gold: 90 }, trainTime: 15, pop: 1, gather: false, desc: 'Хорезмский уникальный конный (верблюжий) лучник: залп с дистанции и высокая скорость. Найм открыт при сюзеренитете Хорезма', bld: 'stable', ageReq: 2, tribeOf: 'khwarezm' },
+  oghuzguard:  { name: 'Огузский ширбаш',  hp: 195, atk: 15, range: 34,  speed: 112, cost: { food: 70, wood: 20, gold: 55 }, trainTime: 12, pop: 1, gather: false, desc: 'Тяжёлый найзагер огузов: живучая стена против конницы. Найм открыт при сюзеренитете огузов', bld: 'barracks', ageReq: 1, tribeOf: 'oghuz' },
+  druzhinnik:  { name: 'Дружинник',        hp: 165, atk: 14, range: 28,  speed: 128, cost: { food: 75, wood: 0, gold: 50 },  trainTime: 12, pop: 1, gather: false, desc: 'Славянский дружинник: крепкая линейная пехота с мечом. Найм открыт при сюзеренитете Руси', bld: 'barracks', ageReq: 1, tribeOf: 'russia' },
+  mirza:       { name: 'Бухарский мирза',  hp: 60,  atk: 4,  range: 22,  speed: 124, cost: { food: 60, wood: 0, gold: 65 },  trainTime: 11, pop: 1, gather: false, desc: 'Учёный строитель Бухары: возводит постройки как двое шаруа. Найм открыт при сюзеренитете Бухары', bld: 'towncenter', ageReq: 0, tribeOf: 'bukhara' },
   monk:        { name: 'Имам',        hp: 50,  atk: 0,  range: 135, speed: 108, cost: { food: 0, wood: 0, gold: 110 },  trainTime: 14, pop: 1, gather: false, desc: 'Служитель мечети — лечит ваше войско', bld: 'mosque', ageReq: 0 },
   trader:      { name: 'Көпес (торговец)', hp: 90, atk: 0, range: 16, speed: 104, cost: { food: 0, wood: 0, gold: 80 }, trainTime: 12, pop: 1, gather: false, desc: 'Караванщик: возит товар в дружественные города и племена — привозит золото', bld: 'market', ageReq: 0 },
   scout:       { name: 'Барлаушы',    hp: 60,  atk: 6,  range: 26,  speed: 196, cost: { food: 60, wood: 0, gold: 10 },   trainTime: 8,  pop: 1, gather: false, desc: 'Разведчик: открывает карту, ищет становища народов, обороняется; авто-разведка', bld: 'towncenter', ageReq: 0 },
@@ -39,17 +43,21 @@ export const UNIT_DEFS = {
 export type UnitKey = keyof typeof UNIT_DEFS;
 
 // ── Технологии (исследуются в зданиях) ──
-export interface TechDef { id: string; name: string; desc: string; bld: BuildingKey; ageReq: number; cost: { wood: number; food: number; gold: number }; time: number; icon: string }
+export interface TechDef {
+  id: string; name: string; desc: string; bld: BuildingKey; ageReq: number;
+  cost: { wood: number; food: number; gold: number }; time: number; icon: string;
+  eureka?: string;  // условие-ускорение (Civ VI Boosts, п.39): выполнил — цена −40% (арба — бесплатно)
+}
 export const TECHS: Record<string, TechDef> = {
-  sharpBlades: { id: 'sharpBlades', name: 'Дамасские сабли', desc: '+25% к атаке всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 0, food: 120, gold: 150 }, time: 20, icon: 'swords' },
-  forgedArmor:  { id: 'forgedArmor', name: 'Кольчуга батыра', desc: '+25% к здоровью всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 150, food: 0, gold: 150 }, time: 20, icon: 'shield' },
-  infantryDrill:{ id: 'infantryDrill', name: 'Выучка сарбазов', desc: '+15% к скорости пехоты', bld: 'barracks', ageReq: 0, cost: { wood: 0, food: 150, gold: 60 }, time: 18, icon: 'medal' },
-  eagleEye:     { id: 'eagleEye', name: 'Глаз беркута', desc: '+20% к дальности стрелков и башен', bld: 'barracks', ageReq: 1, cost: { wood: 100, food: 0, gold: 120 }, time: 18, icon: 'eagle' },
-  horseBreeding:{ id: 'horseBreeding', name: 'Аргамаки', desc: '+15% к скорости и HP конницы', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 180, gold: 140 }, time: 22, icon: 'horse' },
-  heavyShot:    { id: 'heavyShot', name: 'Тяжёлые снаряды', desc: '+35% к урону катапульт', bld: 'blacksmith', ageReq: 2, cost: { wood: 200, food: 0, gold: 200 }, time: 24, icon: 'stone' },
-  ironTools:    { id: 'ironTools', name: 'Железные орудия', desc: '+30% к скорости добычи', bld: 'towncenter', ageReq: 0, cost: { wood: 120, food: 0, gold: 80 }, time: 16, icon: 'pick' },
-  wheelbarrow:  { id: 'wheelbarrow', name: 'Арба', desc: 'Шаруа переносят больше груза', bld: 'towncenter', ageReq: 0, cost: { wood: 100, food: 60, gold: 0 }, time: 16, icon: 'wheel' },
-  coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: 'gold' },
+  sharpBlades: { id: 'sharpBlades', name: 'Дамасские сабли', desc: '+25% к атаке всей армии', eureka: 'убить 25 врагов — сабли −40% золота', bld: 'blacksmith', ageReq: 1, cost: { wood: 0, food: 120, gold: 150 }, time: 20, icon: 'swords' },
+  forgedArmor:  { id: 'forgedArmor', name: 'Кольчуга батыра', desc: '+25% к здоровью всей армии', eureka: 'дожить до 3-й волны — кольчуга −40%', bld: 'blacksmith', ageReq: 1, cost: { wood: 150, food: 0, gold: 150 }, time: 20, icon: 'shield' },
+  infantryDrill:{ id: 'infantryDrill', name: 'Выучка сарбазов', desc: '+15% к скорости пехоты', eureka: 'обучить 15 воинов — выучка −40%', bld: 'barracks', ageReq: 0, cost: { wood: 0, food: 150, gold: 60 }, time: 18, icon: 'medal' },
+  eagleEye:     { id: 'eagleEye', name: 'Глаз беркута', desc: '+20% к дальности стрелков и башен', eureka: 'поставить 2 башни — глаз беркута −40%', bld: 'barracks', ageReq: 1, cost: { wood: 100, food: 0, gold: 120 }, time: 18, icon: 'eagle' },
+  horseBreeding:{ id: 'horseBreeding', name: 'Аргамаки', desc: '+15% к скорости и HP конницы', eureka: 'собрать 8 конных — аргамаки −40%', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 180, gold: 140 }, time: 22, icon: 'horse' },
+  heavyShot:    { id: 'heavyShot', name: 'Тяжёлые снаряды', desc: '+35% к урону катапульт', eureka: 'снести 3 постройки джунгар — снаряды −40%', bld: 'blacksmith', ageReq: 2, cost: { wood: 200, food: 0, gold: 200 }, time: 24, icon: 'stone' },
+  ironTools:    { id: 'ironTools', name: 'Железные орудия', desc: '+30% к скорости добычи', eureka: 'собрать 800 дерева — орудия −40%', bld: 'towncenter', ageReq: 0, cost: { wood: 120, food: 0, gold: 80 }, time: 16, icon: 'pick' },
+  wheelbarrow:  { id: 'wheelbarrow', name: 'Арба', desc: 'Шаруа переносят больше груза', eureka: 'вспахать 3 пашни — арба бесплатно', bld: 'towncenter', ageReq: 0, cost: { wood: 100, food: 60, gold: 0 }, time: 16, icon: 'wheel' },
+  coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', eureka: 'заработать 400 золота за партию — чеканка −40%', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: 'gold' },
 };
 
 // ── ЛИНИИ АПГРЕЙДА ЮНИТОВ (AoE) ────────────────────────────────────────────
@@ -96,6 +104,7 @@ export const BUILDING_DEFS = {
   pen:        { name: 'Загон для скота', hp: 380, size: 110, cost: { wood: 160, food: 0, gold: 0 }, buildTime: 12, sight: 170, attack: null, desc: 'Пастух пригоняет сюда овец и коров' },
   wall:       { name: 'Дуал (стена)',  hp: 900,  size: 44,  cost: { wood: 30, food: 0, gold: 0 }, buildTime: 5,  sight: 120, attack: null, desc: 'Саманная стена преграждает путь врагам' },
   gate:       { name: 'Ворота',        hp: 600,  size: 44,  cost: { wood: 45, food: 0, gold: 0 }, buildTime: 6,  sight: 130, attack: null, desc: 'Проход для своих, стена для врага' },
+  orda:       { name: 'Хан орда',      hp: 2400, size: 108, cost: { wood: 380, food: 0, gold: 220 }, buildTime: 30, sight: 300, attack: { dmg: 14, range: 220, cd: 1.2 }, desc: 'Золотая орда 3-й эпохи: тяжёлая оборона, точка сдачи добычи, найм батыров и атты-мергенов, гарнизон 12', ageReq: 2 },
   wonder:     { name: 'Мавзолей хана', hp: 3000, size: 130, cost: { wood: 600, food: 600, gold: 900 }, buildTime: 40, sight: 360, attack: null, desc: 'Великий монумент степи — постройте для победы', ageReq: 3 },
 } as const;
 
@@ -108,6 +117,65 @@ export const DIFF = {
 } as const;
 
 export type GameSpeed = 0.75 | 1 | 1.5 | 2;
+
+// ── Главы истории (п.34): сценарная кампания по вехам Ханства ──
+export interface CampaignObj { t: string; type: 'kills' | 'age' | 'pop' | 'suzerain' | 'converted' | 'bld' | 'kosh'; n?: number; key?: string }
+export interface CampaignDef {
+  id: string; part: string; title: string; years: string; brief: string;
+  mode: 'settled' | 'nomad';
+  give?: { wood?: number; food?: number; gold?: number };
+  startAge?: number;
+  units?: { key: UnitKey; n: number }[];
+  objs: CampaignObj[];
+}
+export const CAMPAIGNS: CampaignDef[] = [
+  {
+    id: 'khanate1465', part: 'Глава I', title: 'Қазақ хандығы', years: '1465',
+    brief: 'Керей и Жанибек откочёвывают от Абулхаира в Жетысу. Семь лет в долине Чу — и первое ханство степи. Поднимите аул с нуля.',
+    mode: 'settled', give: { wood: 400, food: 300 },
+    objs: [
+      { t: 'Поставить 2 юрты для народа', type: 'bld', key: 'house', n: 2 },
+      { t: 'Народ до 14 душ', type: 'pop', n: 14 },
+      { t: 'Наступить Век батыров', type: 'age', n: 1 },
+      { t: 'Первая кровь: 10 врагов', type: 'kills', n: 10 },
+    ],
+  },
+  {
+    id: 'jungar1643', part: 'Глава II', title: 'Жоңғар шапқыншылығы', years: '1643',
+    brief: 'Первые джунгарские тумены выходят к Балхашу. Аул спасают движением и союзами: кочуй, заводи посланников, бей набеги.',
+    mode: 'nomad', units: [{ key: 'horsearcher', n: 2 }],
+    objs: [
+      { t: 'Көш на новый жайляу', type: 'kosh', n: 1 },
+      { t: 'Конюшня для атты-мергенов', type: 'bld', key: 'stable', n: 1 },
+      { t: 'Сюзеренитет у одного народа (6 посланников)', type: 'suzerain', n: 1 },
+      { t: 'Отбить набеги: 20 врагов', type: 'kills', n: 20 },
+    ],
+  },
+  {
+    id: 'anyrakay1726', part: 'Глава III', title: 'Аңырақай шайқасы', years: '1726',
+    brief: 'Год великого побоища: ополчение трёх жузов громит джунгар у Аңырақая. Хан орда, союзники, вера — и степь вернётся.',
+    mode: 'settled', startAge: 2, give: { wood: 600, gold: 300 },
+    units: [{ key: 'swordsman', n: 3 }, { key: 'horsearcher', n: 3 }],
+    objs: [
+      { t: 'Поставить Хан орду', type: 'bld', key: 'orda', n: 1 },
+      { t: 'Сюзеренитет у двух народов', type: 'suzerain', n: 2 },
+      { t: 'Обратить один народ в ислам', type: 'converted', n: 1 },
+      { t: 'Аңырақай: 40 врагов', type: 'kills', n: 40 },
+    ],
+  },
+];
+
+// ── Құрылтай (п.13): законы степи — глобальные модификаторы до следующего совета ──
+export interface LawDef { id: string; name: string; desc: string }
+export const LAW_DEFS: LawDef[] = [
+  { id: 'nalog',  name: 'Шақырым — ясачный сбор', desc: 'Казна: +0,5 золота/с, но народ ропщет (добыча −5%)' },
+  { id: 'mobil',  name: 'Всеобщая мобилизация',   desc: 'Сарбазы готовятся на 25% быстрее, добыча −5%' },
+  { id: 'toler',  name: 'Веротерпимость',         desc: 'Слово имамов слушают охотнее: вера +30%' },
+  { id: 'asylum', name: 'Право убежища',          desc: 'Юрта хана открыта беглецам: +2 к пределу населения' },
+  { id: 'erk',    name: 'Степная вольница',       desc: 'Все ходят быстрее (+8%), но бии слабеют (авторитет тает вдвое)' },
+  { id: 'asar',   name: 'Асар — взаимопомощь',    desc: 'Весь аул выходит на стройку: здания растут на 15% быстрее' },
+];
+export const LAW_BY_ID: Record<string, LawDef> = Object.fromEntries(LAW_DEFS.map(l => [l.id, l]));
 
 // ── Настройки игрока (хранятся в localStorage, применяются на лету) ──
 export interface Settings {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Axe, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
@@ -6,7 +6,8 @@ import {
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
 import { DEDICATIONS, Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
-import { PLAYER_NATION } from './game/nations';
+import { PLAYER_NATION, NATION_BY_ID } from './game/nations';
+import { CAMPAIGNS } from './game/config';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
@@ -71,6 +72,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [dockTab, setDockTab] = useState<'units' | 'build'>('units');
+  const [showToy, setShowToy] = useState(false);   // той (п.20)
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [koshOpen, setKoshOpen] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -84,6 +86,7 @@ export default function App() {
     typeof window === 'undefined' || !matchMedia('(pointer: coarse)').matches);
   const [showTech, setShowTech] = useState(false);
   const [showGreats, setShowGreats] = useState(false);
+  const [showYasa, setShowYasa] = useState(false);
   const [showDip, setShowDip] = useState(false);
   const [gameId, setGameId] = useState(0);
   const [loadSave, setLoadSave] = useState(false);
@@ -103,6 +106,8 @@ export default function App() {
       if ((k === 'l' || k === 'д') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowTech(s => !s);
       // J (рус. О) — совет великих людей
       if ((k === 'j' || k === 'о') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowGreats(s => !s);
+      // O (рус. Щ) — Яса: карточки политик
+      if ((k === 'o' || k === 'щ') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowYasa(s => !s);
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -131,6 +136,7 @@ export default function App() {
     setGameId(g => g + 1);
   }, []);
 
+  const campRef = useRef<string | null>(null);
   const startGame = useCallback((d?: Difficulty, resume = false) => {
     if (d) setSettings(prev => { const next = { ...prev, difficulty: d }; try { localStorage.setItem(LS_SETTINGS, JSON.stringify(next)); } catch { /* noop */ } return next; });
     setLoadSave(resume);
@@ -148,8 +154,12 @@ export default function App() {
     if (!canvas) return;
     const game = new Game(canvas, {
       settings, loadSave,
+      campaign: campRef.current ?? undefined,   // глава кампании (п.34)
       onHud: (h) => setHud(h),
       onGameOver: (s) => {
+        if (s.campId && s.result === 'victory') {
+          try { localStorage.setItem('khanate-camp-' + s.campId, '1'); } catch { /* noop */ }
+        }
         setOver(s);
         setScores(loadScores());
       },
@@ -193,6 +203,7 @@ export default function App() {
       scores={scores} settings={settings} updateSettings={updateSettings}
       onPlay={() => startGame()}
       onResume={() => startGame(undefined, true)}
+      onPlayCampaign={(id) => { campRef.current = id; startGame(); }}
     />
   );
 
@@ -217,6 +228,15 @@ export default function App() {
             <div className="ml-1 flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs font-bold sm:hidden">
               <Users className="h-3.5 w-3.5 text-sky-300" />{hud?.pop ?? 0}/{hud?.popCap ?? 10}
             </div>
+            {hud?.camp && (
+              <div className="pointer-events-auto ml-2 hidden rounded-xl border border-amber-400/30 bg-black/55 px-2.5 py-1 text-[10px] font-bold leading-snug text-slate-200 backdrop-blur-sm md:block"
+                title={`Главы истории (п.34): ${hud.camp.part} — ${hud.camp.title}. Выполните все задачи главы для победы.`}>
+                <div className="text-[9px] font-black tracking-wide text-amber-300">{hud.camp.part} · {hud.camp.title}</div>
+                {hud.camp.objs.map((o, i) => (
+                  <div key={i} className={o.done ? 'text-lime-300 line-through' : 'text-slate-300'}>{o.done ? '✓' : '·'} {o.t}</div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* score / wave center (компактно; дипломатия — отдельная кнопка) */}
@@ -348,6 +368,44 @@ export default function App() {
                 <Ico name="sparkle" /> {hud!.wisdom}
               </div>
             )}
+            {/* Религиозная победа (п.31): видна, как только есть мечеть */}
+            {(hud?.islam?.anyMosque ?? false) && (
+              <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${(hud!.islam.have) >= hud!.islam.need ? 'animate-pulse bg-teal-400/30 text-teal-100' : 'bg-sky-500/15 text-sky-200'}`}
+                title="Религиозная победа: обратите все 7 народов (мечеть + имамы-миссионеры у лагерей)">
+                <Ico name="crescent" /> Ислам: {hud!.islam.have}/{hud!.islam.need}
+              </div>
+            )}
+            {/* Құрылтай (п.13): авторитет хана + закон сезона */}
+            {hud && hud.authority > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-200"
+                title={`Авторитет хана (п.13) — копится со временем и решениями курултаев, при победе уходит в очки (×3)\nЗакон сезона: ${hud.lawName ?? 'нет'}\nНедовольство аула: ${hud.discontent}${hud.discontent >= 70 ? ' (добыча −10%)' : ''}`}>
+                <Ico name="crown" className="h-3.5 w-3.5" />{hud.authority}
+                {hud.lawName && <span className="max-w-[110px] truncate rounded-full bg-black/40 px-1.5 text-[9px] font-bold text-amber-100/90">{hud.lawName}</span>}
+                {hud.discontent >= 70 && <span title="Аул озлоблен" className="text-red-300"><Ico name="warn" className="h-3 w-3" /></span>}
+              </div>
+            )}
+            {/* Двор ханства (п.18) */}
+            {hud?.court && hud.court.length > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-black text-purple-200"
+                title={`Двор ханства (п.18):\n${hud.court.map(p => `• ${p.name} — ${p.traits[0] ?? ''}`).join('\n')}\nАманат скрепляет союз, но убьёте племя — предательство запомнят все. Супруга даёт черту, наследник вырастет батыром или бием.`}>
+                <Ico name="crown" className="h-3.5 w-3.5" />Двор: {hud.court.length}
+              </div>
+            )}
+            {/* Қыс (п.15): индикатор сезона */}
+            {hud?.season && (
+              <div className={`pointer-events-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.season.winter ? 'bg-sky-400/20 text-sky-100' : 'bg-white/10 text-slate-200'}`}
+                title={`Сезон (п.15): ${hud.season.name}. Год = 4 игровых суток.\nДо смены сезона: ~${Math.ceil(hud.season.t / 60)} мин\nЗимой: добыча −15% (с войлочными юртами −8%), стадо ест запасы, скорость −6%, бураны чаще, но каждый убийства в набеге дают ×1,5 славы\n${hud.season.feltYurts ? '✓ Войлочные юрты готовят аул к стуже' : 'Юрты без войлока — зима холодная (крафт у загона)'}`}>
+                <Ico name={hud.season.winter ? 'snow' : hud.season.name.includes('осень') ? 'wood' : 'sun'} className="h-3.5 w-3.5" />
+                {hud.season.name.split(' — ')[0]}
+              </div>
+            )}
+            {/* Төл (п.14): шерсть */}
+            {hud?.tel?.hasPen && (
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-lime-500/15 px-2 py-0.5 text-[11px] font-black text-lime-200"
+                title={`Шерсть (п.14) — овцы в загонах дают шерсть; войлок крафтится у загона: изоляция юрт к зиме и доспехи коннице${hud.tel.feltYurts ? '\n✓ Юрты в войлоке' : ''}${hud.tel.feltArmor ? '\n✓ Войлочные доспехи' : ''}`}>
+                <Ico name="sheep" className="h-3.5 w-3.5" />{hud.tel.wool}
+              </div>
+            )}
             {/* Объединение степи: показываем, когда союз уже собирается */}
             {(hud?.unite?.have ?? 0) >= 3 && (
               <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
@@ -367,6 +425,9 @@ export default function App() {
             <IconBtn onClick={() => g()?.jumpToIdleVillager()} label="Свободные шаруа (.)">
               <span className="relative text-sm leading-none"><Ico name="farmer" className="h-4 w-4" />{(hud?.idleVills ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-400 px-0.5 text-[8px] font-black text-black">{hud?.idleVills}</span>}</span>
             </IconBtn>
+            <IconBtn onClick={() => g()?.ringBell()} label="Колокол ставки (U): звон — укрыть шаруа, повторно — отбой">
+              <span className="relative text-sm leading-none"><Ico name="bell" className={`h-4 w-4 ${hud?.bell ? 'text-amber-300' : ''}`} />{(hud?.bellHidden ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-400 px-0.5 text-[8px] font-black text-black">{hud?.bellHidden}</span>}</span>
+            </IconBtn>
             <IconBtn onClick={() => g()?.toggleMute()} label="Звук">
               {(hud?.muted) ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </IconBtn>
@@ -376,6 +437,10 @@ export default function App() {
             <IconBtn onClick={() => setShowGreats(true)} label="Великие люди степи (J)">
               <span className="relative text-sm leading-none"><Ico name="sparkle" className="h-4 w-4" />{(hud?.greats?.some(x => x.afford) ?? false) &&
                 <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full bg-amber-400" />}</span>
+            </IconBtn>
+            <IconBtn onClick={() => setShowYasa(true)} label="Яса — политики ханства (O)">
+              <span className="relative text-sm leading-none"><Ico name="scroll" className="h-4 w-4" />{(hud?.yasa?.filter(y => y.active).length ?? 0) > 0 &&
+                <span className="absolute -right-1.5 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-amber-400 text-[8px] font-black text-black">{hud?.yasa.filter(y => y.active).length}</span>}</span>
             </IconBtn>
             <IconBtn onClick={() => setShowSettings(true)} label="Настройки">
               <SettingsIcon className="h-4 w-4" />
@@ -436,6 +501,9 @@ export default function App() {
             <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
             <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
           </div>
+          {hud?.sel?.canEscort && (
+            <MiniBtn onClick={() => g()?.orderEscortNearest()}><Ico name="caravan" className="h-3.5 w-3.5" />Сопровождать караван</MiniBtn>
+          )}
           {/* ===== СВОДКА ЭКОНОМИКИ: куда распределены шаруа ===== */}
           {(hud?.econ?.total ?? 0) > 0 && (
             <div className="rounded-xl bg-black/35 px-2 py-1.5">
@@ -545,7 +613,25 @@ export default function App() {
                         <MiniBtn title="Найти лагеря племён на карте" onClick={() => g()?.scoutOrder('bases')}><Binoculars className="h-3 w-3" />Искать базы</MiniBtn>
                         <MiniBtn title="Дойти до незнакомого народа и наладить связь (приветствие правителя)" onClick={() => g()?.scoutOrder('diplomacy')}><MessageCircle className="h-3 w-3" />Связь</MiniBtn>
                         <MiniBtn title="Прокрасться кротом к вражеской базе: раскрыть её и доносить золото" onClick={() => g()?.scoutOrder('infiltrate')}><Eye className="h-3 w-3" />Внедриться</MiniBtn>
+                        <MiniBtn title="Дозор (п.17): вечный светлый круг в тумане. До 4 точек; у ставки джунгар показывает состав и отсчёт рейда" onClick={() => g()?.placeWatch()}><Binoculars className="h-3 w-3" />Дозор</MiniBtn>
                       </div>
+                    </div>
+                  )}
+                  {hud.sel.types?.some(t => t.key === 'scout') && hud.scoutNet && (
+                    <div className="mt-1.5 rounded-xl border border-rose-400/25 bg-rose-500/10 p-1.5">
+                      <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-rose-200"><Ico name="wolf" /> Саботаж (п.17)</div>
+                      {hud.scoutNet.raidSeen && (
+                        <div className="mb-1 rounded-lg bg-black/40 px-2 py-1 text-[10px] font-bold text-sky-200" title="Дозор у ставки джунгар доносит состав и отсчёт рейда">
+                          Дозор доносит: врагов у ставки {hud.scoutNet.army} · рейд через ~{hud.scoutNet.raidIn} с
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1">
+                        <MiniBtn title="Сжечь запас: рейд джунгар задержан на 2 минуты" onClick={() => g()?.sabotage('supplies')}><Ico name="spark" />Запасы</MiniBtn>
+                        <MiniBtn title="Угнать табун: −1 конница врага, +лошади нам" onClick={() => g()?.sabotage('horses')}><Ico name="horse" />Табун</MiniBtn>
+                        <MiniBtn title="Перехватить посланника: племя 3 минуты недоступно джунгарам и набегам" onClick={() => g()?.sabotage('envoy')}><Ico name="handshake" />Посланник</MiniBtn>
+                        {hud.scoutNet.cd > 0 && <span className="self-center rounded bg-black/40 px-1.5 text-[10px] font-black text-rose-200">перезарядка {hud.scoutNet.cd}с</span>}
+                      </div>
+                      <div className="mt-1 text-[9px] font-bold text-slate-400">Дозоров: {hud.scoutNet.posts}/4 · враг может вскрыть сеть (−100 очков)</div>
                     </div>
                   )}
                   {!(hud.sel.types?.every(t => t.key === 'villager') || false) && (
@@ -627,6 +713,49 @@ export default function App() {
                     <div className="mt-1 flex gap-1">
                       <MiniBtn onClick={() => g()?.trade('wood')} title="Обмен дерева на золото"><Ico name="wood" />→<Ico name="gold" /> Торговля</MiniBtn>
                       <MiniBtn onClick={() => g()?.trade('food')} title="Обмен еды на золото"><Ico name="food" />→<Ico name="gold" /></MiniBtn>
+                    </div>
+                  )}
+                  {hud.sel.bkey === 'market' && hud.sel.kerven && (
+                    <div className="mt-1.5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-1.5">
+                      <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-amber-300/90">Керуен (п.16): товар → маршрут · цены дышат каждый день</div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {([
+                          ['wool', 'Шерсть', '6{i:sheep} шерсти', hud.sel.kerven.canWool],
+                          ['grain', 'Зерно', '80{i:food} еды', hud.sel.kerven.canGrain],
+                          ['horses', 'Кони', '120{i:gold}', hud.sel.kerven.canHorses],
+                        ] as const).map(([gk, lbl, cost, can]) => (
+                          <div key={gk} className="rounded-lg border border-white/10 bg-black/30 p-1 text-center">
+                            <div className="text-[10px] font-black text-slate-100">{lbl} <span className="text-amber-300">{hud.sel.kerven![gk]}</span></div>
+                            <div className="mt-0.5 flex gap-0.5">
+                              <button disabled={!can || hud.sel.kerven!.busy} onClick={() => g()?.sendCaravan(gk, 'tribe')}
+                                className={`flex-1 rounded px-1 py-0.5 text-[9px] font-black ${can && !hud.sel.kerven!.busy ? 'btn-iron text-lime-200' : 'bg-black/40 text-slate-500'}`}
+                                title={`Караван ${lbl.toLowerCase()} → дружественное племя (${cost}). Прибытие греет отношения`}>племя</button>
+                              <button disabled={!can || !hud.sel.kerven!.hasCity || hud.sel.kerven!.busy} onClick={() => g()?.sendCaravan(gk, 'city')}
+                                className={`flex-1 rounded px-1 py-0.5 text-[9px] font-black ${can && hud.sel.kerven!.hasCity && !hud.sel.kerven!.busy ? 'btn-iron text-amber-200' : 'bg-black/40 text-slate-500'}`}
+                                title={`Караван ${lbl.toLowerCase()} → город соперника: премия ×1,2, но риск грабежа выше. Эскорт рядом спасает груз`}>город</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {hud.sel.kerven.busy && <div className="mt-1 text-[9px] font-bold text-rose-300">Көпес в пути — наймите ещё на базаре</div>}
+                    </div>
+                  )}
+                  {hud.sel.bkey === 'pen' && hud.sel.penUpg && (
+                    <div className="mt-1.5 rounded-lg border border-lime-300/25 bg-lime-400/10 p-1.5">
+                      <div className="mb-1 flex items-center justify-between text-[9px] font-black uppercase tracking-widest text-lime-300/90">
+                        <span>Төл — выпас и войлок</span>
+                        <span title="Истощение дёрна у загона; стадо на дальнем выпасе — трава отдыхает">дёрн {hud.sel.penUpg.dep}%</span>
+                      </div>
+                      <div className="mb-1 h-1 rounded bg-black/40"><div className="h-1 rounded bg-lime-400/80" style={{ width: `${hud.sel.penUpg.dep}%` }} /></div>
+                      <div className="flex flex-wrap gap-1">
+                        <MiniBtn onClick={() => g()?.craftFelt('yurts')} title="12 шерсти: юрты в войлоке — зимняя изоляция (п.15)">
+                          <Ico name="yurt" /> Юрты в войлоке (12){hud.sel.penUpg.doneYurts ? ' — есть' : ''}
+                        </MiniBtn>
+                        <MiniBtn onClick={() => g()?.craftFelt('armor')} title="16 шерсти: конница +12% HP">
+                          <Ico name="saber" /> Доспехи (16) {hud.sel.penUpg.doneArmor ? '— есть' : ''}
+                        </MiniBtn>
+                        <span className="ml-auto self-center rounded bg-black/40 px-1.5 text-[10px] font-black text-lime-200"><Ico name="sheep" /> {hud.sel.penUpg.wool}</span>
+                      </div>
                     </div>
                   )}
                   {hud.sel.bkey === 'tower' && hud.sel.towerUpg && (
@@ -739,6 +868,13 @@ export default function App() {
                   <TrainBtn label="Имам" icon="mosque" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
                   <TrainBtn label="Барлаушы" icon="compass" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
                   <TrainBtn label="Көпес" icon="camel" key_="0" cost={UNIT_DEFS.trader.cost} ok={canAfford(UNIT_DEFS.trader.cost)} tip={unitStats('trader') + ' · нужен Базар и друзья-соседи'} onClick={() => g()?.train('trader')} />
+                  {(['camelry', 'oghuzguard', 'druzhinnik', 'mirza'] as const).map(k => {
+                    const nid = (UNIT_DEFS[k] as unknown as { tribeOf?: string }).tribeOf!;
+                    const ndef = NATION_BY_ID[nid];
+                    const suz = hud?.nations?.find(n => n.id === nid)?.suzerain === 'player';
+                    if (!suz) return null;   // племенной юнит появляется в доке только за сюзеренитет (п.38)
+                    return <TrainBtn key={k} label={UNIT_DEFS[k].name.replace(/^(Хорезмский |Огузский |Славянский |Бухарский )/, '')} icon={k === 'camelry' ? 'camel' : k === 'mirza' ? 'scroll' : k === 'oghuzguard' ? 'spear' : 'saber'} key_="" cost={UNIT_DEFS[k].cost} ok={canAfford(UNIT_DEFS[k].cost) && (hud?.age ?? 0) >= UNIT_DEFS[k].ageReq} lock={(hud?.age ?? 0) < UNIT_DEFS[k].ageReq} tip={unitStats(k) + ` · уникальный юнит «${ndef?.name ?? nid}»`} onClick={() => g()?.train(k)} />;
+                  })}
                 </>
               ) : (
                 <>
@@ -755,6 +891,7 @@ export default function App() {
                   <div className="mx-0.5 w-px shrink-0 bg-white/10" />
                   <TrainBtn label="Стена" icon="brick" key_="B" cost={bldCostOf('wall', wdisc)} ok={canAfford(bldCostOf('wall', wdisc))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
                   <TrainBtn label="Ворота" icon="door" key_="V" cost={bldCostOf('gate', wdisc)} ok={canAfford(bldCostOf('gate', wdisc))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
+                  <TrainBtn label="Хан орда" icon="yurt" key_="" cost={bldCostOf('orda', wdisc)} ok={canAfford(bldCostOf('orda', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'orda'} tip={bldStats('orda')} onClick={() => g()?.enterPlacement('orda')} />
                   <TrainBtn label="Мавзолей" icon="star" key_="W" cost={bldCostOf('wonder', wdisc)} ok={canAfford(bldCostOf('wonder', wdisc)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
                 </>
               )}
@@ -770,6 +907,21 @@ export default function App() {
       </div>
 
       {/* ===== КОШ (кочевой режим) ===== */}
+      {/* Той (п.20): золотая кнопка праздника + модалка мини-игр */}
+      {hud?.toy?.due && !showToy && !over && (
+        <button onClick={() => setShowToy(true)}
+          className="absolute bottom-24 right-3 z-30 rounded-2xl border border-amber-300/60 bg-amber-400/25 px-3 py-2 text-xs font-black text-amber-100 shadow-lg backdrop-blur-sm animate-pulse"
+          title="Той (п.20): байга, көкпар и асык. Награды, +5% к добыче на время и авторитет биев. Пропустишь — бии обидятся!">
+          <Ico name="spark" className="mr-1 inline h-4 w-4" />ТОЙ!
+        </button>
+      )}
+      {showToy && hud && (
+        <ToyModal onClose={() => setShowToy(false)} act={(kind, amount) => {
+          const gm = g(); if (!gm) return false;
+          if (kind === 'bet') return gm.toyBet(amount ?? 0);
+          gm.toyReward(kind, amount ?? 0); return true;
+        }} />
+      )}
       {koshOpen && hud?.mode === 'nomad' && !over && (
         <Overlay>
           <div className="font-display mb-2 flex items-center justify-center gap-2 text-lg font-black text-amber-100"><Ico name="camel" className="h-5 w-5" />Көш: новый жайляу</div>
@@ -882,6 +1034,39 @@ export default function App() {
                     </button>
                   )}
                 </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ЯСА: карточки политик ===== */}
+      {showYasa && hud && (
+        <div className="absolute inset-0 z-[61] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setShowYasa(false)}>
+          <div className="kz-corners panel-iron w-full max-w-xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between">
+              <div className="font-display text-lg font-black tracking-wide text-amber-200"><Ico name="scroll" /> ЯСА ХАНСТВА</div>
+              <button onClick={() => setShowYasa(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10"><Ico name="cross" /></button>
+            </div>
+            <p className="mb-3 text-[12px] leading-relaxed text-slate-400">
+              Карточки политик: активно до <b className="text-amber-200">{hud.yasaSlots}</b> одновременно. Включение —
+              <b className="text-teal-200"> {hud.yasaCost} мудрости</b>, снятие бесплатно. Сейчас мудрости: <b className="text-teal-200">{hud.wisdom}</b>.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {hud.yasa.map(ya => (
+                <button key={ya.id} onClick={() => gameRef.current?.yasaToggle(ya.id)}
+                  className={`rounded-2xl border p-2.5 text-left transition ${
+                    ya.active ? 'border-lime-400/50 bg-lime-500/10' : 'border-white/10 bg-white/5 hover:border-amber-300/40 hover:bg-amber-400/10'}`}>
+                  <div className="flex items-center gap-2 text-[13px] font-black text-slate-100">
+                    <Ico name={ya.icon} className="h-4 w-4 text-amber-200" />{ya.name}
+                    <span className="ml-auto rounded-full bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-slate-400">{ya.cat}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] leading-snug text-slate-300">{ya.desc}</div>
+                  <div className={`mt-1.5 text-[10px] font-black ${ya.active ? 'text-lime-300' : 'text-amber-200/80'}`}>
+                    {ya.active ? 'ДЕЙСТВУЕТ — нажмите, чтобы снять' : `Включить • ${hud.yasaCost} мудрости`}
+                  </div>
+                </button>
               ))}
             </div>
           </div>
@@ -1031,6 +1216,8 @@ export default function App() {
                   { key: 'gift', label: '{i:gift} Задобрить дарами', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}{i:gold} · прекратить вражду`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
                 ] : [
                   { key: 'gift', label: '{i:gift} Подарки и дары', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}{i:gold} · заключить дружбу`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
+                  { key: 'amanat', label: '{i:handshake} Просить аманат', desc: '150{i:gold} · союз скреплён заложником навеки (п.18)', gold: 150 },
+                  { key: 'marry', label: '{i:crown} Свадебный союз', desc: '250{i:gold} · черта супруга и наследник (нужен сюзеренитет)', gold: 250 },
                   { key: 'attack', label: '{i:swords} Потребовать ухода', desc: 'разозлить народ', danger: true },
                 ])
           }
@@ -1350,6 +1537,11 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
                           <span><Ico name="clock" />{t.time}с</span>
                           <span className="text-amber-200/90"><RT t={t.cost} /></span>
                         </div>
+                        {t.eureka && (
+                          <div className={`mt-1 rounded-lg px-1.5 py-1 text-[10px] leading-snug ${t.eurekaDone ? 'bg-lime-500/15 text-lime-200' : 'bg-black/25 text-slate-400'}`}>
+                            <Ico name="bulb" /> Эврика: {t.eureka}{t.eurekaDone && ' — выполнено!'}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="mt-2">
@@ -1430,8 +1622,9 @@ function bldIcon(k: BuildingKey) {
 }
 
 /* ================= MENU ================= */
-function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { scores: ScoreEntry[]; settings: Settings; updateSettings: (p: Partial<Settings>) => void; onPlay: () => void; onResume: () => void }) {
+function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlayCampaign }: { scores: ScoreEntry[]; settings: Settings; updateSettings: (p: Partial<Settings>) => void; onPlay: () => void; onResume: () => void; onPlayCampaign: (id: string) => void }) {
   const [showSettings, setShowSettings] = useState(false);
+  const [showCamp, setShowCamp] = useState(false);
   // Устав и Зал легенд живут в одной модалке с вкладками: null — закрыта.
   const [infoTab, setInfoTab] = useState<'how' | 'scores' | null>(null);
   const difficulty = settings.difficulty;
@@ -1440,12 +1633,12 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
     const h = (e: KeyboardEvent) => {
       // Esc закрывает попап; Enter/пробел стартуют игру, но не когда открыто
       // окно — иначе игрок, читая устав, случайно улетал бы в бой.
-      if (e.key === 'Escape') { setInfoTab(null); return; }
-      if (!showSettings && !infoTab && (e.key === 'Enter' || e.key === ' ')) onPlay();
+      if (e.key === 'Escape') { setInfoTab(null); setShowCamp(false); return; }
+      if (!showSettings && !infoTab && !showCamp && (e.key === 'Enter' || e.key === ' ')) onPlay();
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onPlay, showSettings, infoTab]);
+  }, [onPlay, showSettings, infoTab, showCamp]);
   if (showSettings) return <SettingsPanel settings={settings} updateSettings={updateSettings} onClose={() => setShowSettings(false)} />;
   return (
     <div className="parchment relative min-h-[100dvh] overflow-y-auto text-white">
@@ -1533,6 +1726,9 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
                 <Ico name="save" /> Продолжить
               </button>
             )}
+            <button onClick={() => setShowCamp(true)} className="btn-iron flex items-center gap-2 rounded-2xl px-5 py-4 text-sm font-black text-amber-200">
+              <Ico name="scroll" /> Главы истории
+            </button>
             <button
               onClick={() => setShowSettings(true)}
               title="Настройки"
@@ -1563,6 +1759,41 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
           60 кадров/с • движок на Canvas • синтезированные звуки битвы • великая степь ждёт своего хана <Ico name="spark" />
         </div>
       </div>
+      {/* ===== ПОПАП: ГЛАВЫ ИСТОРИИ (п.34) ===== */}
+      {showCamp && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowCamp(false)}>
+          <div className="max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-3xl border-2 border-amber-400/40 bg-[#1a140c] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="mb-4 text-center">
+              <div className="text-xl font-black tracking-wide text-amber-200"><Ico name="scroll" className="mr-1 inline h-5 w-5" /> ГЛАВЫ ИСТОРИИ ХАНСТВА</div>
+              <div className="mt-1 text-[11px] font-semibold text-slate-400">Сценарии по вехам 1465–1726: каждая глава обучает своим механикам</div>
+            </div>
+            <div className="space-y-3">
+              {CAMPAIGNS.map((c, ci) => {
+                const done = (() => { try { return !!localStorage.getItem('khanate-camp-' + c.id); } catch { return false; } })();
+                return (
+                  <button key={c.id} onClick={() => onPlayCampaign(c.id)}
+                    className="block w-full rounded-2xl border p-4 text-left transition active:scale-[0.99] border-amber-400/25 bg-gradient-to-br from-amber-900/30 via-black/30 to-black/40 hover:border-amber-300/60">
+                    <div className="flex items-center justify-between">
+                      <div className="text-base font-black text-amber-100">{c.part}: {c.title} <span className="ml-1 text-xs font-bold text-slate-400">{c.years} · {c.mode === 'nomad' ? 'кочевой' : 'оседлый'}</span></div>
+                      {done && <span className="rounded-full bg-lime-500/25 px-2 py-0.5 text-[10px] font-black text-lime-300">ПРОЙДЕНО</span>}
+                    </div>
+                    <div className="mt-1 text-xs leading-relaxed text-slate-300">{c.brief}</div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {c.objs.map((o, oi) => (
+                        <span key={oi} className="rounded-full border border-white/10 bg-black/40 px-2 py-0.5 text-[10px] font-bold text-slate-300">· {o.t}</span>
+                      ))}
+                    </div>
+                    <div className="mt-2 text-[10px] font-bold text-amber-300/80">Глава {['I', 'II', 'III'][ci]} — играть</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-4 text-center">
+              <button onClick={() => setShowCamp(false)} className="btn-iron rounded-xl px-5 py-2 text-xs font-black text-slate-200">Закрыть (Esc)</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ===== ПОПАП: УСТАВ / ЗАЛ ЛЕГЕНД ===== */}
       {infoTab && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm"
@@ -1621,6 +1852,25 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
                   <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500/10 p-2 text-[11px] font-semibold text-emerald-200">
                     <Shield className="h-4 w-4 shrink-0" />Совет: волки дают еду и очки. Охоться рано, развивайся быстро, ударь до 4-й волны.
                   </div>
+                  {/* Дастаны жырау (п.19) */}
+                  {(() => { const dst = loadDastans(); return dst.length ? (
+                    <div className="mt-3">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-amber-300/90">Дастаны жырау ({dst.length})</div>
+                      <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin">
+                        {dst.map((d, i) => (
+                          <div key={i} className="rounded-lg bg-black/30 p-2">
+                            <div className="flex items-center gap-2 text-[11px] font-black text-amber-100">
+                              <span className="truncate">{d.name}</span>
+                              <span className="rounded bg-amber-400/20 px-1 text-[9px] text-amber-200">{d.date}</span>
+                              <span className="ml-auto tabular-nums text-amber-300">{d.score}</span>
+                              <button onClick={() => { try { navigator.clipboard.writeText(d.text); } catch { /* noop */ } }} className="rounded bg-white/10 px-1.5 text-[9px] font-bold text-sky-200 hover:bg-white/20">копия</button>
+                            </div>
+                            <div className="mt-0.5 line-clamp-2 whitespace-pre-line text-[10px] leading-snug text-slate-400">{d.text.split('\n\n')[1] ?? d.text.slice(0, 90)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null; })()}
                 </>
               )}
             </div>
@@ -1790,6 +2040,16 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
                     {n.suzerain === 'player' && <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-black text-amber-200"><Ico name="crown" /> вы сюзерен</span>}
                     {n.suzerain === 'rival' && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-300"><Ico name="warn" /> под джунгарами</span>}
                   </div>
+                  {/* вера народа (п.31): −100 шаманизм .. +100 ислам */}
+                  <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold">
+                    <span className="text-sky-300"><Ico name="crescent" /> вера:</span>
+                    <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-black/40">
+                      <div className="absolute inset-y-0 left-1/2 w-1/2 bg-sky-400/70" style={{ width: `${Math.max(0, n.faith) / 2}%` }} />
+                      <div className="absolute inset-y-0 right-1/2 w-1/2 bg-red-400/60" style={{ width: `${Math.max(0, -n.faith) / 2}%` }} />
+                      <div className="absolute inset-y-0 left-1/2 w-px bg-white/40" />
+                    </div>
+                    <span className={n.faith >= 100 ? 'text-lime-300' : 'text-slate-400'}>{n.faith >= 100 ? 'ислам' : n.faith <= -100 ? 'шаманизм' : `${n.faith > 0 ? '+' : ''}${n.faith}`}</span>
+                  </div>
                   {/* шкала влияния: посланники игрока против джунгарских */}
                   <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold">
                     <span className="text-emerald-300"><Ico name="handshake" /> вы: {n.envoys}</span>
@@ -1841,6 +2101,144 @@ function DiplBtn({ children, onClick, title, disabled, danger }: { children: Rea
 }
 
 /* ================= GAME OVER ================= */
+// ── ЖЫРАУ (п.19): генерируемый дастан о партии ──
+const DASTAN_LS = 'khanate-dastans';
+function loadDastans(): { name: string; text: string; score: number; date: string; result: string }[] {
+  try { return JSON.parse(localStorage.getItem(DASTAN_LS) || '[]'); } catch { return []; }
+}
+function genDastan(over: GameStats, heroName: string): string {
+  const n = heroName.trim() || 'Хан безымянный';
+  const mins = Math.max(1, Math.round(over.timeSec / 60));
+  const st: string[] = [];
+  st.push(`Слушайте, степь, о деяниях ${n},\nчто свершались при ветрах и при звёздах:`);
+  const pool: string[] = [];
+  if (over.kills > 0) pool.push(`Как волков разгонял бураны,\nон бил врагов — ${over.kills} павших в степи,\nи орлы узнали в сезон туманов:\nс таким ханом орде не пройти!`);
+  if ((over.razed ?? 0) > 0) pool.push(`Лаги врагов обратились в пепел —\n${over.razed ?? 0} становищ сровнял с травой;\nо пожарищах до рек Заравшана\nпели жайлау голосом седым.`);
+  if ((over.built ?? 0) > 0) pool.push(`Он поднял аул из-под ладоней:\n${over.built ?? 0} юрт и стен встало в степной тишине,\nи верблюды, доски и керегь\nпомнят руки, что строили во сне.`);
+  if (over.gathered > 500) pool.push(`Стадо тучное, береке в закромах —\n${over.gathered} мешков собрала земля;\nшаруа пели в предутренних туманах,\nчто трудом сытна любая семья.`);
+  if (over.age >= 2) pool.push(`Он прошёл века, как джигит перевалы:\n${over.age} эпохи легли под копыта коней,\nи бии кивали: «Вот так-то, степь наша,\nрастём мы сильнее прежних дней».`);
+  if (mins > 0) pool.push(`Всю ночь у огня догорали звезды,\n${mins} кругов прошептала луна:\n«Держи народ свой, как держит караванщик\nповодья верблюда, — крепко, до утра».`);
+  if (over.campTitle) pool.push(`В ${(over.campTitle ?? '').toLowerCase()} он вписал своё имя,\nкак узорщик — узор на войлоке;\nглавы истории листались ими,\nи каждая строка была в итоге.`);
+  pool.push(`Тунги знамённые в небо глядят:\nдва хвоста развеваются ветер гоня;\nгде пройдёт орда — там цветёт батырский сад,\nгде сгибнется трус — там и след не храня.`);
+  for (const line of over.chronicle ?? []) pool.push(`Как говорил жырау, помня былое:\n${line.replace(/^[«"]|["»]$/g, '')}.`);
+  pool.push(`Пусть же степь запомнит это лето:\n${over.score} очков — вес приданого хана!\n${over.result === 'victory' ? 'Победил он — и дастан мой воспет,' : 'Пал он в бою — но жива его слава,'}\nи поют о нём кобзы и домбры седого стана.`);
+  // уникальность: тасуем и берём не больше 6 строф без повторов
+  for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const picked = pool.slice(0, Math.min(7, pool.length));
+  return [st[0], ...picked, `Дастан сложен жырау великой степи.\nСлава ${n} — от Иртыша до Каспия!`].join('\n\n');
+}
+
+// ── ТОЙ (п.20): байга, көкпар и асык ──
+function ToyModal({ onClose, act }: { onClose: () => void; act: (kind: 'baiga' | 'kokpar' | 'asyq' | 'bet', amount?: number) => boolean | void }) {
+  const [tab, setTab] = useState<'pick' | 'baiga' | 'kokpar' | 'asyq'>('pick');
+  const [msg, setMsg] = useState('');
+  // байга
+  const horses = useMemo(() => [0, 1, 2].map(i => ({ name: ['Сырттанды', 'Кулагер', 'Тарлан'][i], sp: 0.9 + Math.random() * 0.35 })), []);
+  const [betOn, setBetOn] = useState(-1);
+  const [race, setRace] = useState<number[]>([0, 0, 0]);
+  const [racing, setRacing] = useState(false);
+  // көкпар
+  const [marker, setMarker] = useState(50);
+  const [zone, setZone] = useState(() => 25 + Math.random() * 50);
+  const [hits, setHits] = useState(0);
+  const [round, setRound] = useState(0);
+  // асык
+  const [rolls, setRolls] = useState<{ me: number; biy: number } | null>(null);
+  useEffect(() => {
+    if (!racing) return;
+    const id = setInterval(() => {
+      setRace(prev => {
+        const nxt = prev.map((v, i) => v + horses[i].sp * (3 + Math.random() * 3));
+        if (nxt.every(v => v >= 100)) {
+          clearInterval(id);
+          setRacing(false);
+          const winner = nxt.indexOf(Math.max(...nxt));
+          setTimeout(() => {
+            if (winner === betOn) { act('baiga', 120); setMsg('Твоя лошадь первой! Выигрыш 120 золота!'); }
+            else setMsg(`Победил «${horses[winner].name}». Ставка ушла к байге...`);
+          }, 250);
+        }
+        return nxt;
+      });
+    }, 120);
+    return () => clearInterval(id);
+  }, [racing, betOn, horses]);
+  useEffect(() => {
+    if (tab !== 'kokpar') return;
+    const id = setInterval(() => setMarker(m => 10 + (m + 7) % 90), 70);
+    return () => clearInterval(id);
+  }, [tab]);
+  const kokparGrab = () => {
+    const inZone = marker > zone && marker < zone + 20;
+    const nh = hits + (inZone ? 1 : 0);
+    setHits(nh); setZone(10 + Math.random() * 70);
+    if (round >= 2) {
+      const total = 40 + nh * 60;
+      act('kokpar', total);
+      setMsg(`Туша у пиршественной чаши! ${nh}/3 точных рывков — +${total} еды`);
+    } else setRound(round + 1);
+  };
+  const asyqPlay = () => {
+    if (!act('bet', 30)) { setMsg('Нет 30 золота на асыки...'); return; }
+    const me = 2 + Math.floor(Math.random() * 11), biy = 2 + Math.floor(Math.random() * 11);
+    setRolls({ me, biy });
+    if (me > biy) { setTimeout(() => act('asyq', 70), 400); setMsg(`${me} против ${biy} — асыки твои! +70 золота`); }
+    else setMsg(`${me} против ${biy} — бий забрал кон (ставка проиграна)`);
+  };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4" onClick={onClose}>
+      <div className="kz-corners panel-iron w-full max-w-md rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+        <div className="mb-3 text-center font-display text-xl font-black tracking-wide text-amber-200">ТОЙ! <span className="text-[11px] text-slate-400">праздник между волнами</span></div>
+        {tab === 'pick' && (
+          <div className="grid gap-2">
+            {[['baiga', 'Байга', 'Ставка 50 золота на скакуна — забег на тулпаров'], ['kokpar', 'Көкпар', 'Три рывка за тушей: поймай момент в зелёной зоне'], ['asyq', 'Асык', 'Кости против бия: ставка 30, выигрыш 70']].map(([k, t, d]) => (
+              <button key={k} onClick={() => setTab(k as typeof tab)} className="rounded-2xl border border-white/10 bg-white/5 p-2.5 text-left transition hover:border-amber-300/40 hover:bg-amber-400/10">
+                <div className="text-[13px] font-black text-slate-100">{t}</div>
+                <div className="text-[11px] text-slate-400">{d}</div>
+              </button>
+            ))}
+            <button onClick={onClose} className="mt-1 text-[11px] font-bold text-slate-500 hover:text-slate-300">Не сегодня (Esc)</button>
+          </div>
+        )}
+        {tab === 'baiga' && (
+          <div className="space-y-2">
+            {horses.map((h, i) => (
+              <div key={i} className="rounded-xl bg-black/30 p-2">
+                <div className="flex items-center justify-between text-[12px] font-black text-slate-100"><span>{h.name}</span>
+                  <button disabled={racing} onClick={() => { if (act('bet', 50)) setBetOn(i); }} className={`rounded px-2 py-0.5 text-[10px] font-black ${betOn === i ? 'bg-amber-400/30 text-amber-200' : 'btn-iron text-slate-200'}`}>{betOn === i ? 'твоя ставка' : 'ставка 50'}</button>
+                </div>
+                <div className="mt-1 h-2 rounded bg-white/10"><div className="h-2 rounded bg-lime-400" style={{ width: `${Math.min(100, race[i])}%` }} /></div>
+              </div>
+            ))}
+            <button disabled={racing || betOn < 0} onClick={() => setRacing(true)} className="btn-gold w-full rounded-xl py-2 text-sm font-black">{racing ? 'Скачка!' : 'Пускай коней!'}</button>
+            <button onClick={() => setTab('pick')} className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-300">назад</button>
+          </div>
+        )}
+        {tab === 'kokpar' && (
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold text-slate-300">Рывок {Math.min(round + 1, 3)}/3 · точных: {hits}</div>
+            <div className="relative h-10 overflow-hidden rounded-xl bg-black/40">
+              <div className="absolute inset-y-0 bg-lime-500/30" style={{ left: `${zone}%`, width: '20%' }} />
+              <div className="absolute inset-y-1 w-1.5 rounded bg-amber-300" style={{ left: `${marker}%` }} />
+            </div>
+            <button onClick={kokparGrab} className="btn-gold w-full rounded-xl py-2 text-sm font-black">Хватай тушу!</button>
+            <button onClick={() => setTab('pick')} className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-300">назад</button>
+          </div>
+        )}
+        {tab === 'asyq' && (
+          <div className="space-y-2 text-center">
+            <div className="text-[12px] font-bold text-slate-300">Твои кости против костей бия</div>
+            <div className="flex justify-center gap-3 text-3xl font-black text-amber-200">{rolls ? <><span>{rolls.me}</span><span className="text-slate-500">:</span><span>{rolls.biy}</span></> : <span className="text-slate-500">— : —</span>}</div>
+            <button onClick={asyqPlay} className="btn-gold w-full rounded-xl py-2 text-sm font-black">Бросить асыки (30 золота)</button>
+            <button onClick={() => setTab('pick')} className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-300">назад</button>
+          </div>
+        )}
+        {msg && <div className="mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-[12px] font-black text-amber-200">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart, onMenu }: {
   over: GameStats; scores: ScoreEntry[]; name: string; setName: (s: string) => void; saved: boolean;
   onSave: () => void; onRestart: () => void; onMenu: () => void;
@@ -1855,6 +2253,16 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
     return () => window.removeEventListener('keydown', h);
   }, [onRestart]);
   const win = over.result === 'victory';
+  const dastan = useMemo(() => genDastan(over, name), [over, name]);
+  const [dastanSaved, setDastanSaved] = useState(false);
+  const saveDastan = () => {
+    try {
+      const list = loadDastans();
+      list.unshift({ name: name.trim() || 'Безымянный хан', text: dastan, score: over.score, date: new Date().toLocaleDateString(), result: over.result });
+      localStorage.setItem(DASTAN_LS, JSON.stringify(list.slice(0, 12)));
+      setDastanSaved(true);
+    } catch { /* noop */ }
+  };
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm">
       <div className="kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-6 text-center">
@@ -1902,6 +2310,17 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
             <Check className="h-4 w-4" />Высечено в Зале легенд!
           </div>
         )}
+        {/* Дастан жырау (п.19) */}
+        <div className="mt-4 rounded-2xl border border-amber-400/30 bg-gradient-to-b from-amber-900/25 to-black/30 p-3 text-left">
+          <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-amber-300">Жырау сложил дастан о партии</div>
+          <div className="max-h-52 overflow-y-auto scroll-thin whitespace-pre-line rounded-xl bg-black/30 p-2.5 text-[11.5px] leading-relaxed text-amber-50/90">{dastan}</div>
+          <div className="mt-1.5 flex gap-1.5">
+            <button onClick={saveDastan} disabled={dastanSaved} className={`flex-1 rounded-xl px-3 py-1.5 text-[11px] font-black ${dastanSaved ? 'bg-lime-500/20 text-lime-300' : 'btn-iron text-amber-200'}`}>
+              {dastanSaved ? '✓ В Зале Легенд' : 'Сохранить дастан'}
+            </button>
+            <button onClick={() => { try { navigator.clipboard.writeText(dastan); } catch { /* noop */ } }} className="btn-iron rounded-xl px-3 py-1.5 text-[11px] font-black text-sky-200">Скопировать</button>
+          </div>
+        </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <BigBtn onClick={onRestart}><RotateCcw className="h-4 w-4" />РЕВАНШ (R)</BigBtn>
           <MidBtn onClick={onMenu}><Home className="h-4 w-4" />Меню</MidBtn>
