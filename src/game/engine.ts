@@ -389,6 +389,7 @@ export interface HudSnapshot {
   camp?: { part: string; title: string; objs: { t: string; done: boolean }[] };   // глава кампании (п.34)
   authority: number; lawName: string | null; discontent: number;   // құрылтай (п.13)
   tel: { wool: number; feltYurts: boolean; feltArmor: boolean; hasPen: boolean };   // төл (п.14)
+  season: { name: string; winter: boolean; t: number; feltYurts: boolean };   // қыс (п.15)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -1744,7 +1745,7 @@ export class Game {
     if (this.weather !== 'clear') return 'clear';              // после ненастья всегда просвет
     if (this.droughtT > 0) return 'clear';
     const r = Math.random();
-    const buranP = this.isNight() ? 0.18 : 0.08;
+    const buranP = (this.isNight() ? 0.18 : 0.08) + (this.isWinter() ? 0.22 : 0);   // зимой бураны чаще (п.15)
     if (r < buranP) return 'buran';
     if (r < buranP + 0.22) return 'fog';
     if (r < buranP + 0.22 + 0.3) return 'rain';
@@ -3429,6 +3430,8 @@ export class Game {
     // законы курултая (п.13)
     if (this.law === 'nalog' || this.law === 'mobil') m *= 0.95;
     if (this.discontent >= 70) m *= 0.9;   // озлобленный аул работает спустя рукава
+    // қыс (п.15): зимой фураж резан; войлочные юрты (п.14) греют народ
+    if (this.isWinter()) m *= this.feltYurts ? 0.92 : 0.85;
     // төл (п.14): выбитый у загона дёрн — молочность падает вдвое на полном истощении
     if (u.wkind === 'milk' && u.penId != null) {
       const pen = this.blds.find(b => b.id === u.penId);
@@ -3478,6 +3481,10 @@ export class Game {
   }
   // Ночные правила действуют ровно в те 4 минуты, что отведены ночи.
   isNight(): boolean { return Math.abs(this.dayPhase() - 0.5) <= this.nightHalf; }
+  // ── Қыс (п.15): год = 4 игровых суток; сезон поверх суток ──
+  season(): 0 | 1 | 2 | 3 { return ((this.dayNum - 1) % 4 + 4) % 4 as 0 | 1 | 2 | 3; }
+  seasonName(): string { return ['Көктем — весна', 'Жаз — лето', 'Күз — осень', 'Қыс — зима'][this.season()]; }
+  isWinter(): boolean { return this.season() === 3; }
 
   // точка отдыха у ближайшей юрты (или ставки, если юрт ещё нет)
   restSpotFor(u: Unit): { x: number; y: number; b: Bld } | null {
@@ -4020,8 +4027,11 @@ export class Game {
       }
     }
     // шерсть: овцы в загонах дают войлочное сырьё
-    for (const a of this.units) if (a.pastureId != null && a.key === 'sheep') sheepAll++;
+    let herdAll = 0;
+    for (const a of this.units) if (a.pastureId != null && (a.key === 'sheep' || a.key === 'cow')) { herdAll++; if (a.key === 'sheep') sheepAll++; }
     this.wool = Math.min(999, this.wool + 0.045 * Math.min(sheepAll, 12));
+    // қыс (п.15): зимой стадо ест запасы аула
+    if (this.isWinter() && herdAll > 0) this.res.food = Math.max(0, this.res.food - 0.012 * herdAll);
   }
   telBirth() {   // приплод: переход суток, трава должна быть свежей
     let born = 0;
@@ -5175,7 +5185,7 @@ export class Game {
     // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
     const midC = this.terrain.classAt(u.x + dx / 2, u.y + dy / 2);
     const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
-    const s = Math.min(u.speed * wade * this.eraSpeedMult() * this.weatherSpeedMult() * (this.law === 'erk' && u.owner === 'player' ? 1.08 : 1) * dt, d);   // «Вольница» (п.13)
+    const s = Math.min(u.speed * wade * this.eraSpeedMult() * this.weatherSpeedMult() * (this.law === 'erk' && u.owner === 'player' ? 1.08 : 1) * (this.isWinter() ? 0.94 : 1) * dt, d);   // «Вольница» (п.13), зимняя дорога (п.15)
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
     // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
     if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
@@ -6945,7 +6955,7 @@ export class Game {
     this.burst(t.x, t.y - 8, 12, t.owner === 'player' ? ['#93c5fd', '#1e40af', '#fecaca'] : t.key === 'wolf' ? ['#9ca3af', '#4b5563'] : ['#f87171', '#7f1d1d'], 110, 0.7);
     if (byOwner === 'player' && t.owner === 'enemy') {
       this.kills++;
-      this.score += SCORE.kill;
+      this.score += SCORE.kill + (this.isWinter() ? Math.round(SCORE.kill * 0.5) : 0);   // зимний рейд славнее (п.15)
       this.res.gold += 8;
       this.floater(t.x, t.y - 34, `+${SCORE.kill} {i:swords} +8{i:gold}`, "#fde047", 15, true);
       this.trauma = Math.min(1, this.trauma + 0.08);
@@ -7213,7 +7223,7 @@ export class Game {
           this.damageUnit(tu, p.dmg, shooter);
           // credit kills to owner side loosely for score if player-owned arrow
           if (tu.hp <= 0 && p.owner === 'player') {
-            if (tu.owner === 'enemy') { this.kills++; this.score += SCORE.kill; this.res.gold += 8; this.floater(tu.x, tu.y - 30, `+${SCORE.kill} {i:bow}`, '#fde047', 14, true); }
+            if (tu.owner === 'enemy') { this.kills++; this.score += SCORE.kill + (this.isWinter() ? Math.round(SCORE.kill * 0.5) : 0); this.res.gold += 8; this.floater(tu.x, tu.y - 30, `+${SCORE.kill} {i:bow}`, '#fde047', 14, true); }   // зимний рейд славнее (п.15)
             if (tu.owner === 'neutral') { this.wolvesSlain++; this.score += SCORE.wolfKill; this.res.food += 35; this.floater(tu.x, tu.y - 30, `+${SCORE.wolfKill} {i:wolf}`, '#a3e635', 14, true); }
             if (shooter) this.gainXp(shooter, tu);
           }
@@ -7764,6 +7774,7 @@ export class Game {
       scouts: this.units.filter(u => u.owner === 'player' && u.key === 'scout').length,
       authority: Math.round(this.authority), lawName: this.lawName(), discontent: Math.round(this.discontent),
       tel: { wool: Math.floor(this.wool), feltYurts: this.feltYurts, feltArmor: this.feltArmor, hasPen: this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1) },
+      season: { name: this.seasonName(), winter: this.isWinter(), t: Math.max(0, Math.ceil(this.DAY_LEN - this.dayT)), feltYurts: this.feltYurts },
       event: this.event ? (() => {
         const d = this.eventDefs().find(e => e.id === this.event!.id);
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;
@@ -8239,6 +8250,7 @@ export class Game {
     ctx.globalAlpha = 1;
     // ── туман войны (поверх мира, в той же iso-трансформации) ──
     if (this.settings.fogOfWar) this.drawFog();
+    if (this.weather === 'buran' || (this.isWinter() && this.weatherActive('fog'))) this.drawSnow();   // қыс (п.15): снег из партиклов, лимит 650
     // ── обводка гекса под курсором (в мировой iso-трансформации) ──
     if (!this.paused) this.drawHexHover(ctx);
     // ── selection box (draw in iso too) ──
@@ -8869,6 +8881,20 @@ export class Game {
     if (b.flash > 0.05) {
       ctx.fillStyle = `rgba(255, 237, 160, ${b.flash * 0.5})`;
       ctx.beginPath(); ctx.arc(ix, baseY - R * 0.6, R * 0.8, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // Қыс (п.15): снег — процедурные хлопья (150 шт, лимит плана 650 не превышаем)
+  drawSnow() {
+    const { ctx } = this;
+    const t = this.time;
+    ctx.fillStyle = 'rgba(240, 246, 252, 0.75)';
+    for (let i = 0; i < 150; i++) {
+      const seed = i * 173.13;
+      const x = (seed * 7.31 + t * (26 + (i % 5) * 14)) % (this.vw + 40) - 20;   // ветер с северо-востока
+      const y = (seed * 13.7 + t * (48 + (i % 7) * 16)) % (this.vh + 40) - 20;
+      const r = 0.8 + (i % 3) * 0.5;
+      ctx.fillRect(x, y, r, r);
     }
   }
 

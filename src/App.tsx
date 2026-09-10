@@ -383,6 +383,14 @@ export default function App() {
                 {hud.discontent >= 70 && <span title="Аул озлоблен" className="text-red-300"><Ico name="warn" className="h-3 w-3" /></span>}
               </div>
             )}
+            {/* Қыс (п.15): индикатор сезона */}
+            {hud?.season && (
+              <div className={`pointer-events-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.season.winter ? 'bg-sky-400/20 text-sky-100' : 'bg-white/10 text-slate-200'}`}
+                title={`Сезон (п.15): ${hud.season.name}. Год = 4 игровых суток.\nДо смены сезона: ~${Math.ceil(hud.season.t / 60)} мин\nЗимой: добыча −15% (с войлочными юртами −8%), стадо ест запасы, скорость −6%, бураны чаще, но каждый убийства в набеге дают ×1,5 славы\n${hud.season.feltYurts ? '✓ Войлочные юрты готовят аул к стуже' : 'Юрты без войлока — зима холодная (крафт у загона)'}`}>
+                <Ico name={hud.season.winter ? 'snow' : hud.season.name.includes('осень') ? 'wood' : 'sun'} className="h-3.5 w-3.5" />
+                {hud.season.name.split(' — ')[0]}
+              </div>
+            )}
             {/* Төл (п.14): шерсть */}
             {hud?.tel?.hasPen && (
               <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-lime-500/15 px-2 py-0.5 text-[11px] font-black text-lime-200"
