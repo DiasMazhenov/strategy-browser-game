@@ -170,6 +170,8 @@ interface Unit {
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
   stance: 'aggressive' | 'defensive' | 'stand'; // боевая стойка
   tribe?: boolean;   // воин нейтрального племени (пассивен, пока не атакован)
+  bandit?: boolean;  // разбойник: враждебен всем, ходит в набеги на ближайших шаруа (п.25)
+  campId?: number;   // id стоянки-юрты, к которой приписан
   aggro?: boolean;   // племя разозлено (атакует обидчика)
   homeX: number; homeY: number;                 // точка возврата (stand/patrol)
   patrolX: number; patrolY: number;             // вторая точка патруля
@@ -290,6 +292,8 @@ interface Bld {
   gate: boolean;                                                // ворота (проходны для игрока)
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
+  bandit?: boolean;                                             // тёмная юрта разбойников (п.25)
+  raidT?: number;                                               // таймер до следующего набега
   nationId?: string;                                            // народ-племя (id из NATIONS), владеющий лагерем
   pastureX?: number; pastureY?: number;                         // точка дальнего пастбища загона
   pastureStocked?: boolean;                                     // стадо (5 овец + 5 коров) уже создано
@@ -508,6 +512,9 @@ export class Game {
   // сторон, гекс без контр-давления седеет (|loyal| < 0.5 — мятежный) и в
   // конце концов меняет владельца. Только лояльные гексы идут в счёт победы.
   loyal = new Map<string, number>();
+  // ── ЛАГЕРЯ БАНДИТОВ (п.25) ──
+  banditsCleared = 0;             // зачищено стоянок за партию (счёт, респавн)
+  banditRespawnT = 0;             // таймер респавна: не чаще одной стоянки в 2 суток
   loyalT = 0;                     // тик пересчёта давления (раз в 1.5 с)
   rebelCount = 0; lostHexes = 0; wonHexes = 0;  // мятежных сейчас / перешло за партию
   cityTier = 0; cityT = 0;
@@ -852,6 +859,78 @@ export class Game {
         if (!spot) continue;
         this.spawnTribeCamp(spot[0], spot[1], rng);
         placed++;
+      }
+    }
+    this.planBanditCamps();
+  }
+  // Стоянки разбойников: 8–12 по кольцу вокруг стартовых баз (2.2–5 км), чтобы
+  // разведчик находил их в первые минуты, а рейды доставали до окраин аула.
+  private planBanditCamps() {
+    const rng = mulberry32Like((this.terrain.seed * 2654435761) >>> 0);
+    const want = 8 + ((rng() * 5) | 0);
+    let placed = 0, tries = 0;
+    while (placed < want && tries++ < 200) {
+      const base = rng() < 0.6 ? HOME : RIVAL;
+      const a = rng() * Math.PI * 2, rad = 2200 + rng() * 2800;
+      const x = base.x + Math.cos(a) * rad, y = base.y + Math.sin(a) * rad;
+      if (x < 300 || y < 300 || x > WORLD.w - 300 || y > WORLD.h - 300) continue;
+      if (!this.terrain.isBuildable(x, y)) continue;
+      if (this.blds.some(b => dist2(b.x, b.y, x, y) < 900 * 900)) continue;
+      this.spawnBanditCamp(x, y, rng);
+      placed++;
+    }
+  }
+  spawnBanditCamp(x: number, y: number, rng: () => number) {
+    const hut = this.addBld('house', 'neutral', x, y, 1);
+    hut.bandit = true; hut.raidT = 60 + rng() * 90;
+    hut.hp = hut.maxHp = 520;
+    const n = 3 + ((rng() * 3) | 0);
+    const kinds: UnitKey[] = ['swordsman', 'archer', 'swordsman', 'knight'];
+    for (let i = 0; i < n; i++) {
+      const g = this.addUnit(kinds[(rng() * kinds.length) | 0], 'neutral', x + (rng() - 0.5) * 100, y + (rng() - 0.5) * 90);
+      g.bandit = true; g.campId = hut.id; g.aggro = true; g.state = 'idle'; g.stance = 'defensive';
+      g.homeX = x; g.homeY = y; g.wx = x; g.wy = y;
+    }
+    return hut;
+  }
+  // Набеги и респавн стоянок. Разбойники — общая беда: цель выбирается среди
+  // шаруа ОБЕИХ сторон в радиусе, отряд идёт, бьёт и возвращается к юрте.
+  updateBandits(dt: number) {
+    for (const b of this.blds) {
+      if (!b.bandit) continue;
+      b.raidT = (b.raidT ?? 60) - dt;
+      if (b.raidT > 0) continue;
+      b.raidT = 110 + Math.random() * 80;
+      const gang = this.units.filter(u => u.bandit && u.campId === b.id && u.hp > 0);
+      if (gang.length < 2) continue;
+      // ближайший шаруа любой стороны в 1400 px
+      let best: Unit | null = null, bd = 1400 * 1400;
+      for (const v of this.units) {
+        if (v.key !== 'villager' || v.owner === 'neutral' || v.hidden) continue;
+        const d = dist2(v.x, v.y, b.x, b.y);
+        if (d < bd) { bd = d; best = v; }
+      }
+      if (!best) continue;
+      for (const g of gang) { g.state = 'attackmove'; g.tx = best.x; g.ty = best.y; g.targetU = best.id; g.retarget = 0; }
+      if (best.owner === 'player') {
+        this.pushBanner('{i:skull} Набег разбойников!', `Шайка из ${gang.length} идёт на ваших шаруа — отбейте или зачистите стоянку`, 4);
+        this.raiseAlert(best.x, best.y, 'Набег разбойников');
+      }
+    }
+    // респавн: не чаще одной стоянки в двое суток, и только пока их меньше 8
+    this.banditRespawnT -= dt;
+    if (this.banditRespawnT <= 0) {
+      this.banditRespawnT = this.DAY_LEN * 2;
+      const alive = this.blds.filter(b => b.bandit).length;
+      if (alive < 8) {
+        const rng = Math.random;
+        for (let t = 0; t < 40; t++) {
+          const base = rng() < 0.5 ? HOME : RIVAL;
+          const a = rng() * Math.PI * 2, rad = 2600 + rng() * 2600;
+          const x = base.x + Math.cos(a) * rad, y = base.y + Math.sin(a) * rad;
+          if (!this.terrain.isBuildable(x, y) || this.blds.some(o => dist2(o.x, o.y, x, y) < 900 * 900)) continue;
+          this.spawnBanditCamp(x, y, rng); break;
+        }
       }
     }
   }
@@ -2620,8 +2699,9 @@ export class Game {
       gotWood: this.gotWood, gotFood: this.gotFood, gotGold: this.gotGold, ageMark: this.ageMark,
       soldiersTrained: this.soldiersTrained, barracksBuilt: this.barracksBuilt, wolvesSlain: this.wolvesSlain,
       cam: this.cam, tech: this.tech, questsDone: this.questsDone,
-      units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0 })),
-      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null })),
+      units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0, tribe: u.tribe || undefined, bandit: u.bandit || undefined, campI: u.bandit ? this.blds.findIndex(b => b.id === u.campId) : undefined, hx: u.homeX, hy: u.homeY })),
+      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null, tribe: b.tribe || undefined, nationId: b.nationId, bandit: b.bandit || undefined, raidT: b.raidT })),
+      banditsCleared: this.banditsCleared, banditRespawnT: this.banditRespawnT,
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       relicsHeld: this.relicsHeld,
       wisdom: this.wisdom, greatsCalled: this.greatsCalled,
@@ -2718,6 +2798,12 @@ export class Game {
         // восстановить ранг героя и его боевые бонусы
         const lv = ud.level || 1;
         if (lv > 1) { u.level = lv; u.xp = ud.xp || 0; u.kills = ud.kills || 0; u.atk *= Math.pow(1.09, lv - 1); u.maxHp *= Math.pow(1.10, lv - 1); u.hp = Math.min(u.maxHp, Math.max(u.hp, ud.hp)); }
+        // флаги племени/разбойника (1.0.106): раньше не сохранялись, и после загрузки
+        // воины племён превращались в обычных нейтралов без лагеря
+        const x = ud as unknown as { tribe?: boolean; bandit?: boolean; campI?: number; hx?: number; hy?: number };
+        if (x.tribe) { u.tribe = true; u.aggro = false; }
+        if (x.bandit) { u.bandit = true; u.aggro = true; u.stance = 'defensive'; (u as Unit & { _campI?: number })._campI = x.campI; }
+        if (typeof x.hx === 'number') { u.homeX = x.hx; u.homeY = x.hy ?? u.y; u.wx = x.hx; u.wy = x.hy ?? u.y; }
         uMap.set(i, u.id);
       });
       (d.blds || []).forEach((bd: { key: BuildingKey; owner: 'player'|'enemy'; x: number; y: number; hp: number; done: number; queue: { key: UnitKey; t: number; total: number }[]; rallyX: number; rallyY: number; axis?: 'x'|'y'|null }, i: number) => {
@@ -2725,8 +2811,16 @@ export class Game {
         b.hp = bd.hp; b.done = bd.done; b.queue = bd.queue || []; b.rallyX = bd.rallyX; b.rallyY = bd.rallyY;
         if ((bd as unknown as { upg?: { range: number; dmg: number; archers: number } }).upg) b.upg = (bd as unknown as { upg: { range: number; dmg: number; archers: number } }).upg;
         if ((bd.key === 'wall' || bd.key === 'gate') && bd.axis) b.axis = bd.axis;
+        const xb = bd as unknown as { tribe?: boolean; nationId?: string; bandit?: boolean; raidT?: number };
+        if (xb.tribe) { b.tribe = true; b.nationId = xb.nationId ?? this.tribeNationAt(b.x, b.y); }
+        if (xb.bandit) { b.bandit = true; b.raidT = xb.raidT ?? 90; b.maxHp = 520; b.hp = Math.min(b.hp, 520); }
         bMap.set(i, b.id);
       });
+      // привязка разбойников к юртам по индексу здания в сейве
+      for (const u of this.units) { const ci = (u as Unit & { _campI?: number })._campI; if (u.bandit && typeof ci === 'number' && ci >= 0) u.campId = bMap.get(ci); }
+      this.banditsCleared = d.banditsCleared ?? 0; this.banditRespawnT = d.banditRespawnT ?? this.DAY_LEN * 2;
+      // старый сейв без стоянок разбойников — расставить заново
+      if (!this.blds.some(b => b.bandit)) this.planBanditCamps();
       (d.nodes || []).forEach((nd: { kind: 'wood'|'gold'|'food'|'fish'; x: number; y: number; amount: number; r: number }) => this.addNode(nd.kind, nd.x, nd.y, nd.amount));
       // цели не сохраняем — юниты перенацелятся сами; декор оставляем от genWorld
       void uMap; void bMap;
@@ -4222,6 +4316,7 @@ export class Game {
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
     this.updateEvents(dt);         // случайные события степи
     this.updateWeather(dt);        // погода: дождь, туман, буран
+    this.updateBandits(dt);        // набеги и респавн стоянок разбойников
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
     this.updateFog(dt);
@@ -5390,7 +5485,7 @@ export class Game {
       if (e.tribe && !e.aggro) continue;
       // пассивный скот не цель авто-боя (бить можно только явным приказом)
       // дичь/скот — добыча охоты (см. acquirePrey); в авто-оборону не входит
-      if (e.owner === 'neutral' && e.key !== 'wolf' && !e.tribe && u.state !== 'attackmove') continue;
+      if (e.owner === 'neutral' && e.key !== 'wolf' && !e.tribe && !e.bandit && u.state !== 'attackmove') continue;
       if (u.owner === 'player' && e.owner === 'neutral' && e.key === 'wolf' && u.state !== 'attackmove') {
         // крестьяне обороняются от волков в малом радиусе (оборона), но не гоняются за ними
         // через всю карту: военные берут волка обычным радиусом, крестьяне — отдельно ниже
@@ -5526,6 +5621,12 @@ export class Game {
           const f = this.acquireEnemy(u, 240);
           if (f.tu >= 0) { u.targetU = f.tu; u.state = 'attackmove'; return; }
           u.state = 'idle';
+        } else if (u.bandit) {
+          // разбойник: цели нет — домой к юрте; дома — стоим
+          const f = this.acquireEnemy(u, 200);
+          if (f.tu >= 0) { u.targetU = f.tu; u.state = 'attackmove'; return; }
+          if (dist2(u.x, u.y, u.homeX, u.homeY) > 80 * 80) { u.state = 'move'; u.tx = u.homeX; u.ty = u.homeY; }
+          else u.state = 'idle';
         } else {
           // вернулись домой из погони (stand) — встаём
           u.state = 'idle';
@@ -6275,6 +6376,19 @@ export class Game {
     this.burst(b.x, b.y - 20, 46, ['#f59e0b', '#78716c', '#44403c', '#fde68a'], 220, 1.1);
     this.burst(b.x, b.y - 30, 20, ['#ef4444', '#f97316'], 160, 0.9);
     this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '{i:explosion} ХАНСКАЯ СТАВКА УНИЧТОЖЕНА!' : `{i:explosion} ${BUILDING_DEFS[b.key].name} разрушен(о)!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
+    if (b.bandit && byOwner !== 'neutral') {
+      // зачистка стоянки: клад. Кто снёс юрту — того и добыча. Остатки шайки разбегаются.
+      this.banditsCleared++;
+      const roll = Math.random();
+      const res = byOwner === 'player' ? this.res : this.eres;
+      let what: string;
+      if (roll < 0.45) { const g = 120 + Math.floor(Math.random() * 100); res.gold += g; what = `+${g} {i:gold} клад`; }
+      else if (roll < 0.75) { const fd = 150 + Math.floor(Math.random() * 120); res.food += fd; what = `+${fd} {i:food} угнанный скот`; }
+      else if (roll < 0.9 && byOwner === 'player') { this.relicsHeld++; what = '{i:beads} реликвия из награбленного'; }
+      else { what = 'пленные шаруа освобождены'; for (let i = 0; i < 2; i++) this.addUnit('villager', byOwner, b.x + rand(-40, 40), b.y + rand(-30, 30)); }
+      for (const g of this.units) if (g.bandit && g.campId === b.id) { g.hp = 0; this.burst(g.x, g.y, 6, ['#9ca3af'], 60, 0.5); }
+      if (byOwner === 'player') { this.score += 150; this.floater(b.x, b.y - 95, what, '#fde047', 15, true); this.pushBanner('{i:skull} Стоянка зачищена', what.replace(/\{i:\w+\}/g, '').trim(), 4); }
+    }
     if (byOwner === 'player' && b.owner === 'enemy') {
       this.razed++;
       const pts = b.key === 'towncenter' ? SCORE.tc : SCORE.building;
@@ -8167,6 +8281,15 @@ export class Game {
     // вспышка урона — красный спрайт, иначе обычный
     const img: HTMLImageElement | HTMLCanvasElement = (b.flash > 0.05 && sp.flash) ? sp.flash : sp.img;
     ctx.drawImage(img, dx, dy, w, h);
+    if (b.bandit) {
+      // тёмная юрта: затемнение поверх спрайта + чёрный бунчук на шесте
+      ctx.save(); ctx.globalCompositeOperation = 'source-atop'; ctx.fillStyle = 'rgba(20,16,24,0.55)'; ctx.fillRect(dx, dy, w, h); ctx.restore();
+      const px0 = ix + S * 0.35, py0 = iy - S * 0.1;
+      ctx.strokeStyle = '#3f2a14'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px0, py0 - 46); ctx.stroke();
+      const fl = Math.sin(this.time * 5 + b.id) * 3;
+      ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.moveTo(px0, py0 - 46); ctx.lineTo(px0 + 16, py0 - 41 + fl); ctx.lineTo(px0, py0 - 34); ctx.closePath(); ctx.fill();
+      drawIcon(ctx, 'skull', px0 - 6, py0 - 62, 12, '#e5e7eb');
+    }
     // ночные факелы по бокам от входа (сам свет — в drawNightLight)
     this.drawBldTorches(b, ix, iy, S);
     // ближняя половина кольца выделения — ПОВЕРХ здания (передняя кромка фундамента)
@@ -8317,10 +8440,11 @@ export class Game {
       let col = '#7cb7ff';
       if (b.owner !== 'player') {
         if (b.tribe) { const nid = this.tribeNationOf(b); col = nid ? (NATION_BY_ID[nid]?.color ?? '#e0b050') : '#e0b050'; }
+        else if (b.bandit) col = '#1f2937';   // тёмная юрта разбойников — чёрная метка
         else col = this.rivalMet ? '#f87171' : '#5b4a4a';
       }
       ctx.fillStyle = col;
-      const s = b.key === 'towncenter' ? 6 : b.tribe ? 5 : 3.4;
+      const s = b.key === 'towncenter' ? 6 : b.tribe || b.bandit ? 5 : 3.4;
       const [mx, my] = toMap(b.x, b.y);
       ctx.fillRect(mx - s / 2, my - s / 2, s, s);
     }
@@ -8331,7 +8455,7 @@ export class Game {
       if (u.owner === 'player') { ctx.fillStyle = '#eaf4ff'; ctx.fillRect(mx - 1.4, my - 1.4, 2.8, 2.8); }
       else {
         if (!this.canSeeEnemy(u.x, u.y)) continue;
-        ctx.fillStyle = u.tribe ? '#e0b050' : u.owner === 'neutral' ? '#eab308' : '#fecaca';
+        ctx.fillStyle = u.tribe ? '#e0b050' : u.bandit ? '#374151' : u.owner === 'neutral' ? '#eab308' : '#fecaca';
         ctx.fillRect(mx - 1.2, my - 1.2, 2.4, 2.4);
       }
     }

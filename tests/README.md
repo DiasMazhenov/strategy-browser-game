@@ -11,6 +11,7 @@ node tests/weather-test.mjs    # погода степи: эффекты, сей
 node tests/icons-scale.mjs     # масштаб иконок: порог 12px, inline-block, обводка (1.0.103)
 node tests/loyalty-sim.mjs     # лояльность границ: канат давлений, сейв (1.0.104)
 node tests/horsearcher-sim.mjs # атты-мерген: контры, кайт, подключение (1.0.105)
+node tests/bandits-sim.mjs     # лагеря бандитов: набеги, лут, респавн, сейв (1.0.106)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —
