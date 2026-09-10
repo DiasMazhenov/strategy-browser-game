@@ -23,7 +23,7 @@ ok(/this\.finish\('victory'\);/.test(eng) && /СТЕПЬ В ИСЛАМЕ!/.test(
 console.log('\n=== 3. Миссионер ===');
 ok(/if \(u\.owner === 'player' && u\.state === 'idle'\) \{[\s\S]{0,120}for \(const b of this\.blds\) \{\n            if \(!b\.tribe \|\| !b\.nationId \|\| \(this\.faith\[b\.nationId\] \?\? 0\) >= 100\) continue;/.test(eng), 'свободный имам сам идёт к необращённому лагерю');
 ok(/1100 \* 1100/.test(eng), 'радиус поиска лагеря 1100 px');
-ok(/миссионер[\s\S]{0,4}: имаму нечего лечить/.test(eng), 'лечение в приоритете, проповедь — от безделья');
+ok(/МИССИОНЕР \(п\.31\): имаму нечего лечить/.test(eng), 'лечение в приоритете, проповедь — от безделья');
 
 console.log('\n=== 4. UI и сейв ===');
 ok(/islam: \{ have: number; need: number; anyMosque: boolean \};/.test(eng), 'HUD: прогресс ислама');
