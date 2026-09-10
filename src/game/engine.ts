@@ -217,6 +217,8 @@ interface Unit {
   infBaseId?: number;               // id здания, в которое внедряется крот
   meetCd?: number;                  // кулдаун пере-приветствия дипломатии
   // ── обход препятствий (A* по сетке): waypoints в мире ──
+  bellBack?: number;      // [колокол] nodeId прерванной работы — куда вернуться отбоем
+  escortId?: number;      // [конвой] id көпеса, которого сопровождаем (п.37)
   path?: { x: number; y: number }[]; // маршрут вокруг стен (мировые точки)
   pathGoal?: { x: number; y: number };   // цель, под которую посчитан путь
   stuckT?: number;                        // время у стены (для пере-прокладки)
@@ -336,7 +338,7 @@ interface Decor { x: number; y: number; k: number; s: number; c: string }
 export interface SelSnapshot {
   kind: 'none' | 'units' | 'building';
   count?: number; types?: { key: string; label: string; count: number; level?: number; kills?: number; counter?: string }[];
-  avgHp?: number; maxHp?: number; canGather?: boolean;
+  avgHp?: number; maxHp?: number; canGather?: boolean; canEscort?: boolean;
   maxLevel?: number; totalKills?: number; stance?: string | null;
   bkey?: BuildingKey; blabel?: string; hp?: number; bmax?: number; done?: number;
   queue?: { key: UnitKey; label: string; t: number; total: number }[];
@@ -382,6 +384,7 @@ export interface HudSnapshot {
   banner: { title: string; sub: string } | null;
   quests: { id: string; label: string; done: boolean; progress: string }[];
   muted: boolean; idleVills: number; relics: number;
+  bell: boolean; bellHidden: number;   // колокол ставки: звенит / сколько укрыто
   // сводка экономики: сколько шаруа на каждом промысле (макро-информация как в AoE)
   econ: { wood: number; food: number; gold: number; build: number; idle: number;
     rest: number; total: number; idlePct: number };
@@ -535,6 +538,9 @@ export class Game {
   // конце концов меняет владельца. Только лояльные гексы идут в счёт победы.
   loyal = new Map<string, number>();
   // ── ЛАГЕРЯ БАНДИТОВ (п.25) ──
+  // ── КОЛОКОЛ СТАВКИ (п.36, AoE Town Bell) ──
+  bellOn = false;                 // колокол звенит: шаруа спрятаны по гарнизонам
+  bellIds: number[] = [];         // кто ушёл в укрытие по звонку (возвращаем отбоем)
   banditsCleared = 0;             // зачищено стоянок за партию (счёт, респавн)
   banditRespawnT = 0;             // таймер респавна: не чаще одной стоянки в 2 суток
   loyalT = 0;                     // тик пересчёта давления (раз в 1.5 с)
@@ -1875,6 +1881,8 @@ export class Game {
     else if (k === 'home') { this.centerTC(); e.preventDefault(); }
     // N (рус. Т) — звук. Раньше висело на M, но M перехватывала мечеть — ветка была мёртвой.
     else if (k === 'n' || k === 'т') this.toggleMute();
+    // U (рус. Г) — колокол ставки: звон загоняет шаруа по гарнизонам, второй — отбой (п.36)
+    else if (k === 'u' || k === 'г') this.ringBell();
     else if (k === '+' || k === '=') this.zoomBy(0.15);
     else if (k === '-' || k === '_') this.zoomBy(-0.15);
     else if (k === 'a' && e.ctrlKey === false && e.metaKey === false) { /* camera handled in update via keys */ }
@@ -2508,6 +2516,7 @@ export class Game {
     for (const u of us) {
       if (u.resting) { u.resting = false; u.restT = 0; u.restKind = undefined; u.shiftBack = null; }
       if (u.praying) { u.praying = false; u.prayT = 0; u.prayBack = null; }
+      if (u.escortId != null) u.escortId = undefined;   // явный приказ распускает конвой
     }
     // find explicit target
     const tu = this.pickUnit(x, y);
@@ -3859,6 +3868,61 @@ export class Game {
     return 1;
   }
   carryCap(): number { return this.hasTech('wheelbarrow') ? 22 : 14; }
+
+  // ── КОЛОКОЛ СТАВКИ (п.36, AoE Town Bell): один звон — прятаться, второй — работать ──
+  // Гарнизон не пассивен: постройки с шаруа внутри стреляют чаще и больнее
+  // (+12% темпа и +8% урона за каждого внутри — см. updateBuildings).
+  ringBell() {
+    if (this.over) return;
+    this.bellOn = !this.bellOn;
+    if (this.bellOn) {
+      this.bellIds = [];
+      const spots = this.blds.filter(b => b.owner === 'player' && b.done >= 1 && this.garrisonCap(b) > 0);
+      for (const v of this.units) {
+        if (v.owner !== 'player' || v.key !== 'villager' || v.hidden != null) continue;
+        let best: Bld | null = null; let bd = 1e15;
+        for (const b of spots) {
+          if (b.garrison.length >= this.garrisonCap(b)) continue;
+          const d = dist2(v.x, v.y, b.x, b.y);
+          if (d < bd) { bd = d; best = b; }
+        }
+        if (!best) continue;   // гарнизоны полны — остаётся у работы (стройте юрты/башни!)
+        v.bellBack = v.nodeId >= 0 ? v.nodeId : undefined;
+        best.garrison.push(v.id); v.hidden = best.id;
+        v.state = 'idle'; v.nodeId = -1; v.buildId = -1; v.targetU = -1; v.targetB = -1;
+        v.herder = false; v.penId = undefined;
+        this.bellIds.push(v.id);
+      }
+      const n = this.bellIds.length;
+      if (n) {
+        this.pushBanner('{i:bell} Колокол ставки!', `Шаруа укрылись (${n}) — постройки стреляют злее. Повторный звон — отбой`, 3.4);
+        this.sound.alarm();
+      } else this.pushBanner('{i:bell} Колокол ставки!', 'Прятаться некому: шаруа нет или гарнизоны полны', 2.5);
+    } else {
+      let back = 0;
+      for (const id of this.bellIds) {
+        const v = this.units.find(u => u.id === id);
+        if (!v || v.hidden == null) continue;
+        v.hidden = undefined;
+        const bn = v.bellBack; v.bellBack = undefined;
+        if (bn != null && this.nodes.some(nn => nn.id === bn && nn.amount > 0)) { this.orderGather(v, bn); back++; }
+      }
+      this.bellIds = [];
+      this.pushBanner('{i:bell} Отбой', back ? `Шаруа вернулись к работе (${back})` : 'Шаруа вышли из укрытий', 2.4);
+    }
+    this.pushHud();
+  }
+
+  // ── СОПРОВОЖДЕНИЕ КАРАВАНА (п.37): конница из выделения идёт с көпесом ──
+  orderEscortNearest(): boolean {
+    const us = this.selUnits().filter(u => this.combatUnit(u));
+    const trader = this.units.find(x => x.owner === 'player' && x.key === 'trader' && x.hp > 0);
+    if (!us.length || !trader) { this.floater(this.cam.x, this.cam.y - 100, 'Нужны конвой (воины) и көпес на карте!', '#f87171', 15); this.sound.error(); return false; }
+    for (const u of us) { u.escortId = trader.id; u.state = 'idle'; u.targetU = -1; u.targetB = -1; }
+    this.floater(trader.x, trader.y - 44, '{i:caravan} Конвой назначен', '#7dd3fc', 15);
+    this.sound.ack('soldier');
+    return true;
+  }
 
   // ── гарнизон: укрыть/выпустить юнитов ──
   garrisonCap(b: Bld): number { return b.key === 'towncenter' ? 10 : b.key === 'tower' ? 6 : b.key === 'house' ? 5 : 0; }
@@ -5636,6 +5700,12 @@ export class Game {
         if (d < 120 * 120 && d < bd) { bd = d; bu = e.id; bb = -1; }
         continue;
       }
+      // ИИ целит в караваны: груз дороже жизни бойца (п.37)
+      if (e.key === 'trader' && u.owner === 'enemy') {
+        const dtr = dist2(u.x, u.y, e.x, e.y) * 0.45;
+        if (dtr < bd) { bd = dtr; bu = e.id; bb = -1; }
+        continue;
+      }
       const d = dist2(u.x, u.y, e.x, e.y);
       if (d < bd) { bd = d; bu = e.id; bb = -1; }
     }
@@ -5684,6 +5754,16 @@ export class Game {
       const f = this.acquireEnemy(u, scan);
       if (f.tu >= 0) { u.targetU = f.tu; tu = this.units.find(e => e.id === f.tu); }
       else if (f.tb >= 0 && (u.state === 'attackmove' || isCata)) { u.targetB = f.tb; tb = this.blds.find(b => b.id === f.tb); }
+    }
+    // ── п.37: конвой без цели держится за своим көпесом ──
+    if (u.escortId != null && !tu && !tb && u.state !== 'attackmove') {
+      const tr = this.units.find(x => x.id === u.escortId);
+      if (!tr || tr.hp <= 0 || tr.owner !== 'player') u.escortId = undefined;
+      else {
+        const d = Math.hypot(this.tdx(tr.x - u.x), this.tdy(tr.y - u.y));
+        if (d > 90) this.moveTowardPath(u, tr.x, tr.y, dt, 62);
+        return;
+      }
     }
     const uRange = u.range * (u.owner === 'player' ? this.rangeMult(u.key, u.owner) : 1) * (u.range > 40 ? this.weatherRangeMult() : 1);
     if (tu) {
@@ -6508,6 +6588,18 @@ export class Game {
       }
       this.checkQuests();
     }
+    // ── ГРАБЁЖ КАРАВАНА (п.37): убитый көпес отдаёт груз убийце — в обе стороны ──
+    if (t.key === 'trader' && byOwner && byOwner !== t.owner) {
+      const loot = Math.max(30, Math.round(t.trGold ?? 0));
+      if (byOwner === 'player') {
+        this.res.gold += loot;
+        this.score += 60;
+        this.floater(t.x, t.y - 34, `+${loot}{i:gold} караван!`, '#fde047', 16, true);
+      } else if (byOwner === 'enemy') {
+        this.eres.gold += loot;
+        if (t.owner === 'player') this.pushBanner('{i:skull} Караван разграблен!', `Джунгары забрали ${loot} золота — снарядите конвой (выделите воинов → «Сопровождать»)`, 3.6);
+      }
+    }
     if (t.owner === 'player') this.trauma = Math.min(1, this.trauma + 0.04);
   }
 
@@ -7209,6 +7301,7 @@ export class Game {
         { id: 'age', label: 'Открыть Век жузов (T)', done: !!this.questsDone.age, progress: this.age >= 1 ? '1/1' : '0/1' },
       ],
       muted: this.muted, idleVills, relics: this.relicsHeld, econ,
+      bell: this.bellOn, bellHidden: this.bellIds.length,
       pTc: ptc ? Math.max(0, Math.ceil(ptc.hp)) : 0, pTcMax: ptc ? ptc.maxHp : 1,
       eTc: etc ? Math.max(0, Math.ceil(etc.hp)) : 0, eTcMax: etc ? etc.maxHp : 1,
       dmgFlash: this.dmgFlash,
@@ -7361,6 +7454,7 @@ export class Game {
       types: [...map.entries()].map(([key, e]) => ({ key, label: this.unitName(key as UnitKey, 'player'), count: e.count, level: e.level, kills: e.kills, counter: counterText(key as UnitKey) || undefined })),
       avgHp: hp, maxHp: max, maxLevel, totalKills, stance: this.selStance,
       canGather: us.some(u => u.key === 'villager'),
+      canEscort: us.some(u => this.combatUnit(u)) && this.units.some(x => x.owner === 'player' && x.key === 'trader' && x.hp > 0),
     };
   }
 

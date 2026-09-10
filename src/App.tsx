@@ -367,6 +367,9 @@ export default function App() {
             <IconBtn onClick={() => g()?.jumpToIdleVillager()} label="Свободные шаруа (.)">
               <span className="relative text-sm leading-none"><Ico name="farmer" className="h-4 w-4" />{(hud?.idleVills ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-400 px-0.5 text-[8px] font-black text-black">{hud?.idleVills}</span>}</span>
             </IconBtn>
+            <IconBtn onClick={() => g()?.ringBell()} label="Колокол ставки (U): звон — укрыть шаруа, повторно — отбой">
+              <span className="relative text-sm leading-none"><Ico name="bell" className={`h-4 w-4 ${hud?.bell ? 'text-amber-300' : ''}`} />{(hud?.bellHidden ?? 0) > 0 && <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-400 px-0.5 text-[8px] font-black text-black">{hud?.bellHidden}</span>}</span>
+            </IconBtn>
             <IconBtn onClick={() => g()?.toggleMute()} label="Звук">
               {(hud?.muted) ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </IconBtn>
@@ -436,6 +439,9 @@ export default function App() {
             <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
             <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
           </div>
+          {hud?.sel?.canEscort && (
+            <MiniBtn onClick={() => g()?.orderEscortNearest()}><Ico name="caravan" className="h-3.5 w-3.5" />Сопровождать караван</MiniBtn>
+          )}
           {/* ===== СВОДКА ЭКОНОМИКИ: куда распределены шаруа ===== */}
           {(hud?.econ?.total ?? 0) > 0 && (
             <div className="rounded-xl bg-black/35 px-2 py-1.5">
