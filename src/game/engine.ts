@@ -141,7 +141,7 @@ function wallSpriteFor(b: Bld, isCorner: boolean): BldSprite | undefined {
   return kz ? KZ_BLD_SPRITES[b.key] : BLD_SPRITES[b.key];
 }
 
-export interface GameStats { score: number; kills: number; razed: number; gathered: number; timeSec: number; age: number; result: 'victory' | 'defeat'; difficulty: Difficulty; peakPop?: number; peakArmy?: number; built?: number; history?: { t: number; army: number; pop: number }[]; campId?: string; campTitle?: string; }
+export interface GameStats { score: number; kills: number; razed: number; gathered: number; timeSec: number; age: number; result: 'victory' | 'defeat'; difficulty: Difficulty; peakPop?: number; peakArmy?: number; built?: number; history?: { t: number; army: number; pop: number }[]; campId?: string; campTitle?: string; chronicle?: string[]; dastan?: { kills: number; razed: number; built: number; gathered: number; timeSec: number; age: number }; }
 export interface Banner { title: string; sub: string; t: number; dur: number; }
 interface Carry { type: 'wood' | 'food' | 'gold'; amt: number }
 interface Unit {
@@ -579,7 +579,7 @@ export class Game {
   chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
   campStart?: CampaignDef;
-  campT = 0; koshN = 0;
+  campT = 0; koshN = 0; wonderChron = false;
   terr = new Map<string, 1 | 2>();        // гекс "q,r" -> 1 игрок, 2 враг
   terrCount = 0; terrLand = 0; terrDirty = true;
   // ── ЛОЯЛЬНОСТЬ ГРАНИЦ (п.23, Civ6 loyalty) ──
@@ -4363,6 +4363,7 @@ export class Game {
     this.ensureChunks(site.x, site.y, 2);
     old.dep = 0.05; this.siteI = this.koshTarget; this.koshTarget = -1; this.migrating = 0;
     this.koshN++;   // глава II (п.34): «көш на новый жайляу»
+    this.chronicle.push('Ұлы көш: аул откочевал на свежий жайляу');   // п.19
     for (const b of this.blds) if (b.owner === 'player') b.grazeDep = 0;   // көш: свежая трава (п.14)
     this.pushBanner('{i:yurt} Новый жайляу!', 'Пастбища отдохнули; на старом месте остался қыстау с тайником');
   }
@@ -4742,6 +4743,7 @@ export class Game {
     }
     this.res.food -= next.cost.food; this.res.gold -= next.cost.gold || 0;
     this.age++;
+    this.chronicle.push(`Хан вступил в ${this.age}-й век`);
     // buff existing
     const m = AGES[this.age].mult / AGES[this.age - 1].mult;
     for (const u of this.units) if (u.owner === 'player') { u.maxHp *= m; u.hp *= m; u.atk *= m; }
@@ -5150,6 +5152,7 @@ export class Game {
     // Чудо света: обратный отсчёт до победы, если оно цело
     if (this.wonderT > 0 && !this.over) {
       const wonderAlive = this.blds.some(b => b.owner === 'player' && b.key === 'wonder' && b.done >= 1);
+      if (wonderAlive && !this.wonderChron) { this.wonderChron = true; this.chronicle.push('Мавзолей хана встал над степью'); }   // п.19
       if (wonderAlive) {
         this.wonderT -= dt;
         if (this.wonderT <= 0) { this.wonderT = 0; this.finish('victory'); }
@@ -7881,6 +7884,8 @@ export class Game {
       age: this.age, result, difficulty: this.difficulty,
       peakPop: this.peakPop, peakArmy: this.peakArmy, built: this.builtCount, history: this.history.slice(-24),
       campId: this.camp?.id, campTitle: this.camp?.title,
+      chronicle: this.chronicle.slice(-24),   // жырау (п.19): лента деяний
+      dastan: { kills: this.kills, razed: this.razed, built: this.builtCount, gathered: Math.round(this.gatheredTotal), timeSec: Math.round(this.time), age: this.age },
     };
     Game.clearSave();   // партия окончена: снимаем и сохранение, и метку «в игре»
     setTimeout(() => this.onGameOver(stats), 900);

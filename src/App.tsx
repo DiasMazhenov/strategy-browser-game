@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Axe, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
@@ -1836,6 +1836,25 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlay
                   <div className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-500/10 p-2 text-[11px] font-semibold text-emerald-200">
                     <Shield className="h-4 w-4 shrink-0" />Совет: волки дают еду и очки. Охоться рано, развивайся быстро, ударь до 4-й волны.
                   </div>
+                  {/* Дастаны жырау (п.19) */}
+                  {(() => { const dst = loadDastans(); return dst.length ? (
+                    <div className="mt-3">
+                      <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-amber-300/90">Дастаны жырау ({dst.length})</div>
+                      <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin">
+                        {dst.map((d, i) => (
+                          <div key={i} className="rounded-lg bg-black/30 p-2">
+                            <div className="flex items-center gap-2 text-[11px] font-black text-amber-100">
+                              <span className="truncate">{d.name}</span>
+                              <span className="rounded bg-amber-400/20 px-1 text-[9px] text-amber-200">{d.date}</span>
+                              <span className="ml-auto tabular-nums text-amber-300">{d.score}</span>
+                              <button onClick={() => { try { navigator.clipboard.writeText(d.text); } catch { /* noop */ } }} className="rounded bg-white/10 px-1.5 text-[9px] font-bold text-sky-200 hover:bg-white/20">копия</button>
+                            </div>
+                            <div className="mt-0.5 line-clamp-2 whitespace-pre-line text-[10px] leading-snug text-slate-400">{d.text.split('\n\n')[1] ?? d.text.slice(0, 90)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null; })()}
                 </>
               )}
             </div>
@@ -2066,6 +2085,33 @@ function DiplBtn({ children, onClick, title, disabled, danger }: { children: Rea
 }
 
 /* ================= GAME OVER ================= */
+// ── ЖЫРАУ (п.19): генерируемый дастан о партии ──
+const DASTAN_LS = 'khanate-dastans';
+function loadDastans(): { name: string; text: string; score: number; date: string; result: string }[] {
+  try { return JSON.parse(localStorage.getItem(DASTAN_LS) || '[]'); } catch { return []; }
+}
+function genDastan(over: GameStats, heroName: string): string {
+  const n = heroName.trim() || 'Хан безымянный';
+  const mins = Math.max(1, Math.round(over.timeSec / 60));
+  const st: string[] = [];
+  st.push(`Слушайте, степь, о деяниях ${n},\nчто свершались при ветрах и при звёздах:`);
+  const pool: string[] = [];
+  if (over.kills > 0) pool.push(`Как волков разгонял бураны,\nон бил врагов — ${over.kills} павших в степи,\nи орлы узнали в сезон туманов:\nс таким ханом орде не пройти!`);
+  if ((over.razed ?? 0) > 0) pool.push(`Лаги врагов обратились в пепел —\n${over.razed ?? 0} становищ сровнял с травой;\nо пожарищах до рек Заравшана\nпели жайлау голосом седым.`);
+  if ((over.built ?? 0) > 0) pool.push(`Он поднял аул из-под ладоней:\n${over.built ?? 0} юрт и стен встало в степной тишине,\nи верблюды, доски и керегь\nпомнят руки, что строили во сне.`);
+  if (over.gathered > 500) pool.push(`Стадо тучное, береке в закромах —\n${over.gathered} мешков собрала земля;\nшаруа пели в предутренних туманах,\nчто трудом сытна любая семья.`);
+  if (over.age >= 2) pool.push(`Он прошёл века, как джигит перевалы:\n${over.age} эпохи легли под копыта коней,\nи бии кивали: «Вот так-то, степь наша,\nрастём мы сильнее прежних дней».`);
+  if (mins > 0) pool.push(`Всю ночь у огня догорали звезды,\n${mins} кругов прошептала луна:\n«Держи народ свой, как держит караванщик\nповодья верблюда, — крепко, до утра».`);
+  if (over.campTitle) pool.push(`В ${(over.campTitle ?? '').toLowerCase()} он вписал своё имя,\nкак узорщик — узор на войлоке;\nглавы истории листались ими,\nи каждая строка была в итоге.`);
+  pool.push(`Тунги знамённые в небо глядят:\nдва хвоста развеваются ветер гоня;\nгде пройдёт орда — там цветёт батырский сад,\nгде сгибнется трус — там и след не храня.`);
+  for (const line of over.chronicle ?? []) pool.push(`Как говорил жырау, помня былое:\n${line.replace(/^[«"]|["»]$/g, '')}.`);
+  pool.push(`Пусть же степь запомнит это лето:\n${over.score} очков — вес приданого хана!\n${over.result === 'victory' ? 'Победил он — и дастан мой воспет,' : 'Пал он в бою — но жива его слава,'}\nи поют о нём кобзы и домбры седого стана.`);
+  // уникальность: тасуем и берём не больше 6 строф без повторов
+  for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const picked = pool.slice(0, Math.min(7, pool.length));
+  return [st[0], ...picked, `Дастан сложен жырау великой степи.\nСлава ${n} — от Иртыша до Каспия!`].join('\n\n');
+}
+
 function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart, onMenu }: {
   over: GameStats; scores: ScoreEntry[]; name: string; setName: (s: string) => void; saved: boolean;
   onSave: () => void; onRestart: () => void; onMenu: () => void;
@@ -2080,6 +2126,16 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
     return () => window.removeEventListener('keydown', h);
   }, [onRestart]);
   const win = over.result === 'victory';
+  const dastan = useMemo(() => genDastan(over, name), [over, name]);
+  const [dastanSaved, setDastanSaved] = useState(false);
+  const saveDastan = () => {
+    try {
+      const list = loadDastans();
+      list.unshift({ name: name.trim() || 'Безымянный хан', text: dastan, score: over.score, date: new Date().toLocaleDateString(), result: over.result });
+      localStorage.setItem(DASTAN_LS, JSON.stringify(list.slice(0, 12)));
+      setDastanSaved(true);
+    } catch { /* noop */ }
+  };
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm">
       <div className="kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-6 text-center">
@@ -2127,6 +2183,17 @@ function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart,
             <Check className="h-4 w-4" />Высечено в Зале легенд!
           </div>
         )}
+        {/* Дастан жырау (п.19) */}
+        <div className="mt-4 rounded-2xl border border-amber-400/30 bg-gradient-to-b from-amber-900/25 to-black/30 p-3 text-left">
+          <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-amber-300">Жырау сложил дастан о партии</div>
+          <div className="max-h-52 overflow-y-auto scroll-thin whitespace-pre-line rounded-xl bg-black/30 p-2.5 text-[11.5px] leading-relaxed text-amber-50/90">{dastan}</div>
+          <div className="mt-1.5 flex gap-1.5">
+            <button onClick={saveDastan} disabled={dastanSaved} className={`flex-1 rounded-xl px-3 py-1.5 text-[11px] font-black ${dastanSaved ? 'bg-lime-500/20 text-lime-300' : 'btn-iron text-amber-200'}`}>
+              {dastanSaved ? '✓ В Зале Легенд' : 'Сохранить дастан'}
+            </button>
+            <button onClick={() => { try { navigator.clipboard.writeText(dastan); } catch { /* noop */ } }} className="btn-iron rounded-xl px-3 py-1.5 text-[11px] font-black text-sky-200">Скопировать</button>
+          </div>
+        </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <BigBtn onClick={onRestart}><RotateCcw className="h-4 w-4" />РЕВАНШ (R)</BigBtn>
           <MidBtn onClick={onMenu}><Home className="h-4 w-4" />Меню</MidBtn>
