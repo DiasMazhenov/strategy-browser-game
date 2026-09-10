@@ -298,6 +298,13 @@ interface Bld {
 interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
 interface Proj { x: number; y: number; vx: number; vy: number; tx: number; ty: number; targetU: number; targetB: number; dmg: number; owner: 'player' | 'enemy' | 'neutral'; life: number; kind: 'arrow' | 'bolt' | 'rock'; srcU?: number; }
+export type WeatherKind = 'clear' | 'rain' | 'fog' | 'buran';
+export const WEATHER_DEFS: Record<WeatherKind, { name: string; icon: string; desc: string }> = {
+  clear: { name: 'Ясно', icon: '☀️', desc: 'Небо чистое' },
+  rain: { name: 'Жаңбыр — дождь', icon: '🌧️', desc: 'Пашни +20%, все идут медленнее (−15%), стрелки и башни бьют ближе (−15%)' },
+  fog: { name: 'Тұман — туман', icon: '🌫️', desc: 'Обзор −45%, дальность стрельбы −25% — время для внезапного удара' },
+  buran: { name: 'Боран — буран', icon: '🌨️', desc: 'Скорость −30%, обзор −40%, стрельба −30%, шаруа устают быстрее' },
+};
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; shape: 'rect' | 'circle' | 'spark'; rot: number; vr: number }
 interface Floater { x: number; y: number; life: number; max: number; text: string; color: string; size: number }
 interface Corpse { x: number; y: number; key: UnitKey; owner: string; t: number; life: number; face: number }
@@ -384,6 +391,8 @@ export interface HudSnapshot {
   // активное событие степи (модалка с выбором) и тикающие последствия
   event: { id: string; icon: string; title: string; text: string; opts: { label: string; desc: string }[] } | null;
   drought: number; plague: number;
+  // погода степи: вид, сколько ещё держится, краткое описание эффекта
+  weather: { kind: WeatherKind; t: number; name: string; icon: string; desc: string } | null;
   // тревога «нас атакуют»: маркер жив ~20 с, клик по плашке прыгает к месту
   alertHud: { sub: string; t: number } | null;
   // имена родов войск с учётом взятых ступеней апгрейда (для кнопок обучения)
@@ -548,6 +557,12 @@ export class Game {
   alert: { x: number; y: number; t: number; sub: string } | null = null; // место последнего нападения
   lastAlertT = -99;              // время прошлой тревоги (антиспам)
   droughtT = 0;                  // засуха: пашни дают меньше, пока тикает
+  // ── ПОГОДА СТЕПИ ──
+  // Погода — фоновая и не ставит игру на паузу, в отличие от событий. Меняет
+  // числа мягко (±20-35%), чтобы читалась как обстоятельство, а не как удар.
+  weather: WeatherKind = 'clear';
+  weatherT = 0;                  // сколько секунд текущая погода ещё держится
+  weatherFx: { x: number; y: number; vx: number; vy: number; len: number }[] = []; // экранные капли/снежинки (вне лимита 650)
   plagueT = 0;                   // эпидемия: шаруа работают медленнее
   // ── СУТКИ И ПОСМЕННАЯ РАБОТА ──
   // Условные сутки — 30 минут. Шаруа устают за смену, уходят к юртам отдыхать
@@ -1392,6 +1407,86 @@ export class Game {
       },
     ];
   }
+  // ── ПОГОДА ──
+  weatherActive(k: WeatherKind): boolean { return this.settings.weather && this.weather === k; }
+  weatherSpeedMult(): number { return this.weatherActive('rain') ? 0.85 : this.weatherActive('buran') ? 0.7 : 1; }
+  weatherRangeMult(): number { return this.weatherActive('rain') ? 0.85 : this.weatherActive('fog') ? 0.75 : this.weatherActive('buran') ? 0.7 : 1; }
+  weatherSightMult(): number { return this.weatherActive('fog') ? 0.55 : this.weatherActive('buran') ? 0.6 : this.weatherActive('rain') ? 0.85 : 1; }
+  // Выбор следующей погоды. Засуха и дождь несовместимы: пока тикает засуха,
+  // небо ясное — иначе игрок справедливо спросит, почему пашни сохнут под ливнем.
+  // Буран — редкость и чаще ночью (в степи ночью холоднее).
+  pickWeather(): WeatherKind {
+    if (this.weather !== 'clear') return 'clear';              // после ненастья всегда просвет
+    if (this.droughtT > 0) return 'clear';
+    const r = Math.random();
+    const buranP = this.isNight() ? 0.18 : 0.08;
+    if (r < buranP) return 'buran';
+    if (r < buranP + 0.22) return 'fog';
+    if (r < buranP + 0.22 + 0.3) return 'rain';
+    return 'clear';
+  }
+  setWeather(k: WeatherKind, dur?: number) {
+    const prev = this.weather;
+    this.weather = k;
+    this.weatherT = dur ?? (k === 'clear' ? rand(120, 240) : k === 'buran' ? rand(45, 80) : rand(70, 130));
+    if (k !== prev && k !== 'clear') { const d = WEATHER_DEFS[k]; this.pushBanner(`${d.icon} ${d.name}`, d.desc, 3.5); }
+    else if (k === 'clear' && prev !== 'clear') this.pushBanner('☀️ Прояснилось', 'Небо над степью чистое', 2.5);
+    if (k === 'clear') this.weatherFx.length = 0;
+    this.pushHud();
+  }
+  updateWeather(dt: number) {
+    if (!this.settings.weather) { if (this.weather !== 'clear') { this.weather = 'clear'; this.weatherFx.length = 0; } return; }
+    this.weatherT -= dt;
+    if (this.weatherT <= 0) this.setWeather(this.pickWeather());
+    else if (this.weather === 'rain' && this.droughtT > 0) this.setWeather('clear'); // засуха началась событием — дождь уходит
+    // экранные частицы: капли/снежинки в координатах экрана, независимо от камеры
+    const kind = this.weather;
+    if (kind === 'rain' || kind === 'buran') {
+      const cap = Math.min(220, Math.round(this.vw * this.vh / 6000));
+      const spawn = Math.min(cap - this.weatherFx.length, Math.ceil(cap * dt * 1.6));
+      for (let i = 0; i < spawn; i++) {
+        if (kind === 'rain') this.weatherFx.push({ x: rand(-40, this.vw + 40), y: rand(-60, -10), vx: rand(-60, -30), vy: rand(520, 700), len: rand(9, 16) });
+        else this.weatherFx.push({ x: rand(-80, this.vw + 40), y: rand(-40, this.vh), vx: rand(160, 260), vy: rand(60, 120), len: rand(1.2, 2.6) });
+      }
+      for (let i = this.weatherFx.length - 1; i >= 0; i--) {
+        const p = this.weatherFx[i];
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (kind === 'buran') p.y += Math.sin((p.x + this.time * 90) * 0.02) * 40 * dt;
+        if (p.y > this.vh + 20 || p.x > this.vw + 60 || p.x < -100) this.weatherFx.splice(i, 1);
+      }
+    } else if (this.weatherFx.length) this.weatherFx.length = 0;
+  }
+  // Экранный слой погоды: рисуется после ночного освещения, до HUD.
+  drawWeather(ctx: CanvasRenderingContext2D) {
+    if (!this.settings.weather || this.weather === 'clear') return;
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (this.weather === 'rain') {
+      ctx.fillStyle = 'rgba(30,40,70,0.16)'; ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.strokeStyle = 'rgba(190,210,240,0.55)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const p of this.weatherFx) { ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.vx * 0.02, p.y + p.vy * 0.02 * (p.len / 12)); }
+      ctx.stroke();
+    } else if (this.weather === 'fog') {
+      // два слоя тумана, ползут в разные стороны — ощущение глубины без текстур
+      const t = this.time;
+      for (let L = 0; L < 2; L++) {
+        const off = ((t * (L ? 14 : 22)) % this.vw);
+        for (let i = -1; i < 3; i++) {
+          const cx = i * (this.vw / 2) + off * (L ? -1 : 1), cy = this.vh * (L ? 0.65 : 0.35);
+          const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, this.vw * 0.55);
+          g.addColorStop(0, 'rgba(215,220,230,0.22)'); g.addColorStop(1, 'rgba(215,220,230,0)');
+          ctx.fillStyle = g; ctx.fillRect(0, 0, this.vw, this.vh);
+        }
+      }
+      ctx.fillStyle = 'rgba(200,205,215,0.14)'; ctx.fillRect(0, 0, this.vw, this.vh);
+    } else if (this.weather === 'buran') {
+      ctx.fillStyle = 'rgba(210,220,235,0.2)'; ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.fillStyle = 'rgba(245,248,255,0.85)';
+      for (const p of this.weatherFx) ctx.fillRect(p.x, p.y, p.len, p.len);
+    }
+    ctx.restore();
+  }
   // планировщик: раз в 3–5 минут поднимаем подходящее событие
   updateEvents(dt: number) {
     // тикающие последствия
@@ -1423,6 +1518,7 @@ export class Game {
     const herdUnits = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null);
     switch (def.id) {
       case 'jut':
+        this.setWeather('buran', 70);   // джут приходит с бураном
         if (idx === 0) {
           const herd = herdUnits();
           const kill = Math.max(1, Math.floor(herd.length / 3));
@@ -1662,6 +1758,7 @@ export class Game {
     if (this.fogT > 0) return;
     this.fogT = 0.15;
     this.fogVis.fill(0);
+    const wm = this.weatherSightMult();   // туман и буран режут обзор
     const mark = (wx: number, wy: number, sight: number) => {
       const r = Math.ceil(sight / this.fogCell);
       const cx = (wx / this.fogCell) | 0, cy = (wy / this.fogCell) | 0;
@@ -1677,9 +1774,9 @@ export class Game {
       if (u.key === 'scout' && u.infDone) sight = Math.max(sight, 720);
       // пастух в поле видит далеко — чтобы его стадо на дальнем пастбище всегда было видно
       if (u.key === 'villager' && u.herder) sight = 560;
-      mark(u.x, u.y, sight);
+      mark(u.x, u.y, sight * wm);
     }
-    for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight);
+    for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight * wm);
   }
   fogAt(wx0: number, wy0: number): { vis: boolean; expl: boolean } {
     const wx = wrapW(wx0), wy = wrapH(wy0);
@@ -2524,7 +2621,7 @@ export class Game {
       era: { s: this.eraState, d: this.eraDedication, h: this.eraHeroic, c: this.eraHeroicCharge },
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
-      events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
+      events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT, weather: this.weather, weatherT: this.weatherT },
       day: { dayT: this.dayT, dayF: this.dayPhase(), dayNum: this.dayNum, restedTotal: this.restedTotal },
       pray: { azanDone: this.azanDone, berekeT: this.berekeT, berekePower: this.berekePower, prayerCount: this.prayerCount },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
@@ -2644,7 +2741,10 @@ export class Game {
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.uniteT = d.dip.uniteT ?? 0; this.uniteAnn = !!d.dip.uniteAnn;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
-      if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
+      if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0;
+        // старые сейвы без погоды: ясно, первая смена по обычному расписанию
+        this.weather = (['clear', 'rain', 'fog', 'buran'] as WeatherKind[]).includes(d.events.weather) ? d.events.weather : 'clear';
+        this.weatherT = typeof d.events.weatherT === 'number' ? d.events.weatherT : 0; }
       if (d.day) {
         // Старые сейвы писали dayT в пределах прежних 240-секундных суток. Если
         // подставить это число в 30-минутные сутки, часы застрянут около полудня,
@@ -3273,7 +3373,7 @@ export class Game {
       if ((u.freshT ?? 0) > 0) u.freshT = Math.max(0, (u.freshT ?? 0) - dt);
       // усталость копится только за настоящей работой
       const working = !u.resting && (u.state === 'gather' || u.state === 'return' || u.state === 'build');
-      if (working) u.fatigue = Math.min(1, (u.fatigue ?? 0) + dt * this.TIRE_RATE * (this.isNight() ? 1.6 : 1));
+      if (working) u.fatigue = Math.min(1, (u.fatigue ?? 0) + dt * this.TIRE_RATE * (this.isNight() ? 1.6 : 1) * (this.weatherActive('buran') ? 1.5 : 1));
     }
     // раз в 2 с решаем, кого отпустить на отдых
     this.restCycleT += dt;
@@ -3441,6 +3541,7 @@ export class Game {
     if (this.bonusTier('farm', 3)) m = 1.35;
     else if (this.bonusTier('farm', 1)) m = 1.15;
     if (this.droughtT > 0) m *= 0.55;   // засуха: пашни родят скудно
+    if (this.weatherActive('rain')) m *= 1.2; // дождь поит пашни
     return m;
   }
   // скидка на дерево от ремесленных союзников (10% / 20%)
@@ -4045,6 +4146,7 @@ export class Game {
     this.updatePrayer(dt);         // азан с минарета и намаз
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
     this.updateEvents(dt);         // случайные события степи
+    this.updateWeather(dt);        // погода: дождь, туман, буран
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
     this.updateFog(dt);
@@ -4335,7 +4437,7 @@ export class Game {
     // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
     const midC = this.terrain.classAt(u.x + dx / 2, u.y + dy / 2);
     const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
-    const s = Math.min(u.speed * wade * this.eraSpeedMult() * dt, d);
+    const s = Math.min(u.speed * wade * this.eraSpeedMult() * this.weatherSpeedMult() * dt, d);
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
     // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
     if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
@@ -5278,7 +5380,7 @@ export class Game {
       if (f.tu >= 0) { u.targetU = f.tu; tu = this.units.find(e => e.id === f.tu); }
       else if (f.tb >= 0 && (u.state === 'attackmove' || isCata)) { u.targetB = f.tb; tb = this.blds.find(b => b.id === f.tb); }
     }
-    const uRange = u.range * (u.owner === 'player' ? this.rangeMult(u.key, u.owner) : 1);
+    const uRange = u.range * (u.owner === 'player' ? this.rangeMult(u.key, u.owner) : 1) * (u.range > 40 ? this.weatherRangeMult() : 1);
     if (tu) {
       if (tu.owner === u.owner) { u.targetU = -1; }
       else {
@@ -6218,7 +6320,7 @@ export class Game {
         const dmgUp = b.owner === 'player' && up ? 1 + up.dmg * 0.35 : 1;
         const archers = b.owner === 'player' && up ? up.archers : 0; // лучники: до 2 доп. залпов
         b.cd -= dt;
-        const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1) * rangeUp;
+        const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1) * rangeUp * this.weatherRangeMult();
         if (b.cd <= 0) {
           let best: Unit | null = null; let bd = tRange * tRange;
           for (const e of this.units) {
@@ -6786,6 +6888,7 @@ export class Game {
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;
       })() : null,
       drought: Math.ceil(this.droughtT), plague: Math.ceil(this.plagueT),
+      weather: this.weather !== 'clear' && this.settings.weather ? { kind: this.weather, t: Math.ceil(this.weatherT), ...WEATHER_DEFS[this.weather] } : null,
       alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
       unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
         archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
@@ -7342,6 +7445,7 @@ export class Game {
       }
     }
 
+    this.drawWeather(ctx);
     this.drawNodePlate(ctx);
     this.drawEdgeArrows(ctx);
     this.drawMinimap(ctx);

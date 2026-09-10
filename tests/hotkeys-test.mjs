@@ -1,4 +1,4 @@
-// Проверка горячих клавиш движка: дублей нет, Home/N на месте (1.0.093).
+// Проверка горячих клавиш движка: дублей нет, Home/N на месте (1.0.101).
 import { readFileSync } from 'node:fs';
 const src = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');

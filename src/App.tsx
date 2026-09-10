@@ -301,6 +301,11 @@ export default function App() {
                 <Ico name="cactus" /> Засуха: {hud!.drought}с
               </div>
             )}
+            {hud?.weather && (
+              <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-sky-500/20 px-2 py-0.5 text-[11px] font-black text-sky-100" title={`${hud.weather.name}: ${hud.weather.desc}`}>
+                {hud.weather.icon} {hud.weather.name.replace(/^.*— /, '')}: {hud.weather.t}с
+              </div>
+            )}
             {(hud?.plague ?? 0) > 0 && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-lime-500/20 px-2 py-0.5 text-[11px] font-black text-lime-200" title="Поветрие: шаруа добывают медленнее">
                 <Ico name="sick" /> Поветрие: {hud!.plague}с
@@ -1232,6 +1237,7 @@ function SettingsPanel({ settings, updateSettings, onClose, inGame }: { settings
           <Toggle on={settings.screenShake} onClick={() => updateSettings({ screenShake: !settings.screenShake })} label="Тряска камеры" desc="Вибрация при взрывах и разрушениях" />
           <Toggle on={settings.fogOfWar} onClick={() => updateSettings({ fogOfWar: !settings.fogOfWar })} label="Туман войны" desc="Враг скрыт вне обзора ваших войск и зданий" />
           <Toggle on={settings.dayNight} onClick={() => updateSettings({ dayNight: !settings.dayNight })} label="Смена времени суток" desc="Мягкое освещение день→ночь" />
+          <Toggle on={settings.weather ?? true} onClick={() => updateSettings({ weather: !(settings.weather ?? true) })} label="Погода степи" desc="Дождь, туман и буран — с эффектами на обзор, скорость и стрельбу" />
           <Toggle on={settings.particles} onClick={() => updateSettings({ particles: !settings.particles })} label="Частицы" desc="Искры, дым, пыль из-под ног" />
           <Toggle on={settings.damageNumbers} onClick={() => updateSettings({ damageNumbers: !settings.damageNumbers })} label="Числа урона и очков" desc="Всплывающие +очки и награды" />
           <Toggle on={settings.autoPauseOnBlur} onClick={() => updateSettings({ autoPauseOnBlur: !settings.autoPauseOnBlur })} label="Авто-пауза" desc="Ставить игру на паузу при сворачивании вкладки" />

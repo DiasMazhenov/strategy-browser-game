@@ -115,6 +115,7 @@ export interface Settings {
   screenShake: boolean;    // тряска камеры
   fogOfWar: boolean;       // туман войны (враг скрыт вне обзора)
   dayNight: boolean;       // суточный цикл освещения
+  weather: boolean;        // погода степи: дождь, туман, буран (и их эффекты)
   biome: Biome;            // тип карты
   mode: 'settled' | 'nomad'; // оседлый: города/границы; кочевой: перекочёвки
   particles: boolean;      // частицы и пыль
@@ -141,6 +142,7 @@ export const DEFAULT_SETTINGS: Settings = {
   screenShake: true,
   fogOfWar: true,
   dayNight: true,
+  weather: true,
   biome: 'green',
   particles: true,
   damageNumbers: true,
