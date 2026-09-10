@@ -496,7 +496,8 @@ knight/knight_w, cavalry/cavalry_w. Дополнительно сделан ра
 **Ничего дополнительно делать не нужно: уведомление отправляется САМО на каждый пуш.**
 Достаточно обычной пары команд выше — GitHub сам дёрнет вебхук.
 
-Тема: **`ArenaAI`** → приложение ntfy или https://ntfy.sh/ArenaAI.
+Тема: **`ArenaAI-khanate-db24`** → приложение ntfy или https://ntfy.sh/ArenaAI-khanate-db24
+(с 2026-09-10, раньше была `ArenaAI` — почему сменили, см. «Диагностика» ниже).
 
 Как это устроено и почему именно так:
 
@@ -550,6 +551,7 @@ gh api repos/DiasMazhenov/strategy-browser-game/hooks/676340808/pings -X POST
 
 ```python
 from urllib.parse import urlencode
+topic = 'ArenaAI-khanate-db24'
 title = 'Задача сдана — Казахское Ханство'
 message = ('{{with .head_commit}}{{.message}}\n\nАвтор: {{.author.name}}{{end}}\n'
            'Ветка: {{trimPrefix "refs/heads/" (printf "%v" .ref)}}')
@@ -558,7 +560,7 @@ priority = ('{{if eq (printf "%v" .ref) "refs/heads/main"}}4'
 q = urlencode({'tpl': 'yes', 't': title, 'm': message, 'p': priority,
                'click': '{{printf "%v" .compare}}',
                'tags': 'white_check_mark,video_game'})
-print('https://ntfy.sh/ArenaAI?' + q)
+print(f'https://ntfy.sh/{topic}?' + q)
 ```
 
 ```bash
@@ -566,7 +568,46 @@ gh api repos/DiasMazhenov/strategy-browser-game/hooks/676340808 -X PATCH \
   -f "config[url]=$URL" -f "config[content_type]=json"
 ```
 
+**Диагностика «не приходят на телефон» (2026-09-10, итог): цепь GitHub→ntfy исправна,
+виновата подписка телефона; тема сменена на уникальную `ArenaAI-khanate-db24`.**
+
+Проверено по шагам:
+
+1. Все доставки вебхука — HTTP 200 (десятки пушей за два дня, `status: OK`). GitHub
+   доставляет, ntfy принимает: в `.response.payload` каждой доставки — JSON публикации
+   с `id` (например `nMXX3Knmk0Ab`), т.е. ntfy реально опубликовал сообщение в тему.
+   Вывод: с серверной стороны всё работает, «не приходит» — проблема на телефоне
+   (не та тема в подписке — тема **регистрозависима**, подписка слетела, или приложение
+   убито оптимизацией батареи).
+2. Расшифровка `config.url` (`urllib.parse.unquote_plus`): тема `ArenaAI`, `tpl=yes`,
+   шаблон `p` = `main→4` / `hasPrefix "1.0." →3` / остальное `→1`, `tags`, `click` — всё на месте.
+3. Ping (`…/pings -X POST`) без коммита — GitHub 200, ntfy 200: `topic: ArenaAI`,
+   `title` и `tags` отрендерились, `message` = «Ветка: <nil>» и `priority: 1` — это
+   **норма для ping** (в ping-пейлоаде нет `.ref` и `.head_commit`, срабатывает else-ветка).
+4. Так как обе стороны отвечали 200, тема сменена на уникальную
+   **`ArenaAI-khanate-db24`** (PATCH тем же скриптом `urlencode`, поменялся только путь
+   темы) — уникальная тема исключает чужие записи/опечатки в подписке. Повторный ping —
+   GitHub 200, ntfy 200, `topic: ArenaAI-khanate-db24`, id `yZyPRuSyBb1g`.
+   **Пользователю: подписаться на https://ntfy.sh/ArenaAI-khanate-db24 (точно в этом
+   регистре), включить instant delivery / разрешить приложению работать в фоне;
+   старую подписку `ArenaAI` удалить.**
+5. **Не merge'ить PR до конца работы:** merge PR из сессионной ветки в `main` закрывает
+   сессию Arena — поэтому merge делаем САМЫМ ПОСЛЕДНИМ действием задачи, после него
+   агенту в сессию писать больше нельзя.
+
+Попутно найдено (не блокирует доставку, пока оставлено как есть): **ntfy при `tpl=yes`
+рендерит только `message`, `title` и `priority`** (проверено по исходникам ntfy,
+`server/server_template.go` → `renderTemplateFromParams`), поле `click` шаблоном НЕ
+обрабатывается — в телефон уходит сырая строка `{{printf "%v" .compare}}`, тап по
+уведомлению открывает битый URL. Если захочется починить — просто убрать параметр
+`click` из URL хука.
+
 **Грабли (проверено, не повторять):**
+
+- **jq калечит ID доставок** (float64): печатает `…31600` вместо `…31648`, и GET по
+  такому ID даёт 404. Точный ID брать через Python (`json.load`) или `--jq '.[0].id'`
+  с последующим исправлением — надёжнее Python. Ответ ntfy в доставке появляется
+  не мгновенно: если `response` пуст — подождать пару секунд и перечитать.
 
 - **`curl` на ntfy.sh из песочницы агента не работает** — исходящий трафик по белому списку:
   200 отдают только `github.com`, `api.github.com` и `registry.npmjs.org`; `ntfy.sh`,
