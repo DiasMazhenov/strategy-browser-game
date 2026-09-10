@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Axe, Coins, Drumstick, TreePine, Swords, Crown, Home, Castle,
+  Axe, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
@@ -207,9 +207,9 @@ export default function App() {
         <div className="flex items-start justify-between gap-2 p-2 sm:p-3">
           {/* resources */}
           <div className="kz-border-bottom panel-iron pointer-events-auto flex items-center gap-1 rounded-xl px-2 py-1.5 sm:gap-2 sm:px-3">
-            <Res icon={<TreePine className="h-4 w-4 text-lime-300" />} val={hud?.wood ?? 0} />
-            <Res icon={<Drumstick className="h-4 w-4 text-rose-300" />} val={hud?.food ?? 0} />
-            <Res icon={<Coins className="h-4 w-4 text-yellow-300" />} val={hud?.gold ?? 0} />
+            <Res icon={<Ico name="wood" className="h-4 w-4 text-lime-300" />} val={hud?.wood ?? 0} />
+            <Res icon={<Ico name="food" className="h-4 w-4 text-rose-300" />} val={hud?.food ?? 0} />
+            <Res icon={<Ico name="gold" className="h-4 w-4 text-yellow-300" />} val={hud?.gold ?? 0} />
             <div className="ml-1 hidden items-center gap-1 rounded-lg bg-black/30 px-2 py-1 text-xs font-bold sm:flex">
               <Users className="h-3.5 w-3.5 text-sky-300" />
               <span className={(hud && hud.pop >= hud.popCap) ? 'text-red-400' : 'text-white'}>{hud?.pop ?? 0}/{hud?.popCap ?? 10}</span>
@@ -373,7 +373,7 @@ export default function App() {
               <ScrollText className="h-4 w-4" />
             </IconBtn>
             <IconBtn onClick={() => setShowGreats(true)} label="Великие люди степи (J)">
-              <span className="relative text-sm leading-none"><Ico name="sparkle" />{(hud?.greats?.some(x => x.afford) ?? false) &&
+              <span className="relative text-sm leading-none"><Ico name="sparkle" className="h-4 w-4" />{(hud?.greats?.some(x => x.afford) ?? false) &&
                 <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full bg-amber-400" />}</span>
             </IconBtn>
             <IconBtn onClick={() => setShowSettings(true)} label="Настройки">

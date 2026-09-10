@@ -579,7 +579,10 @@ export function drawIcon(ctx: CanvasRenderingContext2D, name: string, x: number,
     const fill = part.f === 'cur' ? color : part.f;
     const stroke = part.s === 'cur' ? color : (part.s ?? color);
     if (fill) { ctx.fillStyle = fill; ctx.fill(p); }
-    if (part.s !== 'none') { ctx.strokeStyle = stroke; ctx.lineWidth = part.w ?? 1.7; ctx.stroke(p); }
+    // Обводка задана в единицах viewBox (24) и масштабируется вместе с иконкой:
+    // на 10-px иконке она становилась 0.7 px и растворялась, на 22-px — толстела.
+    // Держим на экране не тоньше 1.1 px (в единицах viewBox — 1.1/k).
+    if (part.s !== 'none') { ctx.strokeStyle = stroke; ctx.lineWidth = Math.max(part.w ?? 1.7, 1.1 / k); ctx.stroke(p); }
   }
   ctx.restore();
 }

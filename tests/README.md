@@ -8,6 +8,7 @@ node tests/shift-test.mjs      # посменная работа, сутки, у
 node tests/rest-check.cjs      # габариты спрайтов сценок отдыха (1.0.068)
 node tests/hotkeys-test.mjs    # горячие клавиши без дублей, Home/N (1.0.101)
 node tests/weather-test.mjs    # погода степи: эффекты, сейв, честность (1.0.102)
+node tests/icons-scale.mjs     # масштаб иконок: порог 12px, inline-block, обводка (1.0.103)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —
