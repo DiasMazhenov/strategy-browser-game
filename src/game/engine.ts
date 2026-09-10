@@ -347,6 +347,7 @@ export interface AgeReport {
 export interface HudSnapshot {
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
+  rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
   cityTier: number; cityName: string;             // аул -> қала -> астана
   pasture: number;                                // % качества пастбища (кочевой)
   migrating: number;                              // сек до перекочёвки
@@ -501,6 +502,14 @@ export class Game {
   mode: 'settled' | 'nomad' = 'settled';
   terr = new Map<string, 1 | 2>();        // гекс "q,r" -> 1 игрок, 2 враг
   terrCount = 0; terrLand = 0; terrDirty = true;
+  // ── ЛОЯЛЬНОСТЬ ГРАНИЦ (п.23, Civ6 loyalty) ──
+  // terr — базовое право по штампам построек; loyal — «канат» на каждом гексе:
+  // +1 полностью наш, −1 полностью джунгарский. Давление считается с обеих
+  // сторон, гекс без контр-давления седеет (|loyal| < 0.5 — мятежный) и в
+  // конце концов меняет владельца. Только лояльные гексы идут в счёт победы.
+  loyal = new Map<string, number>();
+  loyalT = 0;                     // тик пересчёта давления (раз в 1.5 с)
+  rebelCount = 0; lostHexes = 0; wonHexes = 0;  // мятежных сейчас / перешло за партию
   cityTier = 0; cityT = 0;
   valley = { x: 0, y: 0, r: 1 };
   valleyLandP = { x: 0, y: 0 }; valleyLandE = { x: 0, y: 0 };
@@ -2605,6 +2614,7 @@ export class Game {
     const data = {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
       mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep),
+      loyal: [...this.loyal.entries()].filter(([, v]) => Math.abs(v) < 1), lostHexes: this.lostHexes, wonHexes: this.wonHexes,
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
       kills: this.kills, razed: this.razed, gatheredTotal: this.gatheredTotal, woodGathered: this.woodGathered,
       gotWood: this.gotWood, gotFood: this.gotFood, gotGold: this.gotGold, ageMark: this.ageMark,
@@ -2760,6 +2770,9 @@ export class Game {
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.mode = d.mode === 'nomad' ? 'nomad' : 'settled';
+      // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
+      this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
+      this.lostHexes = d.lostHexes ?? 0; this.wonHexes = d.wonHexes ?? 0;
       if (this.mode === 'nomad' && Array.isArray(d.siteDep)) {
         d.siteDep.forEach((v: number, i: number) => { if (this.sites[i]) this.sites[i].dep = v; });
         this.siteI = typeof d.siteI === 'number' ? Math.min(Math.max(0, d.siteI), this.sites.length - 1) : 0;
@@ -3468,7 +3481,68 @@ export class Game {
       }
     };
     stamp(1); stamp(2);   // враг печатает поверх: фронт границ честный
-    for (const v of this.terr.values()) if (v === 1) this.terrCount++;
+    // лояльность переписывает штамп: гекс, перетянутый давлением, принадлежит тому,
+    // к кому склонился канат, пока штамп владельца не восстановит контр-давление
+    for (const [k, v] of this.loyal) {
+      if (!this.terr.has(k)) { this.loyal.delete(k); continue; }
+      if (v <= -1) this.terr.set(k, 2); else if (v >= 1) this.terr.set(k, 1);
+    }
+    this.terrCount = 0; this.rebelCount = 0;
+    for (const [k, v] of this.terr) {
+      const l = this.loyal.get(k) ?? (v === 1 ? 1 : -1);
+      if (v === 1) { if (l >= 0.5) this.terrCount++; else this.rebelCount++; }
+    }
+  }
+  // Давление на гекс от построек и отрядов стороны: ближе — сильнее, гарнизон и
+  // башни — якоря. Радиус в гексах; вес затухает линейно.
+  private loyalPressure(owner: 'player' | 'enemy', q: number, r: number): number {
+    let p = 0;
+    const [wx, wy] = hexCenterWorld(q, r);
+    for (const b of this.blds) {
+      if (b.owner !== owner || b.done < 1) continue;
+      const d = Math.hypot(b.x - wx, b.y - wy);
+      const R = b.key === 'towncenter' ? 420 : b.key === 'tower' ? 300 : b.key === 'mosque' ? 320 : b.key === 'wonder' ? 360 : 200;
+      if (d > R) continue;
+      const w = b.key === 'towncenter' ? 3 : b.key === 'tower' ? 2 : b.key === 'mosque' ? 2 : b.key === 'wonder' ? 2.5 : b.key === 'house' ? 0.8 : 0.5;
+      p += w * (1 - d / R) + (b.garrison?.length ?? 0) * 0.15;
+    }
+    for (const u of this.units) {
+      if (u.owner !== owner || u.hp <= 0 || u.key === 'villager' || u.key === 'trader' || u.key === 'scout') continue;
+      const d = Math.hypot(u.x - wx, u.y - wy);
+      if (d > 160) continue;
+      p += 0.35 * (1 - d / 160);
+    }
+    return p;
+  }
+  updateLoyalty(dt: number) {
+    if (this.mode !== 'settled' || !this.terr.size) return;
+    this.loyalT += dt;
+    if (this.loyalT < 1.5) return;
+    const step = this.loyalT; this.loyalT = 0;
+    let changed = false;
+    for (const [k, ow] of this.terr) {
+      const [q, r] = k.split(',').map(Number);
+      const pp = this.loyalPressure('player', q, r), pe = this.loyalPressure('enemy', q, r);
+      // порог: без чужого давления гекс сам возвращается к владельцу штампа
+      const cur = this.loyal.get(k) ?? (ow === 1 ? 1 : -1);
+      let drift: number;
+      if (pp < 0.05 && pe < 0.05) drift = ow === 1 ? 0.04 : -0.04;
+      else drift = clamp((pp - pe) * 0.03, -0.06, 0.06);   // разница давлений; кап ±0.06/с → полный переход ~35 с
+      const next = clamp(cur + drift * step, -1, 1);
+      if (Math.abs(next - cur) > 1e-4) this.loyal.set(k, next);
+      if ((ow === 1 && next <= -1) || (ow === 2 && next >= 1)) {
+        changed = true;
+        if (ow === 1) { this.lostHexes++; if (this.lostHexes % 3 === 1) { this.pushBanner('{i:flag} Гекс отпал к джунгарам', 'Без башни, мечети или войск граница не держится', 3); } }
+        else { this.wonHexes++; if (this.wonHexes % 3 === 1) this.pushBanner('{i:flag} Гекс перешёл к нам', 'Давление форпоста склонило степь', 3); }
+      }
+    }
+    if (changed) this.terrDirty = true;
+    else {
+      // счётчики мятежных обновляем без полного пересчёта штампов
+      let tc = 0, rc = 0;
+      for (const [k, v] of this.terr) if (v === 1) { const l = this.loyal.get(k) ?? 1; if (l >= 0.5) tc++; else rc++; }
+      this.terrCount = tc; this.rebelCount = rc;
+    }
   }
   startKosh(i: number) {
     if (this.mode !== 'nomad' || this.migrating > 0 || i === this.siteI || !this.sites[i]) return;
@@ -3504,6 +3578,7 @@ export class Game {
   private updateModes(dt: number) {
     if (this.mode === 'settled') {
       if (this.terrDirty) { this.terrDirty = false; this.recomputeTerr(); }
+      this.updateLoyalty(dt);
       this.cityT += dt;
       if (this.cityT > 2) {
         this.cityT = 0;
@@ -6893,7 +6968,7 @@ export class Game {
       unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
         archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
       mode: this.mode,
-      terrCount: this.terrCount, terrLand: this.terrLand,
+      terrCount: this.terrCount, terrLand: this.terrLand, rebelCount: this.rebelCount,
       cityTier: this.cityTier, cityName: ['Аул', 'Қала', 'Астана'][this.cityTier],
       pasture: this.mode === 'nomad' ? Math.round((1 - (this.sites[this.siteI]?.dep ?? 0)) * 100) : 100,
       migrating: Math.max(0, Math.ceil(this.migrating)),
@@ -7143,7 +7218,11 @@ export class Game {
           const ow = this.terr.get(q + ',' + r);
           if (ow) {
             const col = ow === 1 ? '246,212,124' : '248,113,113';
-            ctx.fillStyle = `rgba(${col},0.10)`;
+            const ly = this.loyal.get(q + ',' + r) ?? (ow === 1 ? 1 : -1);
+            const rebel = Math.abs(ly) < 0.5;   // спорный гекс: серый налёт, мерцает тем сильнее, чем ближе к переходу
+            ctx.fillStyle = rebel
+              ? `rgba(150,150,160,${(0.16 + (0.5 - Math.abs(ly)) * 0.3 * (0.6 + 0.4 * Math.sin(this.time * 4 + q))).toFixed(3)})`
+              : `rgba(${col},0.10)`;
             ctx.beginPath();
             ctx.moveTo(hx + HEX_PTS[0][0], hy - up + HEX_PTS[0][1]);
             for (let i = 1; i < 6; i++) ctx.lineTo(hx + HEX_PTS[i][0], hy - up + HEX_PTS[i][1]);

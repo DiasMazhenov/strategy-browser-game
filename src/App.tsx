@@ -318,8 +318,9 @@ export default function App() {
             )}
             {hud?.mode === 'settled' && (
               <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-100"
-                title={`Территориальная победа: 60% земли долины (${hud.terrLand} гексов) под границей`}>
+                title={`Территориальная победа: 60% земли долины (${hud.terrLand} гексов) под ЛОЯЛЬНОЙ границей${hud.rebelCount ? `\nМятежных гексов: ${hud.rebelCount} — рядом давят джунгары; поставьте башню, мечеть или отряд` : ''}`}>
                 <Ico name="flag" /> {hud.cityName} · {hud.terrCount}/{hud.terrLand}
+                {hud.rebelCount > 0 && <span className="rounded-full bg-slate-400/40 px-1 text-[9px] text-slate-100" title="Спорные гексы"><Ico name="warn" /> {hud.rebelCount}</span>}
               </div>
             )}
             {hud?.mode === 'nomad' && (

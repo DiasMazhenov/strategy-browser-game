@@ -9,6 +9,7 @@ node tests/rest-check.cjs      # габариты спрайтов сценок 
 node tests/hotkeys-test.mjs    # горячие клавиши без дублей, Home/N (1.0.101)
 node tests/weather-test.mjs    # погода степи: эффекты, сейв, честность (1.0.102)
 node tests/icons-scale.mjs     # масштаб иконок: порог 12px, inline-block, обводка (1.0.103)
+node tests/loyalty-sim.mjs     # лояльность границ: канат давлений, сейв (1.0.104)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —
