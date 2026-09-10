@@ -13,14 +13,14 @@ console.log('\n=== 2. Саботаж ===');
 ok(/sabotage\(kind: 'supplies' \| 'horses' \| 'envoy'\)/.test(eng), 'три диверсии');
 ok(/360 \* 360\) \{ this\.floater\(u\.x, u\.y - 40, 'Подкрасться к ставке джунгар/.test(eng), 'только у ставки джунгар');
 ok(/this\.waveT \+= 120;   \/\/ рейд задержан/.test(eng), 'сжечь запас: рейд +2 мин');
-ok(/cav\.hp = 0; this\.burst/\.test(eng) && /kind: 'horse', x: u\.x \+ rand\(-30, 30\)/.test(eng), 'угнать табун: −конница, +лошади');
+ok(/cav\.hp = 0; this\.burst/.test(eng) && /kind: 'horse', x: u\.x \+ rand\(-30, 30\)/.test(eng), 'угнать табун: −конница, +лошади');
 ok(/this\.envoyFreeze\[nid\] = 180;/.test(eng) && /племя 3 минуты недоступно/.test(app), 'перехват посланника: заморозка 180 с');
 ok(/!this\.envoyFreeze\[nid\]\)/.test(eng), 'джунгары не вкладываются в замороженное племя');
 ok(/if \(this\.envoyFreeze\[nid\] > 0\) return;   \/\/ племя заморожено/.test(eng), 'и набегами не провоцируют');
 ok(/u\.sabCd = 90; this\.sound\.research\(\);/.test(eng), 'кулдаун 90 с');
 
 console.log('\n=== 3. Контригра и HUD ===');
-ok(/Math\.random\(\) < 0\.22 && this\.watchPosts\.length/.test(eng) && /Бий врага вскрыл сеть!/.test(eng) && /this\.score = Math\.max\(0, this\.score - 100\);/.test(eng), 'бий вскрывает сеть: точки + 100 очков');
+ok(/Math\.random\(\) < 0\.22 && this\.watchPosts\.length/.test(eng) && /Бий врага вскрыл сеть дозоров/.test(eng) && /this\.score = Math\.max\(0, this\.score - 100\);/.test(eng), 'бий вскрывает сеть: точки + 100 очков');
 ok(/scoutNet: \{ posts: number; raidSeen: boolean; raidIn: number; army: number; cd: number \};/.test(eng), 'разведсводка в HUD');
 ok(/Саботаж \(п\.17\)/.test(app) && /placeWatch\(\)/.test(app), 'панель саботажа и кнопка дозора');
 ok(/watchPosts: this\.watchPosts, envoyFreeze: this\.envoyFreeze,/.test(eng), 'сеть ездит в сейве');
