@@ -409,6 +409,7 @@ export interface HudSnapshot {
   prayerTruce: boolean;   // идёт азан — враг не атакует
   savedAgo: number;       // сколько игровых секунд назад сохранялась партия (-1 — ни разу)   // экран итогов эпохи (null — закрыт)
   atWar: boolean; grievance: number; casusBelli: number; morale: number;
+  aiAdapt: number;   // решимость хунтайджи 0.72..1.42 (п.33): видно в дипломатии
   tradeRoute: boolean; napT: number; condemned: boolean; tributeT: number; hasMarket: boolean;
   woodDiscount: number;   // множитель цены дерева от союза с ремесленниками (1 = без скидки)
   playerPow: number; enemyPow: number; wonderT: number; wonderHold: number;
@@ -574,6 +575,9 @@ export class Game {
 
   // ── дипломатия (в стиле Civilization) ──
   atWar = false;                 // война с ИИ-соперником
+  // ── ДИНАМИЧЕСКИЙ ИИ (п.33): решимость хунтайджи 0.72..1.42 от баланса сил ──
+  aiAdapt = 1;                   // множитель давления: волны, темп, неприязнь, коалиции
+  coalitionTried: Record<string, boolean> = {};  // кого уже подкупали (по разу на племя)
   grievance = 8;                 // неприязнь ИИ (0..100)
   casusBelli = 0;                // оправданность войны у ИИ (0..1)
   warT = 0;                      // длительность текущей войны
@@ -2876,7 +2880,7 @@ export class Game {
       natW: this.natWonders.map(w => ({ k: w.kind, x: w.x, y: w.y })), natSeen: this.natSeen,
       relicsHeld: this.relicsHeld,
       wisdom: this.wisdom, greatsCalled: this.greatsCalled,
-      dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
+      dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT, aiAdapt: this.aiAdapt, coalition: this.coalitionTried,
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT,
         uniteT: this.uniteT, uniteAnn: this.uniteAnn },
       era: { s: this.eraState, d: this.eraDedication, h: this.eraHeroic, c: this.eraHeroicCharge },
@@ -3023,6 +3027,9 @@ export class Game {
       if (this.relicsHeld > 0) for (let i = 0; i < Math.min(this.relics.length, this.relicsHeld); i++) this.relics[i].taken = true;
       this.questsDone = d.questsDone || {};
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
+        // п.33: решимость и список подкупленных переживают загрузку
+        this.aiAdapt = typeof d.dip.aiAdapt === 'number' ? clamp(d.dip.aiAdapt, 0.72, 1.42) : 1;
+        this.coalitionTried = d.dip.coalition && typeof d.dip.coalition === 'object' ? d.dip.coalition : {};
         this.uniteT = d.dip.uniteT ?? 0; this.uniteAnn = !!d.dip.uniteAnn;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
       if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0;
@@ -4653,7 +4660,7 @@ export class Game {
         this.sound.horn();
         this.warnNextWave();
       }
-      if (this.waveT <= 0) { this.launchWave(); this.waveT = Math.max(34, DIFF[this.difficulty].waveInterval - this.wave * 3.2); }
+      if (this.waveT <= 0) { this.launchWave(); this.waveT = Math.max(30, (DIFF[this.difficulty].waveInterval - this.wave * 3.2) / this.aiAdapt); }
     } else {
       // в мире таймер набегов держим «наготове», но не запускаем
       this.waveT = Math.min(this.waveT, DIFF[this.difficulty].waveInterval);
@@ -6953,7 +6960,8 @@ export class Game {
   waveComp(): UnitKey[] {
     const diff = DIFF[this.difficulty];
     const comp: UnitKey[] = [];
-    const n = Math.round(diff.waveBase + this.wave * diff.waveGrowth);
+    // п.33: решимость хунтайджи меняет размер волны (корень — чтобы не молох)
+    const n = Math.round((diff.waveBase + this.wave * diff.waveGrowth) * Math.sqrt(this.aiAdapt));
     for (let i = 0; i < n; i++) comp.push('swordsman');
     if (this.wave >= 2) for (let i = 0; i < Math.ceil(n * 0.6); i++) comp.push('archer');
     if (this.wave >= 2) for (let i = 0; i < Math.ceil(n * 0.5); i++) comp.push('spearman');
@@ -7004,6 +7012,12 @@ export class Game {
 
     const pm = this.milStrength('player');
     const em = this.milStrength('enemy');
+    // ── ДИНАМИЧЕСКИЙ ИИ (п.33): подстройка под баланс сил ──
+    // Доминируем — хунтайджи давит сильнее (волны крупнее/чаще, злее дипломатия,
+    // подкуп племён). Отстаём — набеги реже и мягче: добивать отстающего бессмысленно,
+    // игрок должен уметь догонять.
+    const ratio = pm / Math.max(1, em);
+    this.aiAdapt = clamp(0.72 + (Math.min(2.2, ratio) - 1) * 0.4, 0.72, 1.42);
 
     if (this.atWar) {
       this.warT += 5;
@@ -7065,6 +7079,7 @@ export class Game {
     if (army > 24) g += diff.aiAggression * 0.4;
     // лёгкий фоновый дрейф с течением времени (торговля гасит неприязнь — уже учтена выше)
     g += 0.25 + diff.aiAggression * 0.15;
+    g *= this.aiAdapt;   // п.33: решимость хунтайджи ускоряет и остывает неприязнь
     this.grievance = Math.min(100, this.grievance + g);
 
     // копим повод (casus belli)
@@ -7226,7 +7241,21 @@ export class Game {
     }
   }
 
+  // ── коалиция племён (п.33): доминируешь — хунтайджи подкупает нейтралитет ──
+  private coalitionTry() {
+    if (this.aiAdapt < 1.2 || this.wave < 6 || this.wave % 3 !== 0) return;
+    const cands = TRIBE_IDS.filter(nid => this.metNation(nid) && this.tribeRel[nid] !== 'hostile' && !this.coalitionTried[nid]);
+    if (!cands.length) return;
+    const nid = cands[(Math.random() * cands.length) | 0];
+    this.coalitionTried[nid] = true;
+    this.tribeRel[nid] = 'hostile';
+    for (const e of this.units) if (e.tribe && this.unitTribeNation(e) === nid) { e.aggro = true; }
+    const def = NATION_BY_ID[nid];
+    this.pushBanner('{i:skull} Коварство хунтайджи', `Галдан подкупил «${def?.name ?? nid}»: дары и посланники могут вернуть племя`, 4.5);
+  }
+
   launchWave() {
+    this.coalitionTry();
     this.wave++;
     const comp = this.waveComp();
     const etc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
@@ -7254,8 +7283,8 @@ export class Game {
 
   enemyAI() {
     const diff = DIFF[this.difficulty];
-    // trickle
-    this.eres.wood += 6 * diff.enemyGather; this.eres.food += 6 * diff.enemyGather; this.eres.gold += 3.5 * diff.enemyGather;
+    // trickle (п.33: темп экономики ИИ дышит вместе с решимостью)
+    this.eres.wood += 6 * diff.enemyGather * this.aiAdapt; this.eres.food += 6 * diff.enemyGather * this.aiAdapt; this.eres.gold += 3.5 * diff.enemyGather * this.aiAdapt;
     const etc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
     if (!etc) return;
     const evills = this.units.filter(u => u.owner === 'enemy' && u.key === 'villager');
@@ -7406,7 +7435,7 @@ export class Game {
       ageReport: this.ageReport,
       prayerTruce: this.prayerTruce(),
       savedAgo: this.lastSaveT < 0 ? -1 : Math.max(0, Math.floor(this.time - this.lastSaveT)),
-      atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale,
+      atWar: this.atWar, grievance: Math.round(this.grievance), casusBelli: this.casusBelli, morale: this.morale, aiAdapt: Math.round(this.aiAdapt * 100) / 100,
       tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
       hasMarket: this.marketCount() > 0,
       woodDiscount: this.woodDiscount(),
