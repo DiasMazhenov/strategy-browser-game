@@ -499,7 +499,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // казахская раса (игрок) рисуется отдельным набором спрайтов; враги/нейтралы — штатными
   // атты-мерген (п.24) рисуется кадрами жасауыла с оливковой перекраской и луком — своего арта нет
   const isHA = u.key === 'horsearcher';
-  const sk = (isHA ? 'cavalry' : u.key) as UnitKey;
+  const isMusk = u.key === 'musketeer';
+  const sk = (isHA ? 'cavalry' : isMusk ? 'archer' : u.key) as UnitKey;
   const isKz = u.owner === 'player' && !!KZ_BASE[sk];
   const kzKey = 'kz_' + sk;
   const base = isKz ? KZ_BASE[sk] : UNIT_IMAGES[sk];
@@ -515,7 +516,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   let workSwing = 0;   // фаза удара инструментом 0..1 (для выпада на кадре работы)
   const isVill = u.key === 'villager';
   const isSword = u.key === 'swordsman';
-  const isArch = u.key === 'archer';
+  const isArch = u.key === 'archer' || u.key === 'musketeer';
   const isSpear = u.key === 'spearman';
   const isKnight = u.key === 'knight';
   const isCavalry = u.key === 'cavalry' || u.key === 'horsearcher';
@@ -731,7 +732,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isHerder = !!(u as U & { herder?: boolean }).herder && u.key === 'villager' && u.owner === 'player';
   const mounted = isMounted || isHerder || u.key === 'trader';
   const beast = u.key === 'wolf';
-  const siege = u.key === 'catapult' || u.key === 'ram';
+  const siege = u.key === 'catapult' || u.key === 'ram' || u.key === 'falconet';
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
   const gait = mounted || beast ? Math.sin(u.anim * 1.0) : step; // у галопа фаза та же, но выше амплитуда
   let bob: number, rock: number, lean: number, sway: number;
@@ -773,11 +774,23 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     ? tintedFrame(im, anKey, tier >= 2 ? '#fbbf24' : '#e2e8f0', tier >= 2 ? 0.30 : 0.20)
     : im;
   if (isHA) drawIm = tintedFrame(im, anKey + '|ha', '#65a30d', 0.28);   // оливковый чапан — отличим от жасауыла
+  if (isMusk) drawIm = tintedFrame(im, anKey + '|mk', '#1e293b', 0.34);  // тёмный кафтан стрелка
   // Высота отрисовки — an.h * scale, а НЕ H: при поправке на надголовный вынос
   // (лук мергена, пика найзагера) кадр рисуется крупнее целевой H, чтобы рост
   // самой фигуры совпал с остальными. Якорь ay задан от низа кадра и тоже
   // умножен на scale, поэтому ноги остаются на земле.
   ctx.drawImage(drawIm, -an.ax * scale, -an.ay * scale, w, an.h * scale);
+  if (isMusk) {
+    // длинный ствол мылтық с сошкой поверх кадра лучника
+    const hh = an.h * scale;
+    const gx = w * 0.05, gy = -hh * 0.5;
+    ctx.strokeStyle = '#3f2a14'; ctx.lineWidth = Math.max(2, hh * 0.03); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx - w * 0.15, gy + hh * 0.08); ctx.lineTo(gx + w * 0.42, gy - hh * 0.06); ctx.stroke();
+    ctx.strokeStyle = '#6b7280'; ctx.lineWidth = Math.max(1.2, hh * 0.016);
+    ctx.beginPath(); ctx.moveTo(gx + w * 0.05, gy + hh * 0.03); ctx.lineTo(gx + w * 0.44, gy - hh * 0.065); ctx.stroke();
+    ctx.strokeStyle = '#3f2a14'; ctx.lineWidth = 1.2;   // сошка
+    ctx.beginPath(); ctx.moveTo(gx + w * 0.3, gy - hh * 0.03); ctx.lineTo(gx + w * 0.3, 0); ctx.stroke();
+  }
   if (isHA) {
     // лук за спиной всадника: дуга + тетива, в координатах кадра (после scale/flip)
     const hh = an.h * scale;
@@ -1234,7 +1247,7 @@ const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.sta
 export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
   const herder = u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder;
   const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'trader' || herder;
-  const shadowR = u.key === 'catapult' || u.key === 'ram' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
+  const shadowR = u.key === 'catapult' || u.key === 'ram' ? 21 : u.key === 'falconet' ? 17 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
   diamondShadow(ctx, ix + 2, iy + 8, shadowR, shadowR / 2.2, 'rgba(0,0,0,0.28)');
   // кольцо выделения
@@ -1272,6 +1285,7 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
     else if (u.key === 'sheep' || u.key === 'cow' || u.key === 'deer') drawLivestock(ctx, u, x, y, sw, bob);
     else if (u.key === 'catapult') drawCatapult(ctx, u, x, y, sw, time);
     else if (u.key === 'ram') drawRam(ctx, u, x, y, sw, time);
+    else if (u.key === 'falconet') drawFalconet(ctx, u, x, y, sw, time);
     // торговец «верхом», но не на коне: пока спрайт верблюда не загрузился — рисуем
     // купца пешим (drawHumanoid), а НЕ рыцарским конём из drawHorse
     else if (mounted && u.key !== 'trader') { drawHorse(ctx, u, x, y, sw, time); drawRider(ctx, u, x, y, sw, atk, time, t); }
@@ -1757,6 +1771,31 @@ function drawRam(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw:
   // цепи подвеса
   ln(ctx, x + wob - 8, y - 18, bx0 + f * 8, by0, 1, '#3f3f46');
   ln(ctx, x + wob + 8, y - 18, bx0 + f * 28, by0, 1, '#3f3f46');
+}
+
+// ── ФАЛЬКОНЕТ: короткий ствол на двухколёсном лафете, откат при выстреле ──
+function drawFalconet(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw: number, _time: number) {
+  const f = u.face;
+  const move = moving(u);
+  const wob = move ? Math.sin(u.anim) * 1.2 : 0;
+  const recoil = u.atkAnim > 0 ? Math.sin(Math.min(1, u.atkAnim * 1.6) * Math.PI) * 6 : 0;
+  const ox = x + wob - f * recoil;
+  // колёса
+  for (const wx of [-7, 7]) {
+    cx(ctx, ox + wx, y + 6, 7, '#2e1a06'); cx(ctx, ox + wx, y + 6, 5, '#4a2c10'); cx(ctx, ox + wx, y + 6, 2, '#a8824a');
+    const rot = move ? u.anim * f : 0;
+    for (let i = 0; i < 3; i++) { const a = rot + i * Math.PI / 1.5; ln(ctx, ox + wx, y + 6, ox + wx + Math.cos(a) * 5, y + 6 + Math.sin(a) * 5, 1.5, '#c9a05c'); }
+  }
+  // лафет: станина назад
+  ln(ctx, ox, y + 2, ox - f * 18, y + 7, 4, '#5c3f1c');
+  px(ctx, ox - 6, y - 4, 12, 7, '#6b4a22');
+  // ствол: бронзовый, слегка вверх
+  ln(ctx, ox - f * 6, y - 4, ox + f * 22, y - 10, 6, '#7c5a1e');
+  ln(ctx, ox - f * 6, y - 5, ox + f * 22, y - 11, 2, '#c8a44a');
+  cx(ctx, ox + f * 22, y - 10, 3.5, '#3f2a14');   // дуло
+  cx(ctx, ox - f * 5, y - 4, 4, '#8a6a2a');       // казённик
+  // дымок после выстрела
+  if (u.atkAnim > 0.3) { ctx.globalAlpha = u.atkAnim * 0.5; cx(ctx, ox + f * 28, y - 14, 5 + (1 - u.atkAnim) * 6, '#d6d3d1'); ctx.globalAlpha = 1; }
 }
 
 // ── НОЧНОЙ ФАКЕЛ У ЗДАНИЯ ────────────────────────────────────────────────────

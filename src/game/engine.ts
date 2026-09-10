@@ -226,7 +226,8 @@ interface Unit {
 // опыт для следующего уровня: 3 убийства → ур.2, далее +2 за ранг
 function xpForLevel(level: number): number { return (level + 2) * 3; }
 // тип урона юнита для камень-ножницы-бумаги
-function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' {
+function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' | 'gun' {
+  if (k === 'musketeer' || k === 'falconet') return 'gun';   // порох: броня не спасает
   if (k === 'spearman' || k === 'archer' || k === 'horsearcher') return 'pierce';
   if (k === 'catapult' || k === 'ram') return 'blunt';
   return 'blade';
@@ -234,13 +235,14 @@ function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' {
 // класс брони цели
 function armorClass(k: UnitKey): 'inf' | 'cav' | 'siege' | 'soft' {
   if (k === 'knight' || k === 'cavalry' || k === 'horsearcher') return 'cav';
-  if (k === 'catapult' || k === 'ram') return 'siege';
+  if (k === 'catapult' || k === 'ram' || k === 'falconet') return 'siege';
   if (k === 'swordsman' || k === 'spearman') return 'inf';
   return 'soft';
 }
 // множитель контры: копья бьют конницу, конница топчет лучников/пехоту, клинки рубят пехоту/осаду
 function dmgMult(att: UnitKey, target: UnitKey): number {
   const a = dmgType(att), t = armorClass(target);
+  if (a === 'gun') return t === 'siege' ? 0.8 : 1;   // пуля/ядро: ровно по всем живым, осадные машины держат
   if (a === 'pierce' && t === 'cav') return 1.6;   // копья/стрелы против конницы
   if (a === 'pierce' && t === 'soft') return 1.2;   // стрелы косят беззащитных
   if (a === 'pierce' && t === 'inf') return 0.85;   // пехота лучше держит уколы
@@ -262,7 +264,7 @@ export const DEDICATIONS = [
 export type DedicationId = typeof DEDICATIONS[number]['id'];
 const ERA_THRESHOLD = [0, 45, 70, 100];           // порог золотого века по номеру новой эпохи
 // какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
-const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram'];
+const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram', 'musketeer', 'falconet'];
 export function counterText(k: UnitKey): string {
   if (k === 'villager' || k === 'monk' || k === 'trader') return '';
   const parts: string[] = [];
@@ -273,6 +275,8 @@ export function counterText(k: UnitKey): string {
   }
   if (k === 'catapult') parts.push('×1.7 постройки');
   if (k === 'ram') parts.push('×3 стены и ворота', '×1.5 постройки');
+  if (k === 'musketeer') parts.push('пуля не знает брони: ×1 всем');
+  if (k === 'falconet') parts.push('ядро по площади: все в 55 px');
   // кто опасен для нас: контра в обратную сторону
   const threats: string[] = [];
   for (const t of COUNTER_SHOW) {
@@ -303,7 +307,7 @@ interface Bld {
 }
 interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
-interface Proj { x: number; y: number; vx: number; vy: number; tx: number; ty: number; targetU: number; targetB: number; dmg: number; owner: 'player' | 'enemy' | 'neutral'; life: number; kind: 'arrow' | 'bolt' | 'rock'; srcU?: number; }
+interface Proj { x: number; y: number; vx: number; vy: number; tx: number; ty: number; targetU: number; targetB: number; dmg: number; owner: 'player' | 'enemy' | 'neutral'; life: number; kind: 'arrow' | 'bolt' | 'rock' | 'ball' | 'shot'; srcU?: number; }
 export type WeatherKind = 'clear' | 'rain' | 'fog' | 'buran';
 export const WEATHER_DEFS: Record<WeatherKind, { name: string; icon: string; desc: string }> = {
   clear: { name: 'Ясно', icon: '☀️', desc: 'Небо чистое' },
@@ -3063,7 +3067,7 @@ export class Game {
   // множитель дальности стрелков/башен
   rangeMult(key: string, owner: string): number {
     if (owner !== 'player' || !this.hasTech('eagleEye')) return 1;
-    if (key === 'archer' || key === 'horsearcher' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
+    if (key === 'archer' || key === 'horsearcher' || key === 'musketeer' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
     return 1;
   }
   gatherMult(): number {
@@ -5544,7 +5548,7 @@ export class Game {
       if (dist2(u.x, u.y, u.homeX, u.homeY) > 120 * 120) this.moveTowardPath(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
       return;
     }
-    const isCata = u.key === 'catapult' || u.key === 'ram';   // осадные: ищут постройки сами
+    const isCata = u.key === 'catapult' || u.key === 'ram';   // осадные: ищут постройки сами (фальконет — нет, он против строя)
     // auto-acquire
     if (u.retarget <= 0 && !tu && !tb) {
       u.retarget = 0.4;
@@ -6217,7 +6221,8 @@ export class Game {
     return true;
   }
   strike(att: Unit, tu?: Unit, tb?: Bld) {
-    const isRanged = att.key === 'archer' || att.key === 'catapult' || att.key === 'horsearcher';
+    const isRanged = att.key === 'archer' || att.key === 'catapult' || att.key === 'horsearcher' || att.key === 'musketeer' || att.key === 'falconet';
+    const isGun = att.key === 'musketeer' || att.key === 'falconet';
     const isCata = att.key === 'catapult';
     // удар по ИИ в мирное время = игрок сам начинает войну (волки не в счёт)
     if (att.owner === 'player' && !this.atWar) {
@@ -6227,7 +6232,7 @@ export class Game {
     // боевой клич (редко, чтобы не трещало) / вой волка
     if (att.key === 'wolf') { if (Math.random() < 0.08) this.sound.wolf(); }
     else if (att.owner === 'player' && (tu || tb) && Math.random() < 0.12) this.sound.voice(att.key, 'attack');
-    att.cd = isCata ? 3.2 : att.key === 'ram' ? 2.2 : att.key === 'archer' ? 1.35 : att.key === 'horsearcher' ? 1.5 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
+    att.cd = isCata ? 3.2 : att.key === 'ram' ? 2.2 : att.key === 'musketeer' ? 3.0 : att.key === 'falconet' ? 4.2 : att.key === 'archer' ? 1.35 : att.key === 'horsearcher' ? 1.5 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
     att.atkAnim = 1;
     const variance = rand(0.85, 1.15);
     let dmg = att.atk * variance;
@@ -6237,12 +6242,18 @@ export class Game {
     if (tu) dmg *= dmgMult(att.key, tu.key);
     if (tu?.key === 'ram' && dmgType(att.key) === 'pierce') dmg *= 0.4; // обитый кожей навес — стрелы вязнут
     if (isCata && tb) dmg *= 1.7; // катапульта особенно разрушительна для зданий
+    if (att.key === 'falconet' && tb) dmg *= 0.6; // фальконет — против строя, не стен
     if (att.key === 'ram' && tb) dmg *= (tb.key === 'wall' || tb.key === 'gate') ? 3 : 1.5; // таран: стены и ворота
     if (isRanged) {
       const tx = tu ? tu.x : tb ? tb.x : att.tx, ty = tu ? tu.y : tb ? tb.y : att.ty;
       const dx = this.tdx(tx - att.x), dy = this.tdy(ty - att.y), d = Math.max(1, Math.hypot(dx, dy));
-      const sp = isCata ? 300 : 420;
-      this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : att.key === 'horsearcher' ? 26 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind: isCata ? 'rock' : 'arrow', srcU: att.id });
+      const sp = isCata ? 300 : att.key === 'falconet' ? 520 : att.key === 'musketeer' ? 900 : 420;
+      const kind: Proj['kind'] = isCata ? 'rock' : att.key === 'falconet' ? 'ball' : att.key === 'musketeer' ? 'shot' : 'arrow';
+      this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : att.key === 'horsearcher' ? 26 : att.key === 'falconet' ? 12 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind, srcU: att.id });
+      if (isGun) { // вспышка и дым у дула
+        this.sound.boom(); this.burst(att.x + (dx / d) * 14, att.y - 12, att.key === 'falconet' ? 10 : 4, ['#e5e7eb', '#9ca3af', '#fde68a'], 40, 0.7);
+        if (att.key === 'falconet') this.trauma = Math.min(1, this.trauma + 0.05);
+      }
       if (isCata) { this.sound.boom(); this.trauma = Math.min(1, this.trauma + 0.12); this.burst(att.x, att.y - 26, 8, ['#a8a29e', '#78716c'], 120, 0.5); }
       else { this.sound.arrow(att); this.spark(att.x, att.y - 14, '#fef3c7'); }
     } else {
@@ -6605,7 +6616,19 @@ export class Game {
         } else if (Math.hypot(this.tdx(p.x - p.tx), this.tdy(p.y - p.ty)) < 14) hit = true;
       }
       if (hit || p.life <= 0) {
-        this.spark(p.x, p.y, p.kind === 'rock' ? '#d6d3d1' : '#fde68a');
+        if (p.kind === 'ball') {
+          // ядро: урон по площади 55 px всем ЧУЖИМ вокруг точки падения (кроме уже задетой цели)
+          const shooter = p.srcU != null ? this.units.find(u => u.id === p.srcU) : undefined;
+          for (const v of this.units) {
+            if (v.hp <= 0 || v.owner === p.owner || v.id === p.targetU || v.hidden) continue;
+            if (v.owner === 'neutral' && !v.bandit && !(v.tribe && v.aggro) && v.key !== 'wolf') continue;
+            const d2 = this.tdx(v.x - p.x) ** 2 + this.tdy(v.y - p.y) ** 2;
+            if (d2 < 55 * 55) this.damageUnit(v, p.dmg * (0.75 - Math.sqrt(d2) / 55 * 0.35), shooter);
+          }
+          this.burst(p.x, p.y, 14, ['#78716c', '#a8a29e', '#fbbf24'], 110, 0.6);
+          this.trauma = Math.min(1, this.trauma + 0.04);
+        }
+        this.spark(p.x, p.y, p.kind === 'rock' ? '#d6d3d1' : p.kind === 'shot' ? '#fef3c7' : '#fde68a');
         this.projs.splice(i, 1);
       }
     }
@@ -6622,6 +6645,8 @@ export class Game {
     if ((this.eage >= 1 && this.wave >= 3) || this.wave >= 5) for (let i = 0; i < Math.ceil(n * 0.4); i++) comp.push('knight');
     if ((this.eage >= 1 && this.wave >= 5) || this.wave >= 8) for (let i = 0; i < Math.ceil(n * 0.35); i++) comp.push('cavalry');
     if (this.eage >= 2 && this.wave >= 7) for (let i = 0; i < Math.ceil(n * 0.2); i++) comp.push('horsearcher');
+    // порох (п.27): в Веке Абылай хана джунгары приводят мылтықшы, а каждую 3-ю волну — фальконет
+    if (this.eage >= 3) { for (let i = 0; i < Math.ceil(n * 0.25); i++) comp.push('musketeer'); if (this.wave % 3 === 0) comp.push('falconet'); }
     // штурм (п.26): если у игрока есть стены — с 4-й волны идут тараны, чтобы не упираться
     const walls = this.blds.filter(b => b.owner === 'player' && (b.key === 'wall' || b.key === 'gate') && b.done >= 1).length;
     if (walls >= 6 && this.wave >= 4) for (let i = 0; i < 1 + Math.floor(walls / 14); i++) comp.push('ram');
@@ -6632,7 +6657,7 @@ export class Game {
   waveSummary(comp: UnitKey[]): string {
     const cnt: Record<string, number> = {};
     for (const k of comp) cnt[k] = (cnt[k] || 0) + 1;
-    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'ram', 'catapult'];
+    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'musketeer', 'ram', 'falconet', 'catapult'];
     // имена с учётом ступени врага — игрок сразу видит, что идёт тяжёлая пехота
     return order.filter(k => cnt[k]).map(k => `${cnt[k]}×${this.unitName(k, 'enemy')}`).join(', ');
   }
@@ -7522,9 +7547,10 @@ export class Game {
     for (const p of this.projs) {
       const [px, py] = toIso(p.x, p.y);
       const [px2, py2] = toIso(p.x - p.vx * 0.03, p.y - p.vy * 0.03);
-      ctx.strokeStyle = p.kind === 'rock' ? '#d6d3d1' : '#fef3c7'; ctx.lineWidth = p.kind === 'rock' ? 4 : 2.5;
+      ctx.strokeStyle = p.kind === 'rock' ? '#d6d3d1' : p.kind === 'shot' ? '#fde68a' : '#fef3c7'; ctx.lineWidth = p.kind === 'rock' ? 4 : p.kind === 'shot' ? 1.5 : 2.5;
       ctx.beginPath(); ctx.moveTo(px2, py2 - 16); ctx.lineTo(px, py - 16); ctx.stroke();
       if (p.kind === 'rock') { ctx.fillStyle = '#a8a29e'; ctx.beginPath(); ctx.arc(px, py - 16, 4, 0, 7); ctx.fill(); }
+      else if (p.kind === 'ball') { ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(px, py - 16, 3.2, 0, 7); ctx.fill(); }
     }
     // ── particles ──
     for (const p of this.parts) {
