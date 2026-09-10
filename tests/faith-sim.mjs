@@ -11,7 +11,7 @@ ok(/if \(m\.owner === 'player' && m\.key === 'mosque' && m\.done >= 1 && dist2\(
 ok(/delta \+= u\.owner === 'player' \? 1\.1 : -0\.9;/.test(eng), 'миссионер +1.1/с, шаман джунгар −0.9/с');
 ok(/if \(dist2\(u\.x, u\.y, b\.x, b\.y\) < 240 \* 240\) delta/.test(eng), 'юниты влияют в 240 px от лагеря');
 ok(/const cur = clamp\(was \+ delta \* step, -100, 100\);/.test(eng), 'кламп шкалы');
-ok(/const step = Math\.min\(this\.faithT, 3\); this\.faithT = 0;/.test(eng), 'лаг не даёт гигантских скачков');
+ok(/const step = Math\.min\(this\.faithT, 3\)/.test(eng) && /this\.faithT = 0;/.test(eng), 'лаг не даёт гигантских скачков');
 
 console.log('\n=== 2. Последствия веры ===');
 ok(/if \(cur >= 50 && this\.tribeRel\[nid\] === 'hostile'\)/.test(eng), '50 — враждебность снимается');

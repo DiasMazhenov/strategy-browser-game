@@ -17,7 +17,7 @@ ok(/\(k === 'o' \|\| k === 'щ'\)/.test(app), 'хоткей O (рус. Щ), ду
 
 console.log('\n=== 2. Эффекты политик в точках применения ===');
 ok(/if \(att\.owner === 'player' && this\.yasaActive\('sonzhar'\)\) dmg \*= 1\.12;/.test(eng), 'Сын жау: атака +12% в strike');
-ok(/total: this\.yasaActive\('teznayza'\) \? d\.trainTime \/ 1\.2 : d\.trainTime/.test(eng), 'Тез найза: найм −20% времени');
+ok(/d\.trainTime \/ \(this\.yasaActive\('teznayza'\) \? 1\.2 : 1\)/.test(eng), 'Тез найза: найм −20% времени');
 ok(/if \(this\.yasaActive\('zhorkor'\) && \(u\.carry\.type === 'wood' \|\| u\.carry\.type === 'food'\)\) m \*= 1\.15;/.test(eng), 'Жер қор: дерево/еда +15%');
 ok(/1\.2\) \* \(this\.yasaActive\('sauda'\) \? 1\.3 : 1\);/.test(eng), 'Сауда: базар-доход +30%');
 ok(/if \(this\.yasaActive\('sauda'\)\) bonus \*= 1\.3;/.test(eng), 'Сауда: караваны +30%');
