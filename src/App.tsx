@@ -383,6 +383,13 @@ export default function App() {
                 {hud.discontent >= 70 && <span title="Аул озлоблен" className="text-red-300"><Ico name="warn" className="h-3 w-3" /></span>}
               </div>
             )}
+            {/* Двор ханства (п.18) */}
+            {hud?.court && hud.court.length > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-[11px] font-black text-purple-200"
+                title={`Двор ханства (п.18):\n${hud.court.map(p => `• ${p.name} — ${p.traits[0] ?? ''}`).join('\n')}\nАманат скрепляет союз, но убьёте племя — предательство запомнят все. Супруга даёт черту, наследник вырастет батыром или бием.`}>
+                <Ico name="crown" className="h-3.5 w-3.5" />Двор: {hud.court.length}
+              </div>
+            )}
             {/* Қыс (п.15): индикатор сезона */}
             {hud?.season && (
               <div className={`pointer-events-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-black ${hud.season.winter ? 'bg-sky-400/20 text-sky-100' : 'bg-white/10 text-slate-200'}`}
@@ -1193,6 +1200,8 @@ export default function App() {
                   { key: 'gift', label: '{i:gift} Задобрить дарами', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}{i:gold} · прекратить вражду`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
                 ] : [
                   { key: 'gift', label: '{i:gift} Подарки и дары', desc: `${hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40}{i:gold} · заключить дружбу`, gold: hud.nations.find(n => n.id === hud.audience!.id)?.gift ?? 40 },
+                  { key: 'amanat', label: '{i:handshake} Просить аманат', desc: '150{i:gold} · союз скреплён заложником навеки (п.18)', gold: 150 },
+                  { key: 'marry', label: '{i:crown} Свадебный союз', desc: '250{i:gold} · черта супруга и наследник (нужен сюзеренитет)', gold: 250 },
                   { key: 'attack', label: '{i:swords} Потребовать ухода', desc: 'разозлить народ', danger: true },
                 ])
           }

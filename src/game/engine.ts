@@ -396,6 +396,7 @@ export interface HudSnapshot {
   tel: { wool: number; feltYurts: boolean; feltArmor: boolean; hasPen: boolean };   // төл (п.14)
   season: { name: string; winter: boolean; t: number; feltYurts: boolean };   // қыс (п.15)
   scoutNet: { posts: number; raidSeen: boolean; raidIn: number; army: number; cd: number };   // барлаушы (п.17)
+  court: { name: string; role: string; traits: string[] }[];   // двор ханства (п.18)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -571,6 +572,9 @@ export class Game {
   // ── Барлаушы (п.17): сеть дозоров и саботажа ──
   watchPosts: { x: number; y: number }[] = [];
   envoyFreeze: Record<string, number> = {};
+  // ── Аманат и брачные союзы (п.18): двор ханства ──
+  persons: { id: number; name: string; role: 'biy' | 'amanat' | 'spouse' | 'child' | 'batyr'; nation?: string; traits: string[]; t: number; childT?: number }[] = [];
+  personN = 1;
   kurultaiOpts: string[] = []; kurultaiPending = false; kurultaiDays = new Set<number>();
   chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
@@ -768,6 +772,7 @@ export class Game {
     // Главы истории (п.34): сценарная партия — режим и стартовые силы задаёт глава
     this.campStart = opts.campaign ? CAMPAIGNS.find(c => c.id === opts.campaign) : undefined;
     if (this.campStart) this.applyCampaignStart();
+    this.initCourt();   // аманат и брачные союзы (п.18): бии при дворе
     if (opts.loadSave && this.loadFromSave()) { /* восстановлено из сохранения */ }
     this.bind();
     this.centerOn(HOME.x, HOME.y, true);
@@ -802,6 +807,7 @@ export class Game {
     if (owner === 'player' && d.pop > 0 && key !== 'villager' && this.bonusTier('military', 1)) ageMult *= 1.1;
     // войлочные доспехи (п.14): конница крепче на 12%
     if (owner === 'player' && (key === 'knight' || key === 'cavalry' || key === 'horsearcher' || key === 'camelry') && this.feltArmor) ageMult *= 1.12;
+    if (owner === 'player' && (key === 'knight' || key === 'cavalry' || key === 'horsearcher' || key === 'camelry') && this.hasTrait('Воинственная')) ageMult *= 1.08;   // супруга-воин (п.18)
     const u: Unit = {
       id: this.nextId++, key, owner, x: wrapW(x), y: wrapH(y),
       hp: d.hp * ageMult, maxHp: d.hp * ageMult, atk: d.atk * (owner === 'neutral' ? 1 : ageMult),
@@ -1635,7 +1641,32 @@ export class Game {
     for (const u of this.units) if (u.key === 'scout' && (u.sabCd ?? 0) > 0) u.sabCd = (u.sabCd ?? 0) - 1;   // п.17
     const step = Math.min(this.faithT, 3) * (this.law === 'toler' ? 1.3 : 1);   // «Веротерпимость» (п.13)
     if (this.law === 'nalog') this.res.gold += 0.5;            // ясачный сбор (п.13)
-    this.authority = Math.min(100, this.authority + 0.15 * (this.law === 'erk' ? 0.5 : 1));   // авторитет хана копится медленно
+    this.authority = Math.min(100, this.authority + 0.15 * (this.law === 'erk' ? 0.5 : 1) * (this.hasTrait('Правое слово') ? 1.5 : 1));   // авторитет хана (п.13), Төле би (п.18)
+    this.discontent = Math.max(0, this.discontent - (this.hasTrait('Острый закон') ? 0.024 : 0.02));   // недовольство тает, Айтеке би ускоряет (п.18)
+    // п.18: наследник
+    const sp = this.persons.find(p => p.role === 'spouse');
+    if (sp && !sp.childT && this.time - sp.t > 120) {
+      sp.childT = this.time;
+      this.persons.push({ id: this.personN++, name: 'Наследник хана', role: 'child', traits: [], t: this.time });
+      this.chronicle.push('У хана родился наследник');
+      this.pushBanner('{i:crown} Родился наследник!', 'Через время он станет батыром или бием', 4); this.sound.coin();
+    }
+    const ch = this.persons.find(p => p.role === 'child');
+    if (ch && this.time - ch.t > 240) {
+      this.persons = this.persons.filter(p => p !== ch);
+      if (Math.random() < 0.5) {
+        this.addUnit('knight', 'player', HOME.x + rand(-40, 40), HOME.y + rand(-40, 40));
+        this.persons.push({ id: this.personN++, name: 'Наследник-батыр', role: 'batyr', traits: ['Кровь джунгарской войны'], t: this.time });
+        this.chronicle.push('Наследник вырос и стал батыром');
+        this.pushBanner('{i:saber} Наследник — батыр!', 'Юноша встал под знамя с конём и саблей', 4);
+      } else {
+        this.authority = Math.min(100, this.authority + 15);
+        this.persons.push({ id: this.personN++, name: 'Наследник-бий', role: 'biy', traits: ['Молодой бий: +15 авторитета хану'], t: this.time });
+        this.chronicle.push('Наследник вырос и стал бием курултая');
+        this.pushBanner('{i:scroll} Наследник — бий!', 'Сын хана вошёл в совет: +15 авторитета', 4);
+      }
+      this.sound.research();
+    }
     this.faithT = 0;   // лаг не даёт гигантских скачков
     for (const b of this.blds) {
       if (!b.tribe || !b.nationId || b.done < 0.5) continue;
@@ -1961,6 +1992,29 @@ export class Game {
       // дружеское племя успокаивается
       for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; for (const e of this.units) if (e.tribe && dist2(e.x, e.y, b.x, b.y) < 400 * 400) { e.aggro = false; e.targetU = -1; e.state = 'idle'; } }
       this.sound.coin(); this.pushBanner(`{i:handshake} Дружба с «${def.name}»`, `${def.title} ${def.ruler} рад союзу — племя не нападёт`, 4); this.pushHud(); return true;
+    }
+    if (act === 'amanat') {
+      if (rel !== 'friend') { this.floater(this.cam.x, this.cam.y - 100, 'Сначала нужна дружба', '#94a3b8', 14); return false; }
+      if (this.persons.some(p => p.role === 'amanat')) { this.floater(this.cam.x, this.cam.y - 100, 'Аманат уже живёт в ставке', '#94a3b8', 14); return false; }
+      if (this.res.gold < 150) { this.floater(this.cam.x, this.cam.y - 100, 'Нужно 150 {i:gold}', '#f87171', 15); return false; }
+      this.res.gold -= 150;
+      this.persons.push({ id: this.personN++, name: `Аманат из «${def.name}»`, role: 'amanat', nation: nid, traits: ['Заложник мира: племя не нападёт, союз крепок'], t: this.time });
+      this.score += 300; this.sound.coin();
+      this.chronicle.push(`Аманат из «${def.name}» прибыл в ставку — союз скреплён`);
+      this.pushBanner(`{i:handshake} Аманат прибыл!`, `Союз с «${def.name}» скреплён заложником (+300 очков). Не предайте его!`, 5);
+      this.pushHud(); return true;
+    }
+    if (act === 'marry') {
+      if (this.suzerain(nid) !== 'player') { this.floater(this.cam.x, this.cam.y - 100, 'Нужен сюзеренитет (6 посланников)', '#f87171', 15); return false; }
+      if (this.persons.some(p => p.role === 'spouse' || p.role === 'child')) { this.floater(this.cam.x, this.cam.y - 100, 'Супруга уже во дворце хана', '#94a3b8', 14); return false; }
+      if (this.res.gold < 250) { this.floater(this.cam.x, this.cam.y - 100, 'Нужно 250 {i:gold}', '#f87171', 15); return false; }
+      this.res.gold -= 250;
+      const trait = ['Хозяйственная: добыча аула +5%', 'Воинственная: конница +8% к силе', 'Гостеприимная: +1 к пределу населения'][(Math.random() * 3) | 0];
+      this.persons.push({ id: this.personN++, name: `Ханша из «${def.name}»`, role: 'spouse', nation: nid, traits: [trait], t: this.time });
+      this.score += 300; this.sound.coin();
+      this.chronicle.push(`Свадьба: хан взял в жёны дочь правителя «${def.name}»`);
+      this.pushBanner(`{i:crown} Той-свадьба!`, `«${def.name}» породнился с ханом: ${trait.split(':')[0]} — ${trait.split(':')[1]}`, 6);
+      this.pushHud(); return true;
     }
     if (act === 'attack') {
       if (rel !== 'hostile') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); }
@@ -2840,6 +2894,7 @@ export class Game {
     let c = 10;
     for (const b of this.blds) if (b.owner === owner && b.key === 'house' && b.done >= 1) c += 8;
     if (owner === 'player' && this.law === 'asylum') c += 2;   // «Право убежища» (п.13)
+    if (owner === 'player' && this.hasTrait('Гостеприимная')) c += 1;   // супруга-гостеприимная (п.18)
     return Math.min(60, c);
   }
 
@@ -2995,6 +3050,7 @@ export class Game {
       blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null, tribe: b.tribe || undefined, nationId: b.nationId, bandit: b.bandit || undefined, raidT: b.raidT, grazeDep: b.grazeDep ?? null })),
       wool: this.wool, feltYurts: this.feltYurts, feltArmor: this.feltArmor,
       watchPosts: this.watchPosts, envoyFreeze: this.envoyFreeze,
+      persons: this.persons, personN: this.personN,
       banditsCleared: this.banditsCleared, banditRespawnT: this.banditRespawnT,
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       natW: this.natWonders.map(w => ({ k: w.kind, x: w.x, y: w.y })), natSeen: this.natSeen,
@@ -3182,6 +3238,8 @@ export class Game {
       this.feltYurts = d.feltYurts === true; this.feltArmor = d.feltArmor === true;
       this.watchPosts = Array.isArray(d.watchPosts) ? d.watchPosts : [];   // п.17
       this.envoyFreeze = (d.envoyFreeze ?? {}) as Record<string, number>;
+      this.persons = Array.isArray(d.persons) ? d.persons : this.persons;   // п.18: двор
+      this.personN = typeof d.personN === 'number' ? d.personN : this.personN + 1;
       this.koshN = typeof d.koshN === 'number' ? d.koshN : 0;
       // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
       this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
@@ -3445,6 +3503,7 @@ export class Game {
     for (const w of this.natWonders) {
       if (this.tdx(u.x - w.x) ** 2 + this.tdy(u.y - w.y) ** 2 < WONDER_AURA * WONDER_AURA) { m *= 1.25; break; }
     }
+    if (this.hasTrait('Хозяйственная')) m *= 1.05;   // супруга-хозяйка (п.18)
     // законы курултая (п.13)
     if (this.law === 'nalog' || this.law === 'mobil') m *= 0.95;
     if (this.discontent >= 70) m *= 0.9;   // озлобленный аул работает спустя рукава
@@ -4024,6 +4083,31 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── АМАНАТ И БРАЧНЫЕ СОЮЗЫ (п.18) ──
+  initCourt() {
+    this.persons = [
+      { id: this.personN++, name: 'Төле би', role: 'biy', traits: ['Правое слово: авторитет растёт в полтора раза быстрее'], t: 0 },
+      { id: this.personN++, name: 'Казыбек би', role: 'biy', traits: ['Серебряный язык: керуены богаче на 5%'], t: 0 },
+      { id: this.personN++, name: 'Айтеке би', role: 'biy', traits: ['Острый закон: недовольство тает быстрее'], t: 0 },
+    ];
+  }
+  hasTrait(t: string): boolean { return this.persons.some(p => p.traits.some(x => x.startsWith(t))); }
+  betrayal(nid: string) {
+    const am = this.persons.find(p => p.role === 'amanat' && p.nation === nid);
+    if (!am) return;
+    this.persons = this.persons.filter(p => p !== am);
+    this.tribeRel[nid] = 'hostile';
+    for (const other of TRIBE_IDS) {
+      if (!this.tribeMet[other] || other === nid) continue;
+      this.tribeRel[other] = this.tribeRel[other] === 'friend' ? 'neutral' : 'hostile';   // молва о предательстве
+    }
+    this.authority = Math.max(0, this.authority - 30);
+    this.score = Math.max(0, this.score - 400);
+    this.chronicle.push(`Предательство: аманат из «${NATION_BY_ID[nid]?.name ?? nid}» погиб — степь запомнила`);
+    this.pushBanner('{i:warn} Аманат мёртв!', 'Вы убили заложника мира: все народы отворачиваются (−400 очков, −30 авторитета)', 6);
+    this.sound.alarm(); this.pushHud();
+  }
+
   // ── БАРЛАУШЫ (п.17): дозоры в тумане и саботаж ──
   placeWatch() {
     const us = this.selUnits().filter(u => u.owner === 'player' && u.key === 'scout');
@@ -6806,6 +6890,7 @@ export class Game {
         let bonus = this.hasTech('coinage') ? 1.35 : 1;
         if (this.bonusTier('trade', 3)) bonus *= 1.5; // союз торговых народов: караваны богаче
         if (this.yasaActive('sauda')) bonus *= 1.3;   // Яса «Сауда жолы» (п.32)
+        if (this.hasTrait('Серебряный язык')) bonus *= 1.05;   // Казыбек би (п.18)
         u.trGold = Math.round(Math.min(90, 14 + leg / 22) * bonus);
         // керуен (п.16): товар и живая цена; за город платят с премией риска
         if (u.trGood) {
@@ -7078,6 +7163,10 @@ export class Game {
     if (this.corpses.length > 40) this.corpses.shift();
     this.sound.death();
     this.burst(t.x, t.y - 8, 12, t.owner === 'player' ? ['#93c5fd', '#1e40af', '#fecaca'] : t.key === 'wolf' ? ['#9ca3af', '#4b5563'] : ['#f87171', '#7f1d1d'], 110, 0.7);
+    if (byOwner === 'player' && t.tribe) {
+      const nidT = this.tribeNationAt(t.x, t.y);
+      if (nidT && this.persons.some(p => p.role === 'amanat' && p.nation === nidT)) this.betrayal(nidT);   // п.18: предательство
+    }
     if (byOwner === 'player' && t.owner === 'enemy') {
       this.kills++;
       this.score += SCORE.kill + (this.isWinter() ? Math.round(SCORE.kill * 0.5) : 0);   // зимний рейд славнее (п.15)
@@ -7900,6 +7989,7 @@ export class Game {
       authority: Math.round(this.authority), lawName: this.lawName(), discontent: Math.round(this.discontent),
       tel: { wool: Math.floor(this.wool), feltYurts: this.feltYurts, feltArmor: this.feltArmor, hasPen: this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1) },
       season: { name: this.seasonName(), winter: this.isWinter(), t: Math.max(0, Math.ceil(this.DAY_LEN - this.dayT)), feltYurts: this.feltYurts },
+      court: this.persons.map(p => ({ name: p.name, role: p.role, traits: p.traits })),
       scoutNet: (() => {
         const tc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
         const near = tc ? this.watchPosts.some(w => dist2(w.x, w.y, tc.x, tc.y) < 420 * 420) : false;
