@@ -190,6 +190,7 @@ interface Unit {
   trGood?: 'wool' | 'grain' | 'horses';   // товар керуена (п.16)
   trRoute?: 'city' | 'tribe';             // маршрут керуена (п.16)
   trAmbushed?: boolean;                   // грабители уже встретили этот караван
+  sabCd?: number;                         // перезарядка саботажа барлаушы (п.17)
   trHomeB?: number;          // id своего базара (точка отправления и сдачи выручки)
   trDestB?: number;          // id здания партнёра (лагерь племени / ставка соперника)
   trNation?: string;         // народ-партнёр (для баннера и проверки дружбы)
@@ -394,6 +395,7 @@ export interface HudSnapshot {
   authority: number; lawName: string | null; discontent: number;   // құрылтай (п.13)
   tel: { wool: number; feltYurts: boolean; feltArmor: boolean; hasPen: boolean };   // төл (п.14)
   season: { name: string; winter: boolean; t: number; feltYurts: boolean };   // қыс (п.15)
+  scoutNet: { posts: number; raidSeen: boolean; raidIn: number; army: number; cd: number };   // барлаушы (п.17)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -566,6 +568,9 @@ export class Game {
   wool = 0; feltYurts = false; feltArmor = false; telT = 0;
   // ── Керуен (п.16): товары и живые цены ──
   kervenP: Record<'wool' | 'grain' | 'horses', number> = { wool: 26, grain: 18, horses: 42 };
+  // ── Барлаушы (п.17): сеть дозоров и саботажа ──
+  watchPosts: { x: number; y: number }[] = [];
+  envoyFreeze: Record<string, number> = {};
   kurultaiOpts: string[] = []; kurultaiPending = false; kurultaiDays = new Set<number>();
   chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
@@ -1565,7 +1570,7 @@ export class Game {
     // соперник охотнее вкладывается на высокой сложности и когда богат
     if (Math.random() > 0.35 + diff.aiAggression * 0.2) return;
     // цель: племя, где игрок близок к сюзеренитету (перебить) либо просто знакомое
-    const cands = TRIBE_IDS.filter(nid => this.tribeRel[nid] !== 'hostile');
+    const cands = TRIBE_IDS.filter(nid => this.tribeRel[nid] !== 'hostile' && !this.envoyFreeze[nid]);   // перехваченные посланники (п.17) джунгарам недоступны
     if (!cands.length) return;
     cands.sort((a, b) => (this.envoys[b] ?? 0) - (this.envoys[a] ?? 0));
     const nid = Math.random() < 0.7 ? cands[0] : cands[(Math.random() * cands.length) | 0];
@@ -1626,6 +1631,8 @@ export class Game {
     // Құрылтай (п.13): созываем, когда ни одна модалка не открыта
     if (this.kurultaiPending && !this.event && !this.over) this.spawnKurultai();
     this.updateTel();   // төл: выпас, шерсть, поветрие (п.14)
+    for (const nid of Object.keys(this.envoyFreeze)) { this.envoyFreeze[nid] -= 1; if (this.envoyFreeze[nid] <= 0) delete this.envoyFreeze[nid]; }   // п.17
+    for (const u of this.units) if (u.key === 'scout' && (u.sabCd ?? 0) > 0) u.sabCd = (u.sabCd ?? 0) - 1;   // п.17
     const step = Math.min(this.faithT, 3) * (this.law === 'toler' ? 1.3 : 1);   // «Веротерпимость» (п.13)
     if (this.law === 'nalog') this.res.gold += 0.5;            // ясачный сбор (п.13)
     this.authority = Math.min(100, this.authority + 0.15 * (this.law === 'erk' ? 0.5 : 1));   // авторитет хана копится медленно
@@ -1922,6 +1929,7 @@ export class Game {
 
   // разозлить всё племя народа nid (для угрозы/шпионажа)
   provokeTribeById(nid: string) {
+    if (this.envoyFreeze[nid] > 0) return;   // племя заморожено перехватом барлаушы (п.17)
     for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; this.provokeTribe(b.x, b.y, this.units.find(u => u.owner === 'player') ?? this.units[0]); }
   }
   // ── действия из панели дипломатии ──
@@ -2104,6 +2112,7 @@ export class Game {
         if (d <= sight) { const idx = gy * this.fogGW + gx; this.fogVis[idx] = 1; this.fogExpl[idx] = 1; }
       }
     };
+    for (const w of this.watchPosts) mark(w.x, w.y, 300);   // дозоры барлаушы светят постоянно (п.17)
     for (const u of this.units) if (u.owner === 'player' && !u.hidden) {
       // разведчик-крот, внедрённый у вражеской базы, раскрывает вокруг себя большую область
       let sight = u.key === 'scout' ? 480 : 150;
@@ -2985,6 +2994,7 @@ export class Game {
       units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0, tribe: u.tribe || undefined, bandit: u.bandit || undefined, campI: u.bandit ? this.blds.findIndex(b => b.id === u.campId) : undefined, hx: u.homeX, hy: u.homeY })),
       blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null, tribe: b.tribe || undefined, nationId: b.nationId, bandit: b.bandit || undefined, raidT: b.raidT, grazeDep: b.grazeDep ?? null })),
       wool: this.wool, feltYurts: this.feltYurts, feltArmor: this.feltArmor,
+      watchPosts: this.watchPosts, envoyFreeze: this.envoyFreeze,
       banditsCleared: this.banditsCleared, banditRespawnT: this.banditRespawnT,
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       natW: this.natWonders.map(w => ({ k: w.kind, x: w.x, y: w.y })), natSeen: this.natSeen,
@@ -3170,6 +3180,8 @@ export class Game {
       this.chronicle = Array.isArray(d.chronicle) ? d.chronicle : [];
       this.wool = typeof d.wool === 'number' ? d.wool : 0;   // төл (п.14)
       this.feltYurts = d.feltYurts === true; this.feltArmor = d.feltArmor === true;
+      this.watchPosts = Array.isArray(d.watchPosts) ? d.watchPosts : [];   // п.17
+      this.envoyFreeze = (d.envoyFreeze ?? {}) as Record<string, number>;
       this.koshN = typeof d.koshN === 'number' ? d.koshN : 0;
       // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
       this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
@@ -4012,6 +4024,54 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── БАРЛАУШЫ (п.17): дозоры в тумане и саботаж ──
+  placeWatch() {
+    const us = this.selUnits().filter(u => u.owner === 'player' && u.key === 'scout');
+    if (!us.length) { this.floater(this.cam.x, this.cam.y - 90, 'Выберите разведчика {i:compass}', '#94a3b8', 14); this.sound.error(); return; }
+    const u = us[0];
+    if (this.watchPosts.length >= 4) { this.floater(u.x, u.y - 40, 'Дозоров не больше 4 — снимите старый', '#f87171'); this.sound.error(); return; }
+    this.watchPosts.push({ x: u.x, y: u.y });
+    this.chronicle.push('Барлаушы выставил дозорную точку в степи');
+    this.floater(u.x, u.y - 40, 'Дозор выставлен — туман раскрыт', '#7dd3fc', 14);
+    this.sound.select(); this.pushHud();
+  }
+  sabotage(kind: 'supplies' | 'horses' | 'envoy') {
+    const us = this.selUnits().filter(u => u.owner === 'player' && u.key === 'scout');
+    if (!us.length) { this.floater(this.cam.x, this.cam.y - 90, 'Выберите разведчика {i:compass}', '#94a3b8', 14); this.sound.error(); return; }
+    const u = us.find(x => (x.sabCd ?? 0) <= 0) ?? us[0];
+    if ((u.sabCd ?? 0) > 0) { this.floater(u.x, u.y - 40, `Барлаушы перезаряжается (${Math.ceil(u.sabCd!)} с)`, '#f87171'); this.sound.error(); return; }
+    const tc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
+    if (!tc || dist2(u.x, u.y, tc.x, tc.y) > 360 * 360) { this.floater(u.x, u.y - 40, 'Подкрасться к ставке джунгар (360 шагов)', '#f87171', 14); this.sound.error(); return; }
+    u.sabCd = 90; this.sound.research();
+    if (kind === 'supplies') {
+      this.waveT += 120;   // рейд задержан
+      this.chronicle.push('Барлаушы сжёг запасы джунгар — рейд задержан');
+      this.pushBanner('{i:spark} Диверсия: запасы горят!', 'Рейд джунгар задержан на две минуты', 4);
+    } else if (kind === 'horses') {
+      const cav = this.units.filter(x => x.owner === 'enemy' && (x.key === 'cavalry' || x.key === 'horsearcher' || x.key === 'knight') && dist2(x.x, x.y, u.x, u.y) < 500 * 500).sort((a, b) => dist2(a.x, a.y, u.x, u.y) - dist2(b.x, b.y, u.x, u.y))[0];
+      if (cav) { cav.hp = 0; this.burst(cav.x, cav.y - 10, 10, ['#f87171', '#7f1d1d'], 90, 0.7); }
+      this.nodes.push({ id: 900000 + this.nodes.length, kind: 'horse', x: u.x + rand(-30, 30), y: u.y + rand(-30, 30), amount: 90, max: 90, r: 44, phase: 0 });
+      this.chronicle.push('Барлаушы угнал табун джунгар — конница врага оскудела');
+      this.pushBanner('{i:horse} Табун угнан!', 'Враг теряет коня, у нас — свежие лошади', 4);
+    } else {
+      const nids = TRIBE_IDS.filter(nid => this.metNation(nid) && this.tribeRel[nid] !== 'hostile');
+      const nid = nids[(Math.random() * nids.length) | 0];
+      if (nid) {
+        this.envoyFreeze[nid] = 180;
+        this.chronicle.push(`Посланник джунгар перехвачен: «${NATION_BY_ID[nid]?.name ?? nid}» заморожено`);
+        this.pushBanner(`{i:handshake} Посланник перехвачен!`, `«${NATION_BY_ID[nid]?.name ?? nid}» три минуты недоступно хунтайджи`, 4);
+      }
+    }
+    // контригра: вражеский бий вскрывает сеть
+    if (Math.random() < 0.22 && this.watchPosts.length) {
+      this.watchPosts = []; this.score = Math.max(0, this.score - 100);
+      this.chronicle.push('Бий врага вскрыл сеть дозоров — точки потеряны');
+      this.pushBanner('{i:warn} Сеть вскрыта!', 'Вражеский бий выследил дозоры — точки потеряны (−100 очков)', 5);
+      this.sound.alarm();
+    }
+    this.pushHud();
+  }
+
   // ── КЕРУЕН (п.16): караванная торговля с выбором товара и маршрута ──
   sendCaravan(good: 'wool' | 'grain' | 'horses', route: 'city' | 'tribe') {
     const home = this.blds.find(b => b.owner === 'player' && b.key === 'market' && b.done >= 1);
@@ -7840,6 +7900,13 @@ export class Game {
       authority: Math.round(this.authority), lawName: this.lawName(), discontent: Math.round(this.discontent),
       tel: { wool: Math.floor(this.wool), feltYurts: this.feltYurts, feltArmor: this.feltArmor, hasPen: this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1) },
       season: { name: this.seasonName(), winter: this.isWinter(), t: Math.max(0, Math.ceil(this.DAY_LEN - this.dayT)), feltYurts: this.feltYurts },
+      scoutNet: (() => {
+        const tc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
+        const near = tc ? this.watchPosts.some(w => dist2(w.x, w.y, tc.x, tc.y) < 420 * 420) : false;
+        const army = near && tc ? this.units.filter(x => x.owner === 'enemy' && x.key !== 'villager' && x.hp > 0 && dist2(x.x, x.y, tc.x, tc.y) < 460 * 460).length : -1;
+        const selScouts = this.selUnits().filter(u => u.owner === 'player' && u.key === 'scout');
+        return { posts: this.watchPosts.length, raidSeen: near, raidIn: near ? Math.max(0, Math.ceil(this.waveT)) : -1, army, cd: selScouts.length ? Math.max(0, Math.ceil(Math.min(...selScouts.map(u => u.sabCd ?? 0)))) : -1 };
+      })(),
       event: this.event ? (() => {
         const d = this.eventDefs().find(e => e.id === this.event!.id);
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;

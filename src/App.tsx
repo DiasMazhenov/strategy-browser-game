@@ -605,7 +605,25 @@ export default function App() {
                         <MiniBtn title="Найти лагеря племён на карте" onClick={() => g()?.scoutOrder('bases')}><Binoculars className="h-3 w-3" />Искать базы</MiniBtn>
                         <MiniBtn title="Дойти до незнакомого народа и наладить связь (приветствие правителя)" onClick={() => g()?.scoutOrder('diplomacy')}><MessageCircle className="h-3 w-3" />Связь</MiniBtn>
                         <MiniBtn title="Прокрасться кротом к вражеской базе: раскрыть её и доносить золото" onClick={() => g()?.scoutOrder('infiltrate')}><Eye className="h-3 w-3" />Внедриться</MiniBtn>
+                        <MiniBtn title="Дозор (п.17): вечный светлый круг в тумане. До 4 точек; у ставки джунгар показывает состав и отсчёт рейда" onClick={() => g()?.placeWatch()}><Binoculars className="h-3 w-3" />Дозор</MiniBtn>
                       </div>
+                    </div>
+                  )}
+                  {hud.sel.types?.some(t => t.key === 'scout') && hud.scoutNet && (
+                    <div className="mt-1.5 rounded-xl border border-rose-400/25 bg-rose-500/10 p-1.5">
+                      <div className="mb-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-rose-200"><Ico name="wolf" /> Саботаж (п.17)</div>
+                      {hud.scoutNet.raidSeen && (
+                        <div className="mb-1 rounded-lg bg-black/40 px-2 py-1 text-[10px] font-bold text-sky-200" title="Дозор у ставки джунгар доносит состав и отсчёт рейда">
+                          Дозор доносит: врагов у ставки {hud.scoutNet.army} · рейд через ~{hud.scoutNet.raidIn} с
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1">
+                        <MiniBtn title="Сжечь запас: рейд джунгар задержан на 2 минуты" onClick={() => g()?.sabotage('supplies')}><Ico name="spark" />Запасы</MiniBtn>
+                        <MiniBtn title="Угнать табун: −1 конница врага, +лошади нам" onClick={() => g()?.sabotage('horses')}><Ico name="horse" />Табун</MiniBtn>
+                        <MiniBtn title="Перехватить посланника: племя 3 минуты недоступно джунгарам и набегам" onClick={() => g()?.sabotage('envoy')}><Ico name="handshake" />Посланник</MiniBtn>
+                        {hud.scoutNet.cd > 0 && <span className="self-center rounded bg-black/40 px-1.5 text-[10px] font-black text-rose-200">перезарядка {hud.scoutNet.cd}с</span>}
+                      </div>
+                      <div className="mt-1 text-[9px] font-bold text-slate-400">Дозоров: {hud.scoutNet.posts}/4 · враг может вскрыть сеть (−100 очков)</div>
                     </div>
                   )}
                   {!(hud.sel.types?.every(t => t.key === 'villager') || false) && (
