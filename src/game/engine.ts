@@ -187,6 +187,9 @@ interface Unit {
   converts?: number;      // [имам] сколько душ обращено (для статистики)
   // ── көпес (торговец): круговой маршрут «свой базар → дружественный город/лагерь → базар» ──
   trPhase?: 'out' | 'back';  // out — везёт товар к партнёру, back — возвращается с выручкой
+  trGood?: 'wool' | 'grain' | 'horses';   // товар керуена (п.16)
+  trRoute?: 'city' | 'tribe';             // маршрут керуена (п.16)
+  trAmbushed?: boolean;                   // грабители уже встретили этот караван
   trHomeB?: number;          // id своего базара (точка отправления и сдачи выручки)
   trDestB?: number;          // id здания партнёра (лагерь племени / ставка соперника)
   trNation?: string;         // народ-партнёр (для баннера и проверки дружбы)
@@ -362,6 +365,7 @@ export interface SelSnapshot {
   garrison?: number; garrisonCap?: number;
   towerUpg?: { range: number; dmg: number; archers: number; maxRange: number; maxDmg: number; maxArchers: number };
   penUpg?: { dep: number; wool: number; canYurts: boolean; canArmor: boolean; doneYurts: boolean; doneArmor: boolean };   // төл (п.14)
+  kerven?: { wool: number; grain: number; horses: number; canWool: boolean; canGrain: boolean; canHorses: boolean; hasCity: boolean; hasTribe: boolean; busy: boolean };   // керуен (п.16)
 }
 export interface TechTreeRow {
   id: string; name: string; desc: string; icon: string;
@@ -560,6 +564,8 @@ export class Game {
   authority = 50; law: string | null = null; discontent = 0; kurultaiN = 0;
   // ── Төл (п.14): стада, выпас, шерсть и войлок ──
   wool = 0; feltYurts = false; feltArmor = false; telT = 0;
+  // ── Керуен (п.16): товары и живые цены ──
+  kervenP: Record<'wool' | 'grain' | 'horses', number> = { wool: 26, grain: 18, horses: 42 };
   kurultaiOpts: string[] = []; kurultaiPending = false; kurultaiDays = new Set<number>();
   chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
@@ -4006,6 +4012,36 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── КЕРУЕН (п.16): караванная торговля с выбором товара и маршрута ──
+  sendCaravan(good: 'wool' | 'grain' | 'horses', route: 'city' | 'tribe') {
+    const home = this.blds.find(b => b.owner === 'player' && b.key === 'market' && b.done >= 1);
+    if (!home) { this.floater(HOME.x, HOME.y - 80, 'Нужен базар', '#f87171'); this.sound.error(); return; }
+    // товар за ресурс: шерсть (тёла), зерно, кони
+    if (good === 'wool' && this.wool < 6) { this.floater(home.x, home.y - 70, 'Нужно 6 шерсти', '#f87171'); this.sound.error(); return; }
+    if (good === 'grain' && this.res.food < 80) { this.floater(home.x, home.y - 70, 'Нужно 80 еды', '#f87171'); this.sound.error(); return; }
+    if (good === 'horses' && this.res.gold < 120) { this.floater(home.x, home.y - 70, 'Нужно 120 золота', '#f87171'); this.sound.error(); return; }
+    const trader = this.units.find(x => x.owner === 'player' && x.key === 'trader' && x.hp > 0);
+    if (!trader) { this.floater(home.x, home.y - 70, 'Наймите көпеса на базаре', '#f87171'); this.sound.error(); return; }
+    let dest: Bld | undefined;
+    if (route === 'city') dest = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter' && b.done >= 1);
+    else {
+      const friendTribes = this.blds.filter(b => b.tribe && b.done >= 1 && this.tribeRel[this.tribeNationOf(b) ?? ''] === 'friend');
+      dest = friendTribes.sort((a, b) => dist2(a.x, a.y, home.x, home.y) - dist2(b.x, b.y, home.x, home.y))[0];
+    }
+    if (!dest) { this.floater(home.x, home.y - 70, route === 'city' ? 'Ставка соперника не найдена' : 'Нет дружественного племени', '#f87171'); this.sound.error(); return; }
+    if (good === 'wool') this.wool -= 6;
+    if (good === 'grain') this.res.food -= 80;
+    if (good === 'horses') this.res.gold -= 120;
+    trader.trGood = good; trader.trRoute = route; trader.trAmbushed = false;
+    trader.trDestB = dest.id; trader.trNation = route === 'city' ? 'rival' : (this.tribeNationOf(dest) ?? undefined);
+    trader.trPhase = 'out'; trader.trWaitT = 0; trader.state = 'move';
+    const GN = { wool: 'Шерсть', grain: 'Зерно', horses: 'Кони' }[good];
+    this.chronicle.push(`Керуен с ${GN.toLowerCase()} ушёл по маршруту «${route === 'city' ? 'город' : 'племя'}»`);
+    this.pushBanner('{i:camel} Керуен ушёл!', `${GN} → ${route === 'city' ? 'город соперника' : 'дружественное племя'}. В пути не без риска`, 3.5);
+    this.sound.select(); this.pushHud();
+  }
+  kervenPrice(g: 'wool' | 'grain' | 'horses'): number { return this.kervenP[g]; }
+
   // ── ТӨЛ (п.14): прирост стада и истощение выпаса ──
   updateTel() {
     this.telT++;
@@ -4885,6 +4921,11 @@ export class Game {
       this.pushBanner(`{i:sunrise} День ${this.dayNum}`, 'Новый день над степью', 2.4);
       if (this.dayNum % 4 === 0 && !this.kurultaiDays.has(this.dayNum)) { this.kurultaiPending = true; this.kurultaiDays.add(this.dayNum); }   // раз в 4 суток (п.13)
       this.telBirth();   // төл (п.14): приплод по весне поголовья
+      // керуен (п.16): цены дышат — сезон, война
+      const drift = () => 0.8 + Math.random() * 0.4;
+      this.kervenP.wool = Math.round(26 * drift() * (this.isWinter() ? 1.35 : 1));
+      this.kervenP.grain = Math.round(18 * drift() * (this.season() === 0 ? 1.25 : 1));
+      this.kervenP.horses = Math.round(42 * drift() * (this.rivalMet ? 1.25 : 1));
     }
     this.updatePrayer(dt);         // азан с минарета и намаз
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
@@ -6682,6 +6723,23 @@ export class Game {
     }
 
     if (u.trPhase === 'out' && dest) {
+      // керуен (п.16): грабители у лагерей; эскорт рядом — караван не тронут
+      if (u.trGood && !u.trAmbushed) {
+        const camp = this.blds.find(b => b.bandit && b.done >= 0.5 && dist2(b.x, b.y, u.x, u.y) < 240 * 240);
+        if (camp) {
+          u.trAmbushed = true;
+          const escort = this.units.some(e => e.owner === 'player' && e.hp > 0 && e.key !== 'villager' && e.key !== 'trader' && e.key !== 'scout' && dist2(e.x, e.y, u.x, u.y) < 320 * 320);
+          if (escort) {
+            this.floater(u.x, u.y - 34, 'Эскорт отогнал грабителей!', '#a3e635', 14);
+          } else {
+            this.floater(u.x, u.y - 34, 'Керуен разграблен — товар потерян!', '#f87171', 15);
+            this.chronicle.push('Керуен попал в засаду у разбойничьего лагеря');
+            this.pushBanner('{i:warn} Засада!', 'Грабители отняли товар — держите бойцов возле каравана', 4);
+            this.sound.alarm();
+            u.trGood = undefined; u.trRoute = undefined;   // везёт пустым, но доходит
+          }
+        }
+      }
       if (this.moveTowardPath(u, dest.x, dest.y, dt, dest.size / 2 + 20)) {
         // догрузились: выручка тем больше, чем дальше плечо (как торговые повозки в AoE)
         const leg = Math.hypot(dest.x - home.x, dest.y - home.y);
@@ -6689,6 +6747,11 @@ export class Game {
         if (this.bonusTier('trade', 3)) bonus *= 1.5; // союз торговых народов: караваны богаче
         if (this.yasaActive('sauda')) bonus *= 1.3;   // Яса «Сауда жолы» (п.32)
         u.trGold = Math.round(Math.min(90, 14 + leg / 22) * bonus);
+        // керуен (п.16): товар и живая цена; за город платят с премией риска
+        if (u.trGood) {
+          u.trGold = Math.round(u.trGold * (0.8 + this.kervenP[u.trGood] / 40) * (u.trRoute === 'city' ? 1.2 : 1));
+          if (u.trRoute === 'tribe' && u.trNation) this.tribeRel[u.trNation] = 'friend';   // караван греет отношения
+        }
         u.trPhase = 'back'; u.trWaitT = 1.2;
         this.burst(u.x, u.y - 18, 6, ['#fde047', '#facc15', '#fff7cc'], 60, 0.6);
       }
@@ -6706,6 +6769,8 @@ export class Game {
           this.floater(u.x, u.y - 28, `+${g} {i:gold}`, '#fde047', 14);
           this.sound.coin();
           this.checkQuests();
+          if (u.trGood) this.chronicle.push(`Керуен вернулся с ${g} золота выручки`);   // п.16
+          u.trGood = undefined; u.trRoute = undefined; u.trAmbushed = false;
         }
       }
       u.trGold = 0; u.trPhase = 'out'; u.trWaitT = 1; u.trDestB = undefined; // следующий круг
@@ -7861,6 +7926,13 @@ export class Game {
         garrison: b.garrison.length, garrisonCap: this.garrisonCap(b),
         towerUpg: b.key === 'tower' && b.owner === 'player' ? {
           range: b.upg?.range ?? 0, dmg: b.upg?.dmg ?? 0, archers: b.upg?.archers ?? 0, maxRange: 3, maxDmg: 3, maxArchers: 2,
+        } : undefined,
+        kerven: b.key === 'market' && b.owner === 'player' && b.done >= 1 ? {
+          wool: this.kervenP.wool, grain: this.kervenP.grain, horses: this.kervenP.horses,
+          canWool: this.wool >= 6, canGrain: this.res.food >= 80, canHorses: this.res.gold >= 120,
+          hasCity: this.blds.some(x => x.owner === 'enemy' && x.key === 'towncenter' && x.done >= 1),
+          hasTribe: this.blds.some(x => x.tribe && x.done >= 1 && this.tribeRel[this.tribeNationOf(x) ?? ''] === 'friend'),
+          busy: !this.units.some(x => x.owner === 'player' && x.key === 'trader' && x.hp > 0),
         } : undefined,
         penUpg: b.key === 'pen' && b.owner === 'player' && b.done >= 1 ? {
           dep: Math.round((b.grazeDep ?? 0) * 100), wool: Math.floor(this.wool),

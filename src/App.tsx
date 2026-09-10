@@ -689,6 +689,31 @@ export default function App() {
                       <MiniBtn onClick={() => g()?.trade('food')} title="Обмен еды на золото"><Ico name="food" />→<Ico name="gold" /></MiniBtn>
                     </div>
                   )}
+                  {hud.sel.bkey === 'market' && hud.sel.kerven && (
+                    <div className="mt-1.5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-1.5">
+                      <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-amber-300/90">Керуен (п.16): товар → маршрут · цены дышат каждый день</div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {([
+                          ['wool', 'Шерсть', '6{i:sheep} шерсти', hud.sel.kerven.canWool],
+                          ['grain', 'Зерно', '80{i:food} еды', hud.sel.kerven.canGrain],
+                          ['horses', 'Кони', '120{i:gold}', hud.sel.kerven.canHorses],
+                        ] as const).map(([gk, lbl, cost, can]) => (
+                          <div key={gk} className="rounded-lg border border-white/10 bg-black/30 p-1 text-center">
+                            <div className="text-[10px] font-black text-slate-100">{lbl} <span className="text-amber-300">{hud.sel.kerven![gk]}</span></div>
+                            <div className="mt-0.5 flex gap-0.5">
+                              <button disabled={!can || hud.sel.kerven!.busy} onClick={() => g()?.sendCaravan(gk, 'tribe')}
+                                className={`flex-1 rounded px-1 py-0.5 text-[9px] font-black ${can && !hud.sel.kerven!.busy ? 'btn-iron text-lime-200' : 'bg-black/40 text-slate-500'}`}
+                                title={`Караван ${lbl.toLowerCase()} → дружественное племя (${cost}). Прибытие греет отношения`}>племя</button>
+                              <button disabled={!can || !hud.sel.kerven!.hasCity || hud.sel.kerven!.busy} onClick={() => g()?.sendCaravan(gk, 'city')}
+                                className={`flex-1 rounded px-1 py-0.5 text-[9px] font-black ${can && hud.sel.kerven!.hasCity && !hud.sel.kerven!.busy ? 'btn-iron text-amber-200' : 'bg-black/40 text-slate-500'}`}
+                                title={`Караван ${lbl.toLowerCase()} → город соперника: премия ×1,2, но риск грабежа выше. Эскорт рядом спасает груз`}>город</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {hud.sel.kerven.busy && <div className="mt-1 text-[9px] font-bold text-rose-300">Көпес в пути — наймите ещё на базаре</div>}
+                    </div>
+                  )}
                   {hud.sel.bkey === 'pen' && hud.sel.penUpg && (
                     <div className="mt-1.5 rounded-lg border border-lime-300/25 bg-lime-400/10 p-1.5">
                       <div className="mb-1 flex items-center justify-between text-[9px] font-black uppercase tracking-widest text-lime-300/90">
