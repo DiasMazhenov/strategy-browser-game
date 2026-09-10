@@ -309,6 +309,7 @@ interface Bld {
   research: { id: string; t: number; total: number } | null;   // текущее исследование
   garrison: number[];                                           // id юнитов внутри (оборона)
   upg?: { range: number; dmg: number; archers: number };        // улучшения башни (дальность/урон/лучники)
+  grazeDep?: number;                                            // истощение выпаса 0..1 (п.14 төл)
   gate: boolean;                                                // ворота (проходны для игрока)
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
@@ -360,6 +361,7 @@ export interface SelSnapshot {
   research?: { id: string; name: string; t: number; total: number } | null;
   garrison?: number; garrisonCap?: number;
   towerUpg?: { range: number; dmg: number; archers: number; maxRange: number; maxDmg: number; maxArchers: number };
+  penUpg?: { dep: number; wool: number; canYurts: boolean; canArmor: boolean; doneYurts: boolean; doneArmor: boolean };   // төл (п.14)
 }
 export interface TechTreeRow {
   id: string; name: string; desc: string; icon: string;
@@ -386,6 +388,7 @@ export interface AgeReport {
 export interface HudSnapshot {
   camp?: { part: string; title: string; objs: { t: string; done: boolean }[] };   // глава кампании (п.34)
   authority: number; lawName: string | null; discontent: number;   // құрылтай (п.13)
+  tel: { wool: number; feltYurts: boolean; feltArmor: boolean; hasPen: boolean };   // төл (п.14)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -554,6 +557,8 @@ export class Game {
   mode: 'settled' | 'nomad' = 'settled';
   // ── Құрылтай (п.13) ──
   authority = 50; law: string | null = null; discontent = 0; kurultaiN = 0;
+  // ── Төл (п.14): стада, выпас, шерсть и войлок ──
+  wool = 0; feltYurts = false; feltArmor = false; telT = 0;
   kurultaiOpts: string[] = []; kurultaiPending = false; kurultaiDays = new Set<number>();
   chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
@@ -783,6 +788,8 @@ export class Game {
     let ageMult = owner === 'player' ? AGES[this.age].mult : owner === 'enemy' ? AGES[this.eage].mult * diff.enemyHp : 1;
     // союз с военными племенами (ур.1): войска игрока крепче на 10%
     if (owner === 'player' && d.pop > 0 && key !== 'villager' && this.bonusTier('military', 1)) ageMult *= 1.1;
+    // войлочные доспехи (п.14): конница крепче на 12%
+    if (owner === 'player' && (key === 'knight' || key === 'cavalry' || key === 'horsearcher' || key === 'camelry') && this.feltArmor) ageMult *= 1.12;
     const u: Unit = {
       id: this.nextId++, key, owner, x: wrapW(x), y: wrapH(y),
       hp: d.hp * ageMult, maxHp: d.hp * ageMult, atk: d.atk * (owner === 'neutral' ? 1 : ageMult),
@@ -1611,6 +1618,7 @@ export class Game {
     if (this.faithT < 1) return;
     // Құрылтай (п.13): созываем, когда ни одна модалка не открыта
     if (this.kurultaiPending && !this.event && !this.over) this.spawnKurultai();
+    this.updateTel();   // төл: выпас, шерсть, поветрие (п.14)
     const step = Math.min(this.faithT, 3) * (this.law === 'toler' ? 1.3 : 1);   // «Веротерпимость» (п.13)
     if (this.law === 'nalog') this.res.gold += 0.5;            // ясачный сбор (п.13)
     this.authority = Math.min(100, this.authority + 0.15 * (this.law === 'erk' ? 0.5 : 1));   // авторитет хана копится медленно
@@ -2968,7 +2976,8 @@ export class Game {
       soldiersTrained: this.soldiersTrained, barracksBuilt: this.barracksBuilt, wolvesSlain: this.wolvesSlain,
       cam: this.cam, tech: this.tech, questsDone: this.questsDone,
       units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0, tribe: u.tribe || undefined, bandit: u.bandit || undefined, campI: u.bandit ? this.blds.findIndex(b => b.id === u.campId) : undefined, hx: u.homeX, hy: u.homeY })),
-      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null, tribe: b.tribe || undefined, nationId: b.nationId, bandit: b.bandit || undefined, raidT: b.raidT })),
+      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null, tribe: b.tribe || undefined, nationId: b.nationId, bandit: b.bandit || undefined, raidT: b.raidT, grazeDep: b.grazeDep ?? null })),
+      wool: this.wool, feltYurts: this.feltYurts, feltArmor: this.feltArmor,
       banditsCleared: this.banditsCleared, banditRespawnT: this.banditRespawnT,
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       natW: this.natWonders.map(w => ({ k: w.kind, x: w.x, y: w.y })), natSeen: this.natSeen,
@@ -3080,6 +3089,7 @@ export class Game {
         const b = this.addBld(bd.key, bd.owner, bd.x, bd.y, Math.max(0.15, bd.done));
         b.hp = bd.hp; b.done = bd.done; b.queue = bd.queue || []; b.rallyX = bd.rallyX; b.rallyY = bd.rallyY;
         if ((bd as unknown as { upg?: { range: number; dmg: number; archers: number } }).upg) b.upg = (bd as unknown as { upg: { range: number; dmg: number; archers: number } }).upg;
+        b.grazeDep = typeof (bd as unknown as { grazeDep?: number | null }).grazeDep === 'number' ? (bd as unknown as { grazeDep: number }).grazeDep : undefined;   // төл (п.14)
         if ((bd.key === 'wall' || bd.key === 'gate') && bd.axis) b.axis = bd.axis;
         const xb = bd as unknown as { tribe?: boolean; nationId?: string; bandit?: boolean; raidT?: number };
         if (xb.tribe) { b.tribe = true; b.nationId = xb.nationId ?? this.tribeNationAt(b.x, b.y); }
@@ -3151,6 +3161,8 @@ export class Game {
       this.law = (d.law as string | null) ?? null;
       this.discontent = typeof d.discontent === 'number' ? d.discontent : 0;
       this.chronicle = Array.isArray(d.chronicle) ? d.chronicle : [];
+      this.wool = typeof d.wool === 'number' ? d.wool : 0;   // төл (п.14)
+      this.feltYurts = d.feltYurts === true; this.feltArmor = d.feltArmor === true;
       this.koshN = typeof d.koshN === 'number' ? d.koshN : 0;
       // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
       this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
@@ -3417,6 +3429,11 @@ export class Game {
     // законы курултая (п.13)
     if (this.law === 'nalog' || this.law === 'mobil') m *= 0.95;
     if (this.discontent >= 70) m *= 0.9;   // озлобленный аул работает спустя рукава
+    // төл (п.14): выбитый у загона дёрн — молочность падает вдвое на полном истощении
+    if (u.wkind === 'milk' && u.penId != null) {
+      const pen = this.blds.find(b => b.id === u.penId);
+      if (pen) m *= 1 - 0.5 * (pen.grazeDep ?? 0);
+    }
     return m;
   }
   readonly FRESH_BONUS = 1.35;   // насколько быстрее работает отдохнувший
@@ -3982,6 +3999,73 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── ТӨЛ (п.14): прирост стада и истощение выпаса ──
+  updateTel() {
+    this.telT++;
+    if (this.telT < 1) return;
+    const pens = this.blds.filter(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1);
+    let sheepAll = 0;
+    for (const pen of pens) {
+      const dep = pen.grazeDep ?? 0;
+      const herd = this.units.filter(a => a.pastureId === pen.id && (a.key === 'sheep' || a.key === 'cow'));
+      const atPen = herd.filter(a => dist2(a.x, a.y, pen.x, pen.y) < 130 * 130).length;
+      // у загона трава выбивается; стадо на дальнем выпасе — дёрн отдыхает
+      pen.grazeDep = atPen > 0 ? Math.min(1, dep + 0.006 * atPen) : Math.max(0, dep - 0.004);
+      // перевыпас → риск поветрия
+      if (pen.grazeDep > 0.75 && herd.length >= 4 && Math.random() < 0.02) {
+        this.plagueT = Math.max(this.plagueT, 40);
+        this.chronicle.push('Перевыпас обернулся поветрием');
+        this.pushBanner('{i:warn} Поветрие от перевыпаса', 'Загон выбит: молока меньше, мошки тучи', 4);
+        pen.grazeDep = 0.55;
+      }
+    }
+    // шерсть: овцы в загонах дают войлочное сырьё
+    for (const a of this.units) if (a.pastureId != null && a.key === 'sheep') sheepAll++;
+    this.wool = Math.min(999, this.wool + 0.045 * Math.min(sheepAll, 12));
+  }
+  telBirth() {   // приплод: переход суток, трава должна быть свежей
+    let born = 0;
+    for (const pen of this.blds.filter(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1)) {
+      if ((pen.grazeDep ?? 0) >= 0.6) continue;
+      const herd = this.units.filter(a => a.pastureId === pen.id);
+      const sheep = herd.filter(a => a.key === 'sheep'), cows = herd.filter(a => a.key === 'cow');
+      const birth = (key: 'sheep' | 'cow', cur: number, cap: number) => {
+        if (cur >= 2 && cur < cap) {
+          const a = this.addUnit(key, 'neutral', pen.x + rand(-34, 34), pen.y + rand(-26, 26));
+          a.pastureId = pen.id; a.wx = pen.pastureX ?? pen.x; a.wy = pen.pastureY ?? pen.y; born++;
+        }
+      };
+      birth('sheep', sheep.length, 12); birth('cow', cows.length, 8);
+    }
+    if (born) {
+      this.chronicle.push(`Төл: в загонах прибавилось ${born} голов приплода`);
+      this.pushBanner('{i:sheep} Төл — приплод!', `В загонах прибавилось ${born} голов — шерсть и молоко`, 3.5);
+      this.sound.coin();
+    }
+  }
+  craftFelt(kind: 'yurts' | 'armor') {
+    if (kind === 'yurts') {
+      if (this.feltYurts) return;
+      if (this.wool < 12) { this.floater(HOME.x, HOME.y - 80, 'Нужно 12 шерсти', '#f87171'); this.sound.error(); return; }
+      this.wool -= 12; this.feltYurts = true; this.score += 150; this.sound.research();
+      this.chronicle.push('Юрты покрыты войлоком — зима не страшна');
+      this.pushBanner('{i:yurt} Войлочные юрты!', 'Изоляция готова: зимняя стужа будет переноситься легче', 4);
+    } else {
+      if (this.feltArmor) return;
+      if (this.wool < 16) { this.floater(HOME.x, HOME.y - 80, 'Нужно 16 шерсти', '#f87171'); this.sound.error(); return; }
+      this.wool -= 16; this.feltArmor = true; this.score += 150; this.sound.research();
+      for (const u of this.units) {
+        if (u.owner !== 'player') continue;
+        if (u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'camelry') {
+          u.maxHp = Math.round(u.maxHp * 1.12); u.hp = Math.min(u.maxHp, Math.round(u.hp * 1.12));
+        }
+      }
+      this.chronicle.push('Конница одета в войлочные доспехи');
+      this.pushBanner('{i:saber} Войлочные доспехи!', 'Конница крепче на 12% — войлок держит стрелу', 4);
+    }
+    this.pushHud();
+  }
+
   // ── ҚҰРЫЛТАЙ (п.13): совет биев раз в 4 суток ──
   spawnKurultai() {
     this.kurultaiPending = false; this.kurultaiN++;
@@ -4089,6 +4173,7 @@ export class Game {
     this.ensureChunks(site.x, site.y, 2);
     old.dep = 0.05; this.siteI = this.koshTarget; this.koshTarget = -1; this.migrating = 0;
     this.koshN++;   // глава II (п.34): «көш на новый жайляу»
+    for (const b of this.blds) if (b.owner === 'player') b.grazeDep = 0;   // көш: свежая трава (п.14)
     this.pushBanner('{i:yurt} Новый жайляу!', 'Пастбища отдохнули; на старом месте остался қыстау с тайником');
   }
   private updateModes(dt: number) {
@@ -4789,6 +4874,7 @@ export class Game {
       this.azanDone = [];          // новые сутки — намазы звучат заново
       this.pushBanner(`{i:sunrise} День ${this.dayNum}`, 'Новый день над степью', 2.4);
       if (this.dayNum % 4 === 0 && !this.kurultaiDays.has(this.dayNum)) { this.kurultaiPending = true; this.kurultaiDays.add(this.dayNum); }   // раз в 4 суток (п.13)
+      this.telBirth();   // төл (п.14): приплод по весне поголовья
     }
     this.updatePrayer(dt);         // азан с минарета и намаз
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
@@ -7677,6 +7763,7 @@ export class Game {
       })() : null,
       scouts: this.units.filter(u => u.owner === 'player' && u.key === 'scout').length,
       authority: Math.round(this.authority), lawName: this.lawName(), discontent: Math.round(this.discontent),
+      tel: { wool: Math.floor(this.wool), feltYurts: this.feltYurts, feltArmor: this.feltArmor, hasPen: this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1) },
       event: this.event ? (() => {
         const d = this.eventDefs().find(e => e.id === this.event!.id);
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;
@@ -7763,6 +7850,11 @@ export class Game {
         garrison: b.garrison.length, garrisonCap: this.garrisonCap(b),
         towerUpg: b.key === 'tower' && b.owner === 'player' ? {
           range: b.upg?.range ?? 0, dmg: b.upg?.dmg ?? 0, archers: b.upg?.archers ?? 0, maxRange: 3, maxDmg: 3, maxArchers: 2,
+        } : undefined,
+        penUpg: b.key === 'pen' && b.owner === 'player' && b.done >= 1 ? {
+          dep: Math.round((b.grazeDep ?? 0) * 100), wool: Math.floor(this.wool),
+          canYurts: !this.feltYurts && this.wool >= 12, canArmor: !this.feltArmor && this.wool >= 16,
+          doneYurts: this.feltYurts, doneArmor: this.feltArmor,
         } : undefined,
         research: b.research ? { id: b.research.id, name: (TECHS[b.research.id] ?? UPGRADES[b.research.id])?.name ?? '', t: b.research.t, total: b.research.total } : null,
         techs: b.owner === 'player' ? this.techsFor(b.key).map(id => {

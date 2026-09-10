@@ -383,6 +383,13 @@ export default function App() {
                 {hud.discontent >= 70 && <span title="Аул озлоблен" className="text-red-300"><Ico name="warn" className="h-3 w-3" /></span>}
               </div>
             )}
+            {/* Төл (п.14): шерсть */}
+            {hud?.tel?.hasPen && (
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-lime-500/15 px-2 py-0.5 text-[11px] font-black text-lime-200"
+                title={`Шерсть (п.14) — овцы в загонах дают шерсть; войлок крафтится у загона: изоляция юрт к зиме и доспехи коннице${hud.tel.feltYurts ? '\n✓ Юрты в войлоке' : ''}${hud.tel.feltArmor ? '\n✓ Войлочные доспехи' : ''}`}>
+                <Ico name="sheep" className="h-3.5 w-3.5" />{hud.tel.wool}
+              </div>
+            )}
             {/* Объединение степи: показываем, когда союз уже собирается */}
             {(hud?.unite?.have ?? 0) >= 3 && (
               <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
@@ -672,6 +679,24 @@ export default function App() {
                     <div className="mt-1 flex gap-1">
                       <MiniBtn onClick={() => g()?.trade('wood')} title="Обмен дерева на золото"><Ico name="wood" />→<Ico name="gold" /> Торговля</MiniBtn>
                       <MiniBtn onClick={() => g()?.trade('food')} title="Обмен еды на золото"><Ico name="food" />→<Ico name="gold" /></MiniBtn>
+                    </div>
+                  )}
+                  {hud.sel.bkey === 'pen' && hud.sel.penUpg && (
+                    <div className="mt-1.5 rounded-lg border border-lime-300/25 bg-lime-400/10 p-1.5">
+                      <div className="mb-1 flex items-center justify-between text-[9px] font-black uppercase tracking-widest text-lime-300/90">
+                        <span>Төл — выпас и войлок</span>
+                        <span title="Истощение дёрна у загона; стадо на дальнем выпасе — трава отдыхает">дёрн {hud.sel.penUpg.dep}%</span>
+                      </div>
+                      <div className="mb-1 h-1 rounded bg-black/40"><div className="h-1 rounded bg-lime-400/80" style={{ width: `${hud.sel.penUpg.dep}%` }} /></div>
+                      <div className="flex flex-wrap gap-1">
+                        <MiniBtn onClick={() => g()?.craftFelt('yurts')} title="12 шерсти: юрты в войлоке — зимняя изоляция (п.15)">
+                          <Ico name="yurt" /> Юрты в войлоке (12){hud.sel.penUpg.doneYurts ? ' — есть' : ''}
+                        </MiniBtn>
+                        <MiniBtn onClick={() => g()?.craftFelt('armor')} title="16 шерсти: конница +12% HP">
+                          <Ico name="saber" /> Доспехи (16) {hud.sel.penUpg.doneArmor ? '— есть' : ''}
+                        </MiniBtn>
+                        <span className="ml-auto self-center rounded bg-black/40 px-1.5 text-[10px] font-black text-lime-200"><Ico name="sheep" /> {hud.sel.penUpg.wool}</span>
+                      </div>
                     </div>
                   )}
                   {hud.sel.bkey === 'tower' && hud.sel.towerUpg && (
