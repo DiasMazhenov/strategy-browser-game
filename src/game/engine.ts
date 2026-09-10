@@ -1,4 +1,4 @@
-import { AGES, BUILDING_DEFS, CAMPAIGNS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type CampaignDef, type Difficulty, type Settings, type UnitKey } from './config';
+import { AGES, BUILDING_DEFS, CAMPAIGNS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type CampaignDef, type Difficulty, type Settings, type UnitKey, LAW_DEFS } from './config';
 import { SoundBank } from './audio';
 import { drawIcon, drawRich, strokeRich, measureRich } from './iconset';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
@@ -385,6 +385,7 @@ export interface AgeReport {
 
 export interface HudSnapshot {
   camp?: { part: string; title: string; objs: { t: string; done: boolean }[] };   // глава кампании (п.34)
+  authority: number; lawName: string | null; discontent: number;   // құрылтай (п.13)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -551,6 +552,10 @@ export class Game {
   paused = false; over: 'victory' | 'defeat' | null = null;
   // ── РЕЖИМЫ: отырықшы (города и границы) / көшпенді (перекочёвки) ──
   mode: 'settled' | 'nomad' = 'settled';
+  // ── Құрылтай (п.13) ──
+  authority = 50; law: string | null = null; discontent = 0; kurultaiN = 0;
+  kurultaiOpts: string[] = []; kurultaiPending = false; kurultaiDays = new Set<number>();
+  chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
   campStart?: CampaignDef;
   campT = 0; koshN = 0;
@@ -1604,7 +1609,12 @@ export class Game {
     if (this.over) return;
     this.faithT += dt;
     if (this.faithT < 1) return;
-    const step = Math.min(this.faithT, 3); this.faithT = 0;   // лаг не даёт гигантских скачков
+    // Құрылтай (п.13): созываем, когда ни одна модалка не открыта
+    if (this.kurultaiPending && !this.event && !this.over) this.spawnKurultai();
+    const step = Math.min(this.faithT, 3) * (this.law === 'toler' ? 1.3 : 1);   // «Веротерпимость» (п.13)
+    if (this.law === 'nalog') this.res.gold += 0.5;            // ясачный сбор (п.13)
+    this.authority = Math.min(100, this.authority + 0.15 * (this.law === 'erk' ? 0.5 : 1));   // авторитет хана копится медленно
+    this.faithT = 0;   // лаг не даёт гигантских скачков
     for (const b of this.blds) {
       if (!b.tribe || !b.nationId || b.done < 0.5) continue;
       const nid = b.nationId;
@@ -1650,6 +1660,15 @@ export class Game {
     opts: { label: string; desc: string }[]; can: () => boolean }[] {
     const herd = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null).length;
     return [
+      {
+        id: 'kurultai', icon: 'scroll', title: 'ҚҰРЫЛТАЙ — совет биев',
+        text: 'Раз в четыре суток бии съезжаются в ставку: Толе би, Казыбек би и Айтеке би ждут слова хана. Выберите закон сезона — он будет действовать до следующего курултая.',
+        can: () => false,   // спавнится вручную по расписанию суток
+        opts: this.kurultaiOpts.length ? [
+          ...this.kurultaiOpts.map(id => { const l = LAW_DEFS.find(x => x.id === id)!; return { label: l.name, desc: l.desc }; }),
+          { label: 'Разойтись без решения', desc: 'Бии ропчут: авторитет −10, недовольство +20' },
+        ] : [{ label: '…', desc: '' }],
+      },
       {
         id: 'jut', icon: 'snow', title: 'Джут — ледяная зима',
         text: 'Степь сковало гололёдом, из-под наста не добыть траву. Скот слабеет на глазах, и старейшины ждут вашего слова.',
@@ -1812,6 +1831,7 @@ export class Game {
     const ev = this.event; if (!ev) return;
     const def = this.eventDefs().find(e => e.id === ev.id);
     this.event = null;
+    if (ev.id === 'kurultai') { this.kurultaiChoice(ev.opts.indexOf(ev.opts[idx] !== undefined ? ev.opts[idx] : '')); this.pushHud(); return; }
     if (!def) { this.pushHud(); return; }
     const herdUnits = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null);
     switch (def.id) {
@@ -2795,6 +2815,7 @@ export class Game {
   popCap(owner: 'player' | 'enemy' | 'neutral') {
     let c = 10;
     for (const b of this.blds) if (b.owner === owner && b.key === 'house' && b.done >= 1) c += 8;
+    if (owner === 'player' && this.law === 'asylum') c += 2;   // «Право убежища» (п.13)
     return Math.min(60, c);
   }
 
@@ -2840,7 +2861,7 @@ export class Game {
     if (!this.afford(d.cost)) { this.floater(b.x, b.y - 60, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
     this.pay(d.cost);
     // Яса «Тез найза» (п.32): войска готовятся на 20% быстрее
-    b.queue.push({ key, t: 0, total: this.yasaActive('teznayza') ? d.trainTime / 1.2 : d.trainTime });
+    b.queue.push({ key, t: 0, total: d.trainTime / (this.yasaActive('teznayza') ? 1.2 : 1) / (this.law === 'mobil' ? 1.25 : 1) });   // «Мобилизация» (п.13)
     this.sound.train();
     this.burst(b.x, b.y - 20, 8, ['#f6d47c', '#fff7cc'], 60);
     this.pushHud();
@@ -2939,6 +2960,7 @@ export class Game {
     const data = {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
       mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep), camp: this.camp || undefined, koshN: this.koshN,
+      authority: this.authority, law: this.law, discontent: this.discontent, chronicle: this.chronicle,
       loyal: [...this.loyal.entries()].filter(([, v]) => Math.abs(v) < 1), lostHexes: this.lostHexes, wonHexes: this.wonHexes,
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
       kills: this.kills, razed: this.razed, gatheredTotal: this.gatheredTotal, woodGathered: this.woodGathered,
@@ -3125,6 +3147,10 @@ export class Game {
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.mode = d.mode === 'nomad' ? 'nomad' : 'settled';
       this.camp = (d.camp ?? null) as this['camp'];   // глава восстанавливается вместе с партией
+      this.authority = typeof d.authority === 'number' ? d.authority : 50;   // құрылтай (п.13)
+      this.law = (d.law as string | null) ?? null;
+      this.discontent = typeof d.discontent === 'number' ? d.discontent : 0;
+      this.chronicle = Array.isArray(d.chronicle) ? d.chronicle : [];
       this.koshN = typeof d.koshN === 'number' ? d.koshN : 0;
       // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
       this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
@@ -3388,6 +3414,9 @@ export class Game {
     for (const w of this.natWonders) {
       if (this.tdx(u.x - w.x) ** 2 + this.tdy(u.y - w.y) ** 2 < WONDER_AURA * WONDER_AURA) { m *= 1.25; break; }
     }
+    // законы курултая (п.13)
+    if (this.law === 'nalog' || this.law === 'mobil') m *= 0.95;
+    if (this.discontent >= 70) m *= 0.9;   // озлобленный аул работает спустя рукава
     return m;
   }
   readonly FRESH_BONUS = 1.35;   // насколько быстрее работает отдохнувший
@@ -3953,6 +3982,49 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── ҚҰРЫЛТАЙ (п.13): совет биев раз в 4 суток ──
+  spawnKurultai() {
+    this.kurultaiPending = false; this.kurultaiN++;
+    const pool = LAW_DEFS.filter(l => l.id !== this.law);
+    for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    this.kurultaiOpts = pool.slice(0, 3).map(l => l.id);
+    this.chronicle.push(`Курултай №${this.kurultaiN}: бии съехались на совет`);
+    this.event = { id: 'kurultai', opts: this.kurultaiOpts };
+    this.sound.quest(); this.pushHud();
+  }
+  kurultaiChoice(idx: number) {
+    if (idx >= 0 && idx < this.kurultaiOpts.length) {
+      const id = this.kurultaiOpts[idx];
+      this.enactLaw(id);
+      this.authority = Math.min(100, this.authority + 8);
+    } else {
+      // разойтись без решения: бии ропчут, авторитет тает, народ уходит
+      this.discontent = Math.min(100, this.discontent + 20);
+      this.authority = Math.max(0, this.authority - 10);
+      this.chronicle.push('Курултай разошёлся без решения — бии в обиде');
+      this.pushBanner('{i:scroll} Совет без решения', 'Бии ропчут: авторитет −10', 3.5);
+      if (this.discontent >= 50) this.aulDesertion();
+    }
+    this.pushHud();
+  }
+  enactLaw(id: string) {
+    const def = LAW_DEFS.find(l => l.id === id);
+    if (!def) return;
+    this.law = id; this.sound.research();
+    this.chronicle.push(`Принят закон «${def.name}»`);
+    this.pushBanner(`{i:scroll} Закон степи: ${def.name}`, def.desc, 5);
+  }
+  aulDesertion() {
+    const left = this.units.filter(u => u.owner === 'player' && u.key === 'villager').slice(0, 2);
+    for (const u of left) { u.owner = 'neutral'; u.path = undefined; u.state = 'idle'; }
+    if (left.length) {
+      this.chronicle.push(`${left.length} шаруа откочевали из-за недовольства`);
+      this.pushBanner('{i:warn} Аул ропщет', 'Недовольные семьи откочевали в степь', 4);
+      this.sound.alarm();
+    }
+  }
+  lawName(): string | null { return this.law ? LAW_DEFS.find(l => l.id === this.law)?.name ?? null : null; }
+
   // ── Главы истории (п.34): сценарный старт и задачи главы ──
   applyCampaignStart() {
     const def = this.campStart!;
@@ -4716,6 +4788,7 @@ export class Game {
       this.dayT -= this.DAY_LEN; this.dayNum++;
       this.azanDone = [];          // новые сутки — намазы звучат заново
       this.pushBanner(`{i:sunrise} День ${this.dayNum}`, 'Новый день над степью', 2.4);
+      if (this.dayNum % 4 === 0 && !this.kurultaiDays.has(this.dayNum)) { this.kurultaiPending = true; this.kurultaiDays.add(this.dayNum); }   // раз в 4 суток (п.13)
     }
     this.updatePrayer(dt);         // азан с минарета и намаз
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
@@ -5016,7 +5089,7 @@ export class Game {
     // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
     const midC = this.terrain.classAt(u.x + dx / 2, u.y + dy / 2);
     const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
-    const s = Math.min(u.speed * wade * this.eraSpeedMult() * this.weatherSpeedMult() * dt, d);
+    const s = Math.min(u.speed * wade * this.eraSpeedMult() * this.weatherSpeedMult() * (this.law === 'erk' && u.owner === 'player' ? 1.08 : 1) * dt, d);   // «Вольница» (п.13)
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
     // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
     if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
@@ -6868,7 +6941,7 @@ export class Game {
       // construction
       if (b.done < 1 && !this.koshBusy()) {
         const def = BUILDING_DEFS[b.key];
-        let rate = b.owner === 'enemy' ? 1 / (def.buildTime * 0.8) : 1 / (def.buildTime * 2.2);
+        let rate = b.owner === 'enemy' ? 1 / (def.buildTime * 0.8) : 1 / (def.buildTime * 2.2) * (b.owner === 'player' && this.law === 'asar' ? 1.15 : 1);   // «Асар» (п.13)
         // союз с научными племенами (ур.3) ускоряет возведение построек
         if (b.owner === 'player' && this.bonusTier('science', 3)) rate *= 1.2;
         let helpers = 0;
@@ -7489,7 +7562,7 @@ export class Game {
   finish(result: 'victory' | 'defeat') {
     this.over = result;
     const timeBonus = result === 'victory' ? Math.max(0, 3000 - this.time * 2) : 0;
-    this.score += timeBonus;
+    this.score += timeBonus + Math.round(this.authority) * 3;   // авторитет хана — часть очков (п.13)
     if (result === 'victory') this.sound.win(); else this.sound.lose();
     this.trauma = 1;
     const stats: GameStats = {
@@ -7603,6 +7676,7 @@ export class Game {
           choices: d.choices.map(c => ({ id: c.id, label: c.label, desc: c.desc, gold: c.gold })) } : null;
       })() : null,
       scouts: this.units.filter(u => u.owner === 'player' && u.key === 'scout').length,
+      authority: Math.round(this.authority), lawName: this.lawName(), discontent: Math.round(this.discontent),
       event: this.event ? (() => {
         const d = this.eventDefs().find(e => e.id === this.event!.id);
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;

@@ -165,6 +165,18 @@ export const CAMPAIGNS: CampaignDef[] = [
   },
 ];
 
+// ── Құрылтай (п.13): законы степи — глобальные модификаторы до следующего совета ──
+export interface LawDef { id: string; name: string; desc: string }
+export const LAW_DEFS: LawDef[] = [
+  { id: 'nalog',  name: 'Шақырым — ясачный сбор', desc: 'Казна: +0,5 золота/с, но народ ропщет (добыча −5%)' },
+  { id: 'mobil',  name: 'Всеобщая мобилизация',   desc: 'Сарбазы готовятся на 25% быстрее, добыча −5%' },
+  { id: 'toler',  name: 'Веротерпимость',         desc: 'Слово имамов слушают охотнее: вера +30%' },
+  { id: 'asylum', name: 'Право убежища',          desc: 'Юрта хана открыта беглецам: +2 к пределу населения' },
+  { id: 'erk',    name: 'Степная вольница',       desc: 'Все ходят быстрее (+8%), но бии слабеют (авторитет тает вдвое)' },
+  { id: 'asar',   name: 'Асар — взаимопомощь',    desc: 'Весь аул выходит на стройку: здания растут на 15% быстрее' },
+];
+export const LAW_BY_ID: Record<string, LawDef> = Object.fromEntries(LAW_DEFS.map(l => [l.id, l]));
+
 // ── Настройки игрока (хранятся в localStorage, применяются на лету) ──
 export interface Settings {
   difficulty: Difficulty;

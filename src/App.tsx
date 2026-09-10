@@ -374,6 +374,15 @@ export default function App() {
                 <Ico name="crescent" /> Ислам: {hud!.islam.have}/{hud!.islam.need}
               </div>
             )}
+            {/* Құрылтай (п.13): авторитет хана + закон сезона */}
+            {hud && hud.authority > 0 && (
+              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-200"
+                title={`Авторитет хана (п.13) — копится со временем и решениями курултаев, при победе уходит в очки (×3)\nЗакон сезона: ${hud.lawName ?? 'нет'}\nНедовольство аула: ${hud.discontent}${hud.discontent >= 70 ? ' (добыча −10%)' : ''}`}>
+                <Ico name="crown" className="h-3.5 w-3.5" />{hud.authority}
+                {hud.lawName && <span className="max-w-[110px] truncate rounded-full bg-black/40 px-1.5 text-[9px] font-bold text-amber-100/90">{hud.lawName}</span>}
+                {hud.discontent >= 70 && <span title="Аул озлоблен" className="text-red-300"><Ico name="warn" className="h-3 w-3" /></span>}
+              </div>
+            )}
             {/* Объединение степи: показываем, когда союз уже собирается */}
             {(hud?.unite?.have ?? 0) >= 3 && (
               <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
