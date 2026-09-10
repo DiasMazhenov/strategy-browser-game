@@ -2801,8 +2801,11 @@ export class Game {
       this.floater(this.cam.x, this.cam.y - 120, `Нужен: ${AGES[ageReq].name}!`, '#f87171', 18);
       this.sound.error(); return;
     }
-    // find correct training building (у ГЦ лимит очереди 5)
+    // find correct training building (у ГЦ лимит очереди 5).
+    // Хан орда (п.28) — второй очаг найма батыров и атты-мергенов.
+    const altKey: BuildingKey | null = (key === 'knight' || key === 'horsearcher') ? 'orda' : null;
     let b: Bld | undefined = this.blds.find(bl => bl.owner === 'player' && bl.key === reqBld && bl.done >= 1 && bl.queue.length < 5);
+    if (!b && altKey) b = this.blds.find(bl => bl.owner === 'player' && bl.key === altKey && bl.done >= 1 && bl.queue.length < 5);
     if (!b) {
       this.floater(this.cam.x, this.cam.y - 120, `Нужен: ${BUILDING_DEFS[reqBld].name}!`, '#f87171', 18);
       this.sound.error(); return;
@@ -3891,9 +3894,9 @@ export class Game {
     for (const b of this.blds) {
       if (b.owner !== owner || b.done < 1) continue;
       const d = Math.hypot(b.x - wx, b.y - wy);
-      const R = b.key === 'towncenter' ? 420 : b.key === 'tower' ? 300 : b.key === 'mosque' ? 320 : b.key === 'wonder' ? 360 : 200;
+      const R = b.key === 'towncenter' ? 420 : b.key === 'tower' ? 300 : b.key === 'mosque' ? 320 : b.key === 'wonder' ? 360 : b.key === 'orda' ? 380 : 200;
       if (d > R) continue;
-      const w = b.key === 'towncenter' ? 3 : b.key === 'tower' ? 2 : b.key === 'mosque' ? 2 : b.key === 'wonder' ? 2.5 : b.key === 'house' ? 0.8 : 0.5;
+      const w = b.key === 'towncenter' ? 3 : b.key === 'tower' ? 2 : b.key === 'mosque' ? 2 : b.key === 'wonder' ? 2.5 : b.key === 'orda' ? 2.5 : b.key === 'house' ? 0.8 : 0.5;
       p += w * (1 - d / R) + (b.garrison?.length ?? 0) * 0.15;
     }
     for (const u of this.units) {
@@ -4086,7 +4089,7 @@ export class Game {
   }
 
   // ── гарнизон: укрыть/выпустить юнитов ──
-  garrisonCap(b: Bld): number { return b.key === 'towncenter' ? 10 : b.key === 'tower' ? 6 : b.key === 'house' ? 5 : 0; }
+  garrisonCap(b: Bld): number { return b.key === 'orda' ? 12 : b.key === 'towncenter' ? 10 : b.key === 'tower' ? 6 : b.key === 'house' ? 5 : 0; }
   canGarrison(b: Bld): boolean { return b.owner === 'player' && b.done >= 1 && this.garrisonCap(b) > 0; }
   garrisonUnits(buildId: number) {
     const b = this.blds.find(bl => bl.id === buildId);
@@ -5761,7 +5764,7 @@ export class Game {
     let best: Bld | null = null; let bd = 1e15;
     for (const b of this.blds) {
       if (b.owner !== u.owner) continue;
-      if (b.key !== 'towncenter' && b.key !== 'storehouse') continue;
+      if (b.key !== 'towncenter' && b.key !== 'storehouse' && b.key !== 'orda') continue;   // орда — тоже дропофф (п.28)
       if (b.done < 1) continue;
       const d = dist2(u.x, u.y, b.x, b.y);
       if (d < bd) { bd = d; best = b; }
@@ -7079,6 +7082,7 @@ export class Game {
       if (b.owner !== owner || b.done < 0.5) continue;
       s += b.maxHp * 0.15;
       if (b.key === 'barracks' || b.key === 'stable' || b.key === 'blacksmith') s += 60;
+      if (b.key === 'orda') s += 90;
       if (b.key === 'tower') s += 40;
       if (b.key === 'wonder') s += 400;
     }
@@ -8595,6 +8599,67 @@ export class Game {
   }
 
   // Чудо света — золотой имперский монумент (процедурный)
+  // Хан орда (п.28): золотая юрта «столица на колёсах» — процедурный арт без gpt image.
+  drawOrda(b: Bld, ix: number, iy: number, selected: boolean) {
+    const { ctx } = this;
+    const S = b.size;
+    ctx.fillStyle = 'rgba(8,14,8,0.30)';
+    ctx.beginPath();
+    ctx.moveTo(ix, iy + S / 2 - 2); ctx.lineTo(ix + S, iy); ctx.lineTo(ix, iy - S / 2 + 2); ctx.lineTo(ix - S, iy);
+    ctx.closePath(); ctx.fill();
+    if (selected) diamondRingHalf(ctx, ix, iy, S * 1.03, S * 1.03 / 2, '#f6d47c', true);
+    if (b.done < 1) {
+      drawConstruction(ctx, ix, iy, S, b.done);
+      if (selected) diamondRingHalf(ctx, ix, iy, S * 1.03, S * 1.03 / 2, '#f6d47c', false);
+      const py = iy - S / 2 - 24;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(ix - 30, py, 60, 8);
+      ctx.fillStyle = '#a3e635'; ctx.fillRect(ix - 29, py + 1, 58 * b.done, 6);
+      return;
+    }
+    const bob = Math.sin(this.time * 1.4) * 1.5;   // дышит: столица живая
+    // корпус юрты: полусфера с золотыми полосами
+    const R = S * 0.62, baseY = iy - 4;
+    const grad = ctx.createLinearGradient(ix - R, baseY - R, ix + R, baseY);
+    grad.addColorStop(0, '#f7e7b7'); grad.addColorStop(0.5, '#e8c15c'); grad.addColorStop(1, '#b45309');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(ix, baseY, R, Math.PI, 0); ctx.closePath(); ctx.fill();
+    // вертикальные керегь-полосы
+    ctx.strokeStyle = 'rgba(120, 53, 15, 0.5)'; ctx.lineWidth = 2;
+    for (let i = -3; i <= 3; i++) {
+      const px = ix + i * (R / 3.6);
+      ctx.beginPath(); ctx.moveTo(px, baseY); ctx.lineTo(px * (1 - 0.08) + ix * 0.08, baseY - Math.sqrt(Math.max(0, R * R - (px - ix) ** 2)) * 0.92); ctx.stroke();
+    }
+    // шанырак (купол-кольцо) на верхушке
+    ctx.fillStyle = '#fde68a';
+    ctx.beginPath(); ctx.ellipse(ix, baseY - R, R * 0.22, R * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#92400e'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(ix, baseY - R, R * 0.22, R * 0.13, 0, 0, Math.PI * 2); ctx.stroke();
+    // дверь- портал с орнаментом
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(ix - 9, baseY - 26, 18, 26);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(ix - 6, baseY - 22, 12, 3);
+    // тунги: два шеста с хвостами-флагами
+    for (const dir of [-1, 1]) {
+      const px = ix + dir * (R + 4), topY = baseY - R - 26 + bob;
+      ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(px, baseY + 2); ctx.lineTo(px, topY); ctx.stroke();
+      const wav = Math.sin(this.time * 3 + dir) * 3;
+      ctx.fillStyle = dir < 0 ? '#dc2626' : '#f59e0b';
+      ctx.beginPath();
+      ctx.moveTo(px, topY);
+      ctx.quadraticCurveTo(px + dir * 16, topY + 6 + wav, px + dir * 2, topY + 26);
+      ctx.lineTo(px, topY + 22);
+      ctx.closePath(); ctx.fill();
+      drawIcon(ctx, 'star', px + dir * 1, topY - 6, 9, '#fde047');
+    }
+    // вспышка при выстреле (кадр атаки)
+    if (b.flash > 0.05) {
+      ctx.fillStyle = `rgba(255, 237, 160, ${b.flash * 0.5})`;
+      ctx.beginPath(); ctx.arc(ix, baseY - R * 0.6, R * 0.8, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
   drawWonder(b: Bld, ix: number, iy: number, selected: boolean) {
     const { ctx } = this;
     const S = b.size;
@@ -8789,6 +8854,7 @@ export class Game {
 
     // Чудо света рисуется процедурно (золотой монумент)
     if (b.key === 'wonder') { this.drawWonder(b, ix, iy, selected); return; }
+    if (b.key === 'orda') { this.drawOrda(b, ix, iy, selected); return; }
 
     const { sp, scale, ready } = placeBld(b, S);
 
@@ -9005,8 +9071,10 @@ export class Game {
         else if (b.bandit) col = '#1f2937';   // тёмная юрта разбойников — чёрная метка
         else col = this.rivalMet ? '#f87171' : '#5b4a4a';
       }
+      // Хан орда (п.28) — золотая метка, вторая «столица»
+      if (b.key === 'orda' && b.owner === 'player') col = '#fbbf24';
       ctx.fillStyle = col;
-      const s = b.key === 'towncenter' ? 6 : b.tribe || b.bandit ? 5 : 3.4;
+      const s = b.key === 'towncenter' || b.key === 'orda' ? 6 : b.tribe || b.bandit ? 5 : 3.4;
       const [mx, my] = toMap(b.x, b.y);
       ctx.fillRect(mx - s / 2, my - s / 2, s, s);
     }

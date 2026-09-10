@@ -782,6 +782,7 @@ export default function App() {
                   <div className="mx-0.5 w-px shrink-0 bg-white/10" />
                   <TrainBtn label="Стена" icon="brick" key_="B" cost={bldCostOf('wall', wdisc)} ok={canAfford(bldCostOf('wall', wdisc))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
                   <TrainBtn label="Ворота" icon="door" key_="V" cost={bldCostOf('gate', wdisc)} ok={canAfford(bldCostOf('gate', wdisc))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
+                  <TrainBtn label="Хан орда" icon="yurt" key_="" cost={bldCostOf('orda', wdisc)} ok={canAfford(bldCostOf('orda', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'orda'} tip={bldStats('orda')} onClick={() => g()?.enterPlacement('orda')} />
                   <TrainBtn label="Мавзолей" icon="star" key_="W" cost={bldCostOf('wonder', wdisc)} ok={canAfford(bldCostOf('wonder', wdisc)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
                 </>
               )}

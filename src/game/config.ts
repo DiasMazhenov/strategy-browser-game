@@ -104,6 +104,7 @@ export const BUILDING_DEFS = {
   pen:        { name: 'Загон для скота', hp: 380, size: 110, cost: { wood: 160, food: 0, gold: 0 }, buildTime: 12, sight: 170, attack: null, desc: 'Пастух пригоняет сюда овец и коров' },
   wall:       { name: 'Дуал (стена)',  hp: 900,  size: 44,  cost: { wood: 30, food: 0, gold: 0 }, buildTime: 5,  sight: 120, attack: null, desc: 'Саманная стена преграждает путь врагам' },
   gate:       { name: 'Ворота',        hp: 600,  size: 44,  cost: { wood: 45, food: 0, gold: 0 }, buildTime: 6,  sight: 130, attack: null, desc: 'Проход для своих, стена для врага' },
+  orda:       { name: 'Хан орда',      hp: 2400, size: 108, cost: { wood: 380, food: 0, gold: 220 }, buildTime: 30, sight: 300, attack: { dmg: 14, range: 220, cd: 1.2 }, desc: 'Золотая орда 3-й эпохи: тяжёлая оборона, точка сдачи добычи, найм батыров и атты-мергенов, гарнизон 12', ageReq: 2 },
   wonder:     { name: 'Мавзолей хана', hp: 3000, size: 130, cost: { wood: 600, food: 600, gold: 900 }, buildTime: 40, sight: 360, attack: null, desc: 'Великий монумент степи — постройте для победы', ageReq: 3 },
 } as const;
 
