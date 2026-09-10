@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { DEDICATIONS, Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
 import { PLAYER_NATION, NATION_BY_ID } from './game/nations';
+import { CAMPAIGNS } from './game/config';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
@@ -134,6 +135,7 @@ export default function App() {
     setGameId(g => g + 1);
   }, []);
 
+  const campRef = useRef<string | null>(null);
   const startGame = useCallback((d?: Difficulty, resume = false) => {
     if (d) setSettings(prev => { const next = { ...prev, difficulty: d }; try { localStorage.setItem(LS_SETTINGS, JSON.stringify(next)); } catch { /* noop */ } return next; });
     setLoadSave(resume);
@@ -151,8 +153,12 @@ export default function App() {
     if (!canvas) return;
     const game = new Game(canvas, {
       settings, loadSave,
+      campaign: campRef.current ?? undefined,   // глава кампании (п.34)
       onHud: (h) => setHud(h),
       onGameOver: (s) => {
+        if (s.campId && s.result === 'victory') {
+          try { localStorage.setItem('khanate-camp-' + s.campId, '1'); } catch { /* noop */ }
+        }
         setOver(s);
         setScores(loadScores());
       },
@@ -196,6 +202,7 @@ export default function App() {
       scores={scores} settings={settings} updateSettings={updateSettings}
       onPlay={() => startGame()}
       onResume={() => startGame(undefined, true)}
+      onPlayCampaign={(id) => { campRef.current = id; startGame(); }}
     />
   );
 
@@ -220,6 +227,15 @@ export default function App() {
             <div className="ml-1 flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs font-bold sm:hidden">
               <Users className="h-3.5 w-3.5 text-sky-300" />{hud?.pop ?? 0}/{hud?.popCap ?? 10}
             </div>
+            {hud?.camp && (
+              <div className="pointer-events-auto ml-2 hidden rounded-xl border border-amber-400/30 bg-black/55 px-2.5 py-1 text-[10px] font-bold leading-snug text-slate-200 backdrop-blur-sm md:block"
+                title={`Главы истории (п.34): ${hud.camp.part} — ${hud.camp.title}. Выполните все задачи главы для победы.`}>
+                <div className="text-[9px] font-black tracking-wide text-amber-300">{hud.camp.part} · {hud.camp.title}</div>
+                {hud.camp.objs.map((o, i) => (
+                  <div key={i} className={o.done ? 'text-lime-300 line-through' : 'text-slate-300'}>{o.done ? '✓' : '·'} {o.t}</div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* score / wave center (компактно; дипломатия — отдельная кнопка) */}
@@ -1496,8 +1512,9 @@ function bldIcon(k: BuildingKey) {
 }
 
 /* ================= MENU ================= */
-function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { scores: ScoreEntry[]; settings: Settings; updateSettings: (p: Partial<Settings>) => void; onPlay: () => void; onResume: () => void }) {
+function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlayCampaign }: { scores: ScoreEntry[]; settings: Settings; updateSettings: (p: Partial<Settings>) => void; onPlay: () => void; onResume: () => void; onPlayCampaign: (id: string) => void }) {
   const [showSettings, setShowSettings] = useState(false);
+  const [showCamp, setShowCamp] = useState(false);
   // Устав и Зал легенд живут в одной модалке с вкладками: null — закрыта.
   const [infoTab, setInfoTab] = useState<'how' | 'scores' | null>(null);
   const difficulty = settings.difficulty;
@@ -1506,12 +1523,12 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
     const h = (e: KeyboardEvent) => {
       // Esc закрывает попап; Enter/пробел стартуют игру, но не когда открыто
       // окно — иначе игрок, читая устав, случайно улетал бы в бой.
-      if (e.key === 'Escape') { setInfoTab(null); return; }
-      if (!showSettings && !infoTab && (e.key === 'Enter' || e.key === ' ')) onPlay();
+      if (e.key === 'Escape') { setInfoTab(null); setShowCamp(false); return; }
+      if (!showSettings && !infoTab && !showCamp && (e.key === 'Enter' || e.key === ' ')) onPlay();
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onPlay, showSettings, infoTab]);
+  }, [onPlay, showSettings, infoTab, showCamp]);
   if (showSettings) return <SettingsPanel settings={settings} updateSettings={updateSettings} onClose={() => setShowSettings(false)} />;
   return (
     <div className="parchment relative min-h-[100dvh] overflow-y-auto text-white">
@@ -1599,6 +1616,9 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
                 <Ico name="save" /> Продолжить
               </button>
             )}
+            <button onClick={() => setShowCamp(true)} className="btn-iron flex items-center gap-2 rounded-2xl px-5 py-4 text-sm font-black text-amber-200">
+              <Ico name="scroll" /> Главы истории
+            </button>
             <button
               onClick={() => setShowSettings(true)}
               title="Настройки"
@@ -1629,6 +1649,41 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
           60 кадров/с • движок на Canvas • синтезированные звуки битвы • великая степь ждёт своего хана <Ico name="spark" />
         </div>
       </div>
+      {/* ===== ПОПАП: ГЛАВЫ ИСТОРИИ (п.34) ===== */}
+      {showCamp && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowCamp(false)}>
+          <div className="max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-3xl border-2 border-amber-400/40 bg-[#1a140c] p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="mb-4 text-center">
+              <div className="text-xl font-black tracking-wide text-amber-200"><Ico name="scroll" className="mr-1 inline h-5 w-5" /> ГЛАВЫ ИСТОРИИ ХАНСТВА</div>
+              <div className="mt-1 text-[11px] font-semibold text-slate-400">Сценарии по вехам 1465–1726: каждая глава обучает своим механикам</div>
+            </div>
+            <div className="space-y-3">
+              {CAMPAIGNS.map((c, ci) => {
+                const done = (() => { try { return !!localStorage.getItem('khanate-camp-' + c.id); } catch { return false; } })();
+                return (
+                  <button key={c.id} onClick={() => onPlayCampaign(c.id)}
+                    className="block w-full rounded-2xl border p-4 text-left transition active:scale-[0.99] border-amber-400/25 bg-gradient-to-br from-amber-900/30 via-black/30 to-black/40 hover:border-amber-300/60">
+                    <div className="flex items-center justify-between">
+                      <div className="text-base font-black text-amber-100">{c.part}: {c.title} <span className="ml-1 text-xs font-bold text-slate-400">{c.years} · {c.mode === 'nomad' ? 'кочевой' : 'оседлый'}</span></div>
+                      {done && <span className="rounded-full bg-lime-500/25 px-2 py-0.5 text-[10px] font-black text-lime-300">ПРОЙДЕНО</span>}
+                    </div>
+                    <div className="mt-1 text-xs leading-relaxed text-slate-300">{c.brief}</div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {c.objs.map((o, oi) => (
+                        <span key={oi} className="rounded-full border border-white/10 bg-black/40 px-2 py-0.5 text-[10px] font-bold text-slate-300">· {o.t}</span>
+                      ))}
+                    </div>
+                    <div className="mt-2 text-[10px] font-bold text-amber-300/80">Глава {['I', 'II', 'III'][ci]} — играть</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-4 text-center">
+              <button onClick={() => setShowCamp(false)} className="btn-iron rounded-xl px-5 py-2 text-xs font-black text-slate-200">Закрыть (Esc)</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ===== ПОПАП: УСТАВ / ЗАЛ ЛЕГЕНД ===== */}
       {infoTab && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm"

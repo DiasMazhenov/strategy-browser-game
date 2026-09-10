@@ -1,4 +1,4 @@
-import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
+import { AGES, BUILDING_DEFS, CAMPAIGNS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type CampaignDef, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
 import { drawIcon, drawRich, strokeRich, measureRich } from './iconset';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
@@ -141,7 +141,7 @@ function wallSpriteFor(b: Bld, isCorner: boolean): BldSprite | undefined {
   return kz ? KZ_BLD_SPRITES[b.key] : BLD_SPRITES[b.key];
 }
 
-export interface GameStats { score: number; kills: number; razed: number; gathered: number; timeSec: number; age: number; result: 'victory' | 'defeat'; difficulty: Difficulty; peakPop?: number; peakArmy?: number; built?: number; history?: { t: number; army: number; pop: number }[]; }
+export interface GameStats { score: number; kills: number; razed: number; gathered: number; timeSec: number; age: number; result: 'victory' | 'defeat'; difficulty: Difficulty; peakPop?: number; peakArmy?: number; built?: number; history?: { t: number; army: number; pop: number }[]; campId?: string; campTitle?: string; }
 export interface Banner { title: string; sub: string; t: number; dur: number; }
 interface Carry { type: 'wood' | 'food' | 'gold'; amt: number }
 interface Unit {
@@ -384,6 +384,7 @@ export interface AgeReport {
 }
 
 export interface HudSnapshot {
+  camp?: { part: string; title: string; objs: { t: string; done: boolean }[] };   // глава кампании (п.34)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -550,6 +551,9 @@ export class Game {
   paused = false; over: 'victory' | 'defeat' | null = null;
   // ── РЕЖИМЫ: отырықшы (города и границы) / көшпенді (перекочёвки) ──
   mode: 'settled' | 'nomad' = 'settled';
+  camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
+  campStart?: CampaignDef;
+  campT = 0; koshN = 0;
   terr = new Map<string, 1 | 2>();        // гекс "q,r" -> 1 игрок, 2 враг
   terrCount = 0; terrLand = 0; terrDirty = true;
   // ── ЛОЯЛЬНОСТЬ ГРАНИЦ (п.23, Civ6 loyalty) ──
@@ -718,7 +722,7 @@ export class Game {
   hint = 'Потяните для выделения • Правый клик — приказ';
   destroyed = false;
 
-  constructor(canvas: HTMLCanvasElement, opts: { difficulty?: Difficulty; settings?: Settings; loadSave?: boolean; onHud: (h: HudSnapshot) => void; onGameOver: (s: GameStats) => void; onPauseRequest: () => void }) {
+  constructor(canvas: HTMLCanvasElement, opts: { difficulty?: Difficulty; settings?: Settings; loadSave?: boolean; campaign?: string; onHud: (h: HudSnapshot) => void; onGameOver: (s: GameStats) => void; onPauseRequest: () => void }) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no ctx');
@@ -739,6 +743,9 @@ export class Game {
     this.fogExpl = new Uint8Array(this.fogGW * this.fogGH);
     this.fogVis = new Uint8Array(this.fogGW * this.fogGH);
     this.genWorld();
+    // Главы истории (п.34): сценарная партия — режим и стартовые силы задаёт глава
+    this.campStart = opts.campaign ? CAMPAIGNS.find(c => c.id === opts.campaign) : undefined;
+    if (this.campStart) this.applyCampaignStart();
     if (opts.loadSave && this.loadFromSave()) { /* восстановлено из сохранения */ }
     this.bind();
     this.centerOn(HOME.x, HOME.y, true);
@@ -2931,7 +2938,7 @@ export class Game {
   serialize(): string {
     const data = {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
-      mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep),
+      mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep), camp: this.camp || undefined, koshN: this.koshN,
       loyal: [...this.loyal.entries()].filter(([, v]) => Math.abs(v) < 1), lostHexes: this.lostHexes, wonHexes: this.wonHexes,
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
       kills: this.kills, razed: this.razed, gatheredTotal: this.gatheredTotal, woodGathered: this.woodGathered,
@@ -3117,6 +3124,8 @@ export class Game {
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
       this.mode = d.mode === 'nomad' ? 'nomad' : 'settled';
+      this.camp = (d.camp ?? null) as this['camp'];   // глава восстанавливается вместе с партией
+      this.koshN = typeof d.koshN === 'number' ? d.koshN : 0;
       // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
       this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
       this.lostHexes = d.lostHexes ?? 0; this.wonHexes = d.wonHexes ?? 0;
@@ -3944,6 +3953,40 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── Главы истории (п.34): сценарный старт и задачи главы ──
+  applyCampaignStart() {
+    const def = this.campStart!;
+    this.camp = { id: def.id, part: def.part, title: def.title, objs: def.objs.map(o => ({ ...o, done: false })) };
+    if (def.give) { this.res.wood += def.give.wood ?? 0; this.res.food += def.give.food ?? 0; this.res.gold += def.give.gold ?? 0; }
+    if (def.startAge && def.startAge > this.age) this.age = def.startAge;
+    for (const g of def.units ?? []) for (let i = 0; i < g.n; i++) this.addUnit(g.key, 'player', HOME.x + rand(-70, 70), HOME.y + rand(-60, 60));
+    this.pushBanner(`{i:scroll} ${def.part}: ${def.title}`, def.brief.slice(0, 90) + '…', 6);
+  }
+  updateCampaign(dt: number) {
+    if (!this.camp) return;
+    this.campT += dt;
+    if (this.campT < 1) return;
+    this.campT = 0;
+    let all = true;
+    for (const o of this.camp.objs) {
+      if (o.done) continue;
+      if (this.campObjDone(o)) { o.done = true; this.score += 200; this.sound.research(); this.pushBanner('{i:scroll} Задача главы выполнена', o.t); }
+      else all = false;
+    }
+    if (all && !this.over) this.finish('victory');
+  }
+  campObjDone(o: { type: string; n?: number; key?: string }): boolean {
+    switch (o.type) {
+      case 'kills': return this.kills >= (o.n ?? 0);
+      case 'age': return this.age >= (o.n ?? 0);
+      case 'pop': return this.units.filter(u => u.owner === 'player' && u.key !== 'wolf' && u.key !== 'sheep' && u.key !== 'cow' && u.key !== 'deer').length >= (o.n ?? 0);
+      case 'suzerain': return TRIBE_IDS.filter(nid => this.suzerain(nid) === 'player').length >= (o.n ?? 0);
+      case 'converted': return TRIBE_IDS.filter(nid => (this.faith[nid] ?? 0) >= 100).length >= (o.n ?? 0);
+      case 'bld': return this.blds.filter(b => b.owner === 'player' && b.key === o.key && b.done >= 1).length >= (o.n ?? 1);
+      case 'kosh': return this.koshN >= (o.n ?? 0);
+      default: return false;
+    }
+  }
   startKosh(i: number) {
     if (this.mode !== 'nomad' || this.migrating > 0 || i === this.siteI || !this.sites[i]) return;
     this.migrating = Math.max(5, Math.round(20 * this.eraKoshMult())); this.koshTarget = i; // Ұлы көш (п.22)
@@ -3973,6 +4016,7 @@ export class Game {
     this.cam.x = site.x; this.cam.y = site.y;
     this.ensureChunks(site.x, site.y, 2);
     old.dep = 0.05; this.siteI = this.koshTarget; this.koshTarget = -1; this.migrating = 0;
+    this.koshN++;   // глава II (п.34): «көш на новый жайляу»
     this.pushBanner('{i:yurt} Новый жайляу!', 'Пастбища отдохнули; на старом месте остался қыстау с тайником');
   }
   private updateModes(dt: number) {
@@ -4680,6 +4724,7 @@ export class Game {
     this.updateBandits(dt);        // набеги и респавн стоянок разбойников
     this.updateNatWonders(dt);     // чудеса природы: открытие даёт очки и мудрость
     this.updateFaith(dt);          // вера степи: мечети/миссионеры против шаманов
+    this.updateCampaign(dt);       // главы истории: сценарные задачи (п.34)
     this.updateEurekas(dt);        // эврики: условия-ускорения техов
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
@@ -7452,6 +7497,7 @@ export class Game {
       gathered: Math.round(this.gatheredTotal), timeSec: Math.round(this.time),
       age: this.age, result, difficulty: this.difficulty,
       peakPop: this.peakPop, peakArmy: this.peakArmy, built: this.builtCount, history: this.history.slice(-24),
+      campId: this.camp?.id, campTitle: this.camp?.title,
     };
     Game.clearSave();   // партия окончена: снимаем и сохранение, и метку «в игре»
     setTimeout(() => this.onGameOver(stats), 900);

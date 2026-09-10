@@ -118,6 +118,53 @@ export const DIFF = {
 
 export type GameSpeed = 0.75 | 1 | 1.5 | 2;
 
+// ── Главы истории (п.34): сценарная кампания по вехам Ханства ──
+export interface CampaignObj { t: string; type: 'kills' | 'age' | 'pop' | 'suzerain' | 'converted' | 'bld' | 'kosh'; n?: number; key?: string }
+export interface CampaignDef {
+  id: string; part: string; title: string; years: string; brief: string;
+  mode: 'settled' | 'nomad';
+  give?: { wood?: number; food?: number; gold?: number };
+  startAge?: number;
+  units?: { key: UnitKey; n: number }[];
+  objs: CampaignObj[];
+}
+export const CAMPAIGNS: CampaignDef[] = [
+  {
+    id: 'khanate1465', part: 'Глава I', title: 'Қазақ хандығы', years: '1465',
+    brief: 'Керей и Жанибек откочёвывают от Абулхаира в Жетысу. Семь лет в долине Чу — и первое ханство степи. Поднимите аул с нуля.',
+    mode: 'settled', give: { wood: 400, food: 300 },
+    objs: [
+      { t: 'Поставить 2 юрты для народа', type: 'bld', key: 'house', n: 2 },
+      { t: 'Народ до 14 душ', type: 'pop', n: 14 },
+      { t: 'Наступить Век батыров', type: 'age', n: 1 },
+      { t: 'Первая кровь: 10 врагов', type: 'kills', n: 10 },
+    ],
+  },
+  {
+    id: 'jungar1643', part: 'Глава II', title: 'Жоңғар шапқыншылығы', years: '1643',
+    brief: 'Первые джунгарские тумены выходят к Балхашу. Аул спасают движением и союзами: кочуй, заводи посланников, бей набеги.',
+    mode: 'nomad', units: [{ key: 'horsearcher', n: 2 }],
+    objs: [
+      { t: 'Көш на новый жайляу', type: 'kosh', n: 1 },
+      { t: 'Конюшня для атты-мергенов', type: 'bld', key: 'stable', n: 1 },
+      { t: 'Сюзеренитет у одного народа (6 посланников)', type: 'suzerain', n: 1 },
+      { t: 'Отбить набеги: 20 врагов', type: 'kills', n: 20 },
+    ],
+  },
+  {
+    id: 'anyrakay1726', part: 'Глава III', title: 'Аңырақай шайқасы', years: '1726',
+    brief: 'Год великого побоища: ополчение трёх жузов громит джунгар у Аңырақая. Хан орда, союзники, вера — и степь вернётся.',
+    mode: 'settled', startAge: 2, give: { wood: 600, gold: 300 },
+    units: [{ key: 'swordsman', n: 3 }, { key: 'horsearcher', n: 3 }],
+    objs: [
+      { t: 'Поставить Хан орду', type: 'bld', key: 'orda', n: 1 },
+      { t: 'Сюзеренитет у двух народов', type: 'suzerain', n: 2 },
+      { t: 'Обратить один народ в ислам', type: 'converted', n: 1 },
+      { t: 'Аңырақай: 40 врагов', type: 'kills', n: 40 },
+    ],
+  },
+];
+
 // ── Настройки игрока (хранятся в localStorage, применяются на лету) ──
 export interface Settings {
   difficulty: Difficulty;
