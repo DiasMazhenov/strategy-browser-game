@@ -1,11 +1,12 @@
 import { AGES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './config';
 import { SoundBank } from './audio';
+import { drawIcon, drawRich, strokeRich, measureRich } from './iconset';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
   getHexTile, hexPath, hexCenter, hexCenterWorld, screenToHex,
-  HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex,
+  HEX_PTS, TCX, TCY, snapToHexWorld, hexNeighbors, worldToHex, HS,
   type HexKind,
   TILE_STEP, HEX_CELL } from './iso';
-import { Terrain, mulberry32 as mulberry32Like } from './terrain';
+import { Terrain, mulberry32 as mulberry32Like, wrapW, wrapH } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
@@ -169,6 +170,8 @@ interface Unit {
   mvx?: number; mvy?: number;                     // сглаженный вектор движения (для fmode)
   stance: 'aggressive' | 'defensive' | 'stand'; // боевая стойка
   tribe?: boolean;   // воин нейтрального племени (пассивен, пока не атакован)
+  bandit?: boolean;  // разбойник: враждебен всем, ходит в набеги на ближайших шаруа (п.25)
+  campId?: number;   // id стоянки-юрты, к которой приписан
   aggro?: boolean;   // племя разозлено (атакует обидчика)
   homeX: number; homeY: number;                 // точка возврата (stand/patrol)
   patrolX: number; patrolY: number;             // вторая точка патруля
@@ -223,27 +226,66 @@ interface Unit {
 // опыт для следующего уровня: 3 убийства → ур.2, далее +2 за ранг
 function xpForLevel(level: number): number { return (level + 2) * 3; }
 // тип урона юнита для камень-ножницы-бумаги
-function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' {
-  if (k === 'spearman' || k === 'archer') return 'pierce';
-  if (k === 'catapult') return 'blunt';
+function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' | 'gun' {
+  if (k === 'musketeer' || k === 'falconet') return 'gun';   // порох: броня не спасает
+  if (k === 'spearman' || k === 'archer' || k === 'horsearcher') return 'pierce';
+  if (k === 'catapult' || k === 'ram') return 'blunt';
   return 'blade';
 }
 // класс брони цели
 function armorClass(k: UnitKey): 'inf' | 'cav' | 'siege' | 'soft' {
-  if (k === 'knight' || k === 'cavalry') return 'cav';
-  if (k === 'catapult') return 'siege';
+  if (k === 'knight' || k === 'cavalry' || k === 'horsearcher') return 'cav';
+  if (k === 'catapult' || k === 'ram' || k === 'falconet') return 'siege';
   if (k === 'swordsman' || k === 'spearman') return 'inf';
   return 'soft';
 }
 // множитель контры: копья бьют конницу, конница топчет лучников/пехоту, клинки рубят пехоту/осаду
 function dmgMult(att: UnitKey, target: UnitKey): number {
   const a = dmgType(att), t = armorClass(target);
+  if (a === 'gun') return t === 'siege' ? 0.8 : 1;   // пуля/ядро: ровно по всем живым, осадные машины держат
   if (a === 'pierce' && t === 'cav') return 1.6;   // копья/стрелы против конницы
-  if (a === 'blade' && (t === 'soft')) return 1.35; // мечники/конница рубят лучников и беззащитных
-  if (att === 'cavalry' && t === 'inf') return 1.3; // конница сметает пехоту
-  if (a === 'blunt' && t === 'siege') return 1.5;   // осадный по осаде
+  if (a === 'pierce' && t === 'soft') return 1.2;   // стрелы косят беззащитных
   if (a === 'pierce' && t === 'inf') return 0.85;   // пехота лучше держит уколы
+  if (a === 'blade' && t === 'soft') return 1.35;   // мечники/конница рубят лучников и беззащитных
+  if ((att === 'cavalry' || att === 'knight') && target === 'spearman') return 0.8; // напороться на найзу
+  if (att === 'cavalry' && t === 'inf') return 1.3; // жасауыл сметает пехоту
+  if ((att === 'swordsman' || att === 'villager') && t === 'cav') return 0.8; // пешим конницу не удержать
+  if (a === 'blunt' && t === 'siege') return 1.5;   // осадный по осаде
+  if (att === 'ram' && t !== 'siege') return 0.25;  // таран по живому — почти ничто
+  if (a === 'blunt' && t !== 'siege') return 0.7;   // катапульта по живому неэффективна
   return 1;
+}
+// ── Золотой/Тёмный век (п.22 плана): посвящения и пороги счёта эпохи ──
+export const DEDICATIONS = [
+  { id: 'kosh', name: 'Ұлы көш', icon: 'camel', desc: 'көш на 30% быстрее, войска на 5% быстрее' },
+  { id: 'daulet', name: 'Дәулет', icon: 'gold', desc: 'добыча ресурсов +15%, торговый доход +15%' },
+  { id: 'iman', name: 'Иман', icon: 'mosque', desc: 'мудрость +30%, имамы лечат и камлают на 25% быстрее' },
+] as const;
+export type DedicationId = typeof DEDICATIONS[number]['id'];
+const ERA_THRESHOLD = [0, 45, 70, 100];           // порог золотого века по номеру новой эпохи
+// какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
+const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram', 'musketeer', 'falconet'];
+export function counterText(k: UnitKey): string {
+  if (k === 'villager' || k === 'monk' || k === 'trader') return '';
+  const parts: string[] = [];
+  for (const t of COUNTER_SHOW) {
+    if (t === k) continue;
+    const m = dmgMult(k, t);
+    if (m >= 1.15) parts.push(`×${(Math.round(m * 10) / 10).toString().replace(/^1\.0$/, '1')} ${UNIT_DEFS[t].name.toLowerCase()}`);
+  }
+  if (k === 'catapult') parts.push('×1.7 постройки');
+  if (k === 'ram') parts.push('×3 стены и ворота', '×1.5 постройки');
+  if (k === 'musketeer') parts.push('пуля не знает брони: ×1 всем');
+  if (k === 'falconet') parts.push('ядро по площади: все в 55 px');
+  // кто опасен для нас: контра в обратную сторону
+  const threats: string[] = [];
+  for (const t of COUNTER_SHOW) {
+    if (t === k) continue;
+    if (dmgMult(t, k) >= 1.5) threats.push(UNIT_DEFS[t].name.toLowerCase());
+  }
+  let out = parts.join(' · ');
+  if (threats.length) out += `${out ? '\n' : ''}Опасны: ${threats.join(', ')}`;
+  return out;
 }
 interface Bld {
   id: number; key: BuildingKey; owner: 'player' | 'enemy' | 'neutral';
@@ -256,6 +298,8 @@ interface Bld {
   gate: boolean;                                                // ворота (проходны для игрока)
   axis?: 'x' | 'y';                                             // ориентация протяжки стены/ворот
   tribe?: boolean;                                              // постройка нейтрального племени
+  bandit?: boolean;                                             // тёмная юрта разбойников (п.25)
+  raidT?: number;                                               // таймер до следующего набега
   nationId?: string;                                            // народ-племя (id из NATIONS), владеющий лагерем
   pastureX?: number; pastureY?: number;                         // точка дальнего пастбища загона
   pastureStocked?: boolean;                                     // стадо (5 овец + 5 коров) уже создано
@@ -263,7 +307,14 @@ interface Bld {
 }
 interface Node { id: number; kind: 'wood' | 'gold' | 'food' | 'fish'; x: number; y: number; amount: number; max: number; r: number; phase: number }
 interface Relic { id: number; x: number; y: number; taken: boolean; phase: number }
-interface Proj { x: number; y: number; vx: number; vy: number; tx: number; ty: number; targetU: number; targetB: number; dmg: number; owner: 'player' | 'enemy' | 'neutral'; life: number; kind: 'arrow' | 'bolt' | 'rock'; srcU?: number; }
+interface Proj { x: number; y: number; vx: number; vy: number; tx: number; ty: number; targetU: number; targetB: number; dmg: number; owner: 'player' | 'enemy' | 'neutral'; life: number; kind: 'arrow' | 'bolt' | 'rock' | 'ball' | 'shot'; srcU?: number; }
+export type WeatherKind = 'clear' | 'rain' | 'fog' | 'buran';
+export const WEATHER_DEFS: Record<WeatherKind, { name: string; icon: string; desc: string }> = {
+  clear: { name: 'Ясно', icon: '☀️', desc: 'Небо чистое' },
+  rain: { name: 'Жаңбыр — дождь', icon: '🌧️', desc: 'Пашни +20%, все идут медленнее (−15%), стрелки и башни бьют ближе (−15%)' },
+  fog: { name: 'Тұман — туман', icon: '🌫️', desc: 'Обзор −45%, дальность стрельбы −25% — время для внезапного удара' },
+  buran: { name: 'Боран — буран', icon: '🌨️', desc: 'Скорость −30%, обзор −40%, стрельба −30%, шаруа устают быстрее' },
+};
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; grav: number; shape: 'rect' | 'circle' | 'spark'; rot: number; vr: number }
 interface Floater { x: number; y: number; life: number; max: number; text: string; color: string; size: number }
 interface Corpse { x: number; y: number; key: UnitKey; owner: string; t: number; life: number; face: number }
@@ -271,7 +322,7 @@ interface Decor { x: number; y: number; k: number; s: number; c: string }
 
 export interface SelSnapshot {
   kind: 'none' | 'units' | 'building';
-  count?: number; types?: { key: string; label: string; count: number; level?: number; kills?: number }[];
+  count?: number; types?: { key: string; label: string; count: number; level?: number; kills?: number; counter?: string }[];
   avgHp?: number; maxHp?: number; canGather?: boolean;
   maxLevel?: number; totalKills?: number; stance?: string | null;
   bkey?: BuildingKey; blabel?: string; hp?: number; bmax?: number; done?: number;
@@ -299,9 +350,18 @@ export interface AgeReport {
   powP: number; powE: number;                     // расклад сил с джунгарами
   unlocks: string[];                              // что открылось в новой эпохе
   score: number;                                  // очков набрано за эпоху
+  era: 'golden' | 'normal' | 'dark';              // век наступившей эпохи (п.22)
+  eraScore: number; eraThreshold: number; eraHeroic: boolean;
 }
 
 export interface HudSnapshot {
+  mode: 'settled' | 'nomad';                      // режим партии
+  terrCount: number; terrLand: number;            // гексы границы / земля долины
+  rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
+  cityTier: number; cityName: string;             // аул -> қала -> астана
+  pasture: number;                                // % качества пастбища (кочевой)
+  migrating: number;                              // сек до перекочёвки
+  sites?: { i: number; tag: string; dep: number; cur: boolean; dist: number }[];
   wood: number; food: number; gold: number; pop: number; popCap: number;
   age: number; ageName: string; score: number; kills: number; razed: number;
   timeSec: number; wave: number; nextWave: number; enemyAge: number;
@@ -326,6 +386,8 @@ export interface HudSnapshot {
   unite: { have: number; need: number; t: number; hold: number };
   // великие люди: мудрость и карточки призыва
   wisdom: number; wisdomRate: number;
+  era: { state: 'normal' | 'golden' | 'dark'; heroic: boolean; dedication: string | null;
+         dedName: string; dedIcon: string; dedDesc: string };
   // азан по реальному времени: расписание на сегодня и ближайший намаз
   realAzan: { on: boolean; city: string; next: string; nextAt: string; inMin: number;
     times: { key: string; name: string; at: string; done: boolean }[] } | null;
@@ -340,6 +402,8 @@ export interface HudSnapshot {
   // активное событие степи (модалка с выбором) и тикающие последствия
   event: { id: string; icon: string; title: string; text: string; opts: { label: string; desc: string }[] } | null;
   drought: number; plague: number;
+  // погода степи: вид, сколько ещё держится, краткое описание эффекта
+  weather: { kind: WeatherKind; t: number; name: string; icon: string; desc: string } | null;
   // тревога «нас атакуют»: маркер жив ~20 с, клик по плашке прыгает к месту
   alertHud: { sub: string; t: number } | null;
   // имена родов войск с учётом взятых ступеней апгрейда (для кнопок обучения)
@@ -444,6 +508,26 @@ export class Game {
   woodOnRepair = 0; // накопитель стоимости ремонта (дерево)
   trauma = 0; dmgFlash = 0;
   paused = false; over: 'victory' | 'defeat' | null = null;
+  // ── РЕЖИМЫ: отырықшы (города и границы) / көшпенді (перекочёвки) ──
+  mode: 'settled' | 'nomad' = 'settled';
+  terr = new Map<string, 1 | 2>();        // гекс "q,r" -> 1 игрок, 2 враг
+  terrCount = 0; terrLand = 0; terrDirty = true;
+  // ── ЛОЯЛЬНОСТЬ ГРАНИЦ (п.23, Civ6 loyalty) ──
+  // terr — базовое право по штампам построек; loyal — «канат» на каждом гексе:
+  // +1 полностью наш, −1 полностью джунгарский. Давление считается с обеих
+  // сторон, гекс без контр-давления седеет (|loyal| < 0.5 — мятежный) и в
+  // конце концов меняет владельца. Только лояльные гексы идут в счёт победы.
+  loyal = new Map<string, number>();
+  // ── ЛАГЕРЯ БАНДИТОВ (п.25) ──
+  banditsCleared = 0;             // зачищено стоянок за партию (счёт, респавн)
+  banditRespawnT = 0;             // таймер респавна: не чаще одной стоянки в 2 суток
+  loyalT = 0;                     // тик пересчёта давления (раз в 1.5 с)
+  rebelCount = 0; lostHexes = 0; wonHexes = 0;  // мятежных сейчас / перешло за партию
+  cityTier = 0; cityT = 0;
+  valley = { x: 0, y: 0, r: 1 };
+  valleyLandP = { x: 0, y: 0 }; valleyLandE = { x: 0, y: 0 };
+  sites: { x: number; y: number; dep: number; tag: string }[] = [];
+  siteI = 0; migrating = 0; koshTarget = -1;
 
   // ── дипломатия (в стиле Civilization) ──
   atWar = false;                 // война с ИИ-соперником
@@ -453,6 +537,11 @@ export class Game {
   peaceT = 0;                    // время с прошлой войны (для требований мира)
   dipTimer = 0;                  // накопитель пересчёта
   morale = 1;                    // боевой дух армии ИИ (штраф за несправедливую войну)
+  // ── век эпохи (п.22 плана): назначается на переходе эпох по счёту деяний ──
+  eraState: 'normal' | 'golden' | 'dark' = 'normal';
+  eraDedication: DedicationId | null = null;       // выбранное посвящение золотого века
+  eraHeroic = false;                               // нынешний золотой век — героический (×1.5)
+  eraHeroicCharge = 0;                             // свершения, накопленные в тёмный век
   // ── расширенная дипломатия ──
   tradeRoute = false;            // действующий торговый договор с соседом
   tradeT = 0;                    // таймер начисления дохода с торговли
@@ -490,6 +579,12 @@ export class Game {
   alert: { x: number; y: number; t: number; sub: string } | null = null; // место последнего нападения
   lastAlertT = -99;              // время прошлой тревоги (антиспам)
   droughtT = 0;                  // засуха: пашни дают меньше, пока тикает
+  // ── ПОГОДА СТЕПИ ──
+  // Погода — фоновая и не ставит игру на паузу, в отличие от событий. Меняет
+  // числа мягко (±20-35%), чтобы читалась как обстоятельство, а не как удар.
+  weather: WeatherKind = 'clear';
+  weatherT = 0;                  // сколько секунд текущая погода ещё держится
+  weatherFx: { x: number; y: number; vx: number; vy: number; len: number }[] = []; // экранные капли/снежинки (вне лимита 650)
   plagueT = 0;                   // эпидемия: шаруа работают медленнее
   // ── СУТКИ И ПОСМЕННАЯ РАБОТА ──
   // Условные сутки — 30 минут. Шаруа устают за смену, уходят к юртам отдыхать
@@ -597,7 +692,7 @@ export class Game {
     const isMobile = matchMedia('(pointer: coarse)').matches;
     this.cam.zoom = isMobile ? 0.7 : 0.9;
     this.hint = isMobile ? 'Касание — выбор • Касание земли — приказ • Потяните — рамка выбора' : 'ЛКМ-рамка — выделение • ПКМ — приказ • WASD камера • 1-8 тренировка';
-    this.pushBanner('⚔️ Аттан!', 'Ведите сарбазов — охотьтесь на волков на северо-востоке', 3.4);
+    this.pushBanner('{i:swords} Аттан!', 'Ведите сарбазов — охотьтесь на волков на северо-востоке', 3.4);
     this.last = performance.now();
     const loop = (t: number) => { if (this.destroyed) return; this.raf = requestAnimationFrame(loop); this.frame(t); };
     this.raf = requestAnimationFrame(loop);
@@ -624,7 +719,7 @@ export class Game {
     // союз с военными племенами (ур.1): войска игрока крепче на 10%
     if (owner === 'player' && d.pop > 0 && key !== 'villager' && this.bonusTier('military', 1)) ageMult *= 1.1;
     const u: Unit = {
-      id: this.nextId++, key, owner, x: clamp(x, 20, WORLD.w - 20), y: clamp(y, 20, WORLD.h - 20),
+      id: this.nextId++, key, owner, x: wrapW(x), y: wrapH(y),
       hp: d.hp * ageMult, maxHp: d.hp * ageMult, atk: d.atk * (owner === 'neutral' ? 1 : ageMult),
       range: d.range, speed: d.speed * (key === 'knight' ? 1 : rand(0.94, 1.06)),
       cd: rand(0, 0.4), state: 'idle', tx: x, ty: y, targetU: -1, targetB: -1, nodeId: -1, buildId: -1,
@@ -680,6 +775,13 @@ export class Game {
     // террейн: безопасные зоны вокруг баз (суша, без гор/воды)
     this.terrain.addSafe(P.x, P.y, 360);
     this.terrain.addSafe(E.x, E.y, 360);
+    // долина (зона территориальной победы) и стоянки кочевья считаются всегда:
+    // сейв мог сохранить режим, отличный от настроек меню
+    this.valley = { x: (P.x + E.x) / 2, y: (P.y + E.y) / 2, r: 500 };
+    this.valleyLandP = P; this.valleyLandE = E;
+    this.countValleyLand();
+    this.discoverSites(P);
+    this.mode = this.settings.mode === 'nomad' ? 'nomad' : 'settled';
 
     // стартовые ресурсы у игрока (дуга леса + золото/ягоды)
     const arc = (cx: number, cy: number, n: number, r0: number, a0: number) => {
@@ -765,6 +867,78 @@ export class Game {
         placed++;
       }
     }
+    this.planBanditCamps();
+  }
+  // Стоянки разбойников: 8–12 по кольцу вокруг стартовых баз (2.2–5 км), чтобы
+  // разведчик находил их в первые минуты, а рейды доставали до окраин аула.
+  private planBanditCamps() {
+    const rng = mulberry32Like((this.terrain.seed * 2654435761) >>> 0);
+    const want = 8 + ((rng() * 5) | 0);
+    let placed = 0, tries = 0;
+    while (placed < want && tries++ < 200) {
+      const base = rng() < 0.6 ? HOME : RIVAL;
+      const a = rng() * Math.PI * 2, rad = 2200 + rng() * 2800;
+      const x = base.x + Math.cos(a) * rad, y = base.y + Math.sin(a) * rad;
+      if (x < 300 || y < 300 || x > WORLD.w - 300 || y > WORLD.h - 300) continue;
+      if (!this.terrain.isBuildable(x, y)) continue;
+      if (this.blds.some(b => dist2(b.x, b.y, x, y) < 900 * 900)) continue;
+      this.spawnBanditCamp(x, y, rng);
+      placed++;
+    }
+  }
+  spawnBanditCamp(x: number, y: number, rng: () => number) {
+    const hut = this.addBld('house', 'neutral', x, y, 1);
+    hut.bandit = true; hut.raidT = 60 + rng() * 90;
+    hut.hp = hut.maxHp = 520;
+    const n = 3 + ((rng() * 3) | 0);
+    const kinds: UnitKey[] = ['swordsman', 'archer', 'swordsman', 'knight'];
+    for (let i = 0; i < n; i++) {
+      const g = this.addUnit(kinds[(rng() * kinds.length) | 0], 'neutral', x + (rng() - 0.5) * 100, y + (rng() - 0.5) * 90);
+      g.bandit = true; g.campId = hut.id; g.aggro = true; g.state = 'idle'; g.stance = 'defensive';
+      g.homeX = x; g.homeY = y; g.wx = x; g.wy = y;
+    }
+    return hut;
+  }
+  // Набеги и респавн стоянок. Разбойники — общая беда: цель выбирается среди
+  // шаруа ОБЕИХ сторон в радиусе, отряд идёт, бьёт и возвращается к юрте.
+  updateBandits(dt: number) {
+    for (const b of this.blds) {
+      if (!b.bandit) continue;
+      b.raidT = (b.raidT ?? 60) - dt;
+      if (b.raidT > 0) continue;
+      b.raidT = 110 + Math.random() * 80;
+      const gang = this.units.filter(u => u.bandit && u.campId === b.id && u.hp > 0);
+      if (gang.length < 2) continue;
+      // ближайший шаруа любой стороны в 1400 px
+      let best: Unit | null = null, bd = 1400 * 1400;
+      for (const v of this.units) {
+        if (v.key !== 'villager' || v.owner === 'neutral' || v.hidden) continue;
+        const d = dist2(v.x, v.y, b.x, b.y);
+        if (d < bd) { bd = d; best = v; }
+      }
+      if (!best) continue;
+      for (const g of gang) { g.state = 'attackmove'; g.tx = best.x; g.ty = best.y; g.targetU = best.id; g.retarget = 0; }
+      if (best.owner === 'player') {
+        this.pushBanner('{i:skull} Набег разбойников!', `Шайка из ${gang.length} идёт на ваших шаруа — отбейте или зачистите стоянку`, 4);
+        this.raiseAlert(best.x, best.y, 'Набег разбойников');
+      }
+    }
+    // респавн: не чаще одной стоянки в двое суток, и только пока их меньше 8
+    this.banditRespawnT -= dt;
+    if (this.banditRespawnT <= 0) {
+      this.banditRespawnT = this.DAY_LEN * 2;
+      const alive = this.blds.filter(b => b.bandit).length;
+      if (alive < 8) {
+        const rng = Math.random;
+        for (let t = 0; t < 40; t++) {
+          const base = rng() < 0.5 ? HOME : RIVAL;
+          const a = rng() * Math.PI * 2, rad = 2600 + rng() * 2600;
+          const x = base.x + Math.cos(a) * rad, y = base.y + Math.sin(a) * rad;
+          if (!this.terrain.isBuildable(x, y) || this.blds.some(o => dist2(o.x, o.y, x, y) < 900 * 900)) continue;
+          this.spawnBanditCamp(x, y, rng); break;
+        }
+      }
+    }
   }
 
   // ── чанковая генерация контента ──
@@ -772,10 +946,11 @@ export class Game {
   // гарантировать, что все чанки в радиусе R (в чанках) от точки загенерены
   ensureChunks(wx: number, wy: number, R: number) {
     const C = Game.CHUNK;
-    const ccx = Math.floor(wx / C), ccz = Math.floor(wy / C);
+    const NX = Math.round(WORLD.w / C), NZ = Math.round(WORLD.h / C);
+    const ccx0 = Math.floor(wx / C), ccz0 = Math.floor(wy / C);
     for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
       if (dx * dx + dz * dz > R * R + 1) continue;
-      const cx = ccx + dx, cz = ccz + dz;
+      const cx = (((ccx0 + dx) % NX) + NX) % NX, cz = (((ccz0 + dz) % NZ) + NZ) % NZ;
       const key = this.chunkKey(cx, cz);
       if (this.chunksGen.has(key)) continue;
       this.chunksGen.add(key);
@@ -1014,17 +1189,17 @@ export class Game {
     const nid = g.nationId; this.greeting = null;
     const def = NATION_BY_ID[nid];
     if (nid === 'rival') {
-      if (act === 'warm') { this.grievance = Math.max(0, this.grievance - 10); this.pushBanner('🕊 Дипломатия', `${def.title} ${def.ruler} принял вас учтиво — отношения тёплые`, 3.5); }
-      else if (act === 'giftBig') { if (this.res.gold >= 75) { this.res.gold -= 75; this.grievance = Math.max(0, this.grievance - 28); this.pushBanner('🎁 Дары хунтайджи', `${def.ruler} доволен богатыми дарами — неприязнь отступила`, 3.5); } else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 75 🪙', '#f87171', 15); } }
-      else if (act === 'cold') { this.grievance = Math.min(100, this.grievance + 14); this.casusBelli = Math.max(this.casusBelli, 0.35); this.pushBanner('⚔️ Холодный приём', `${def.title} нахмурился: эту дерзость он запомнит`, 3.5); }
+      if (act === 'warm') { this.grievance = Math.max(0, this.grievance - 10); this.pushBanner('{i:dove} Дипломатия', `${def.title} ${def.ruler} принял вас учтиво — отношения тёплые`, 3.5); }
+      else if (act === 'giftBig') { if (this.res.gold >= 75) { this.res.gold -= 75; this.grievance = Math.max(0, this.grievance - 28); this.pushBanner('{i:gift} Дары хунтайджи', `${def.ruler} доволен богатыми дарами — неприязнь отступила`, 3.5); } else { this.floater(this.cam.x, this.cam.y - 90, 'Нужно 75 {i:gold}', '#f87171', 15); } }
+      else if (act === 'cold') { this.grievance = Math.min(100, this.grievance + 14); this.casusBelli = Math.max(this.casusBelli, 0.35); this.pushBanner('{i:swords} Холодный приём', `${def.title} нахмурился: эту дерзость он запомнит`, 3.5); }
     } else {
       // племя
       if (act === 'gift') {
         const cost = def.choices.find(c => c.act === 'gift')?.gold ?? 40;
-        if (this.res.gold >= cost) { this.res.gold -= cost; this.tribeRel[nid] = 'friend'; this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} обещает не трогать ваши караваны и границы`, 4); this.sound.coin(); }
-        else { this.floater(this.cam.x, this.cam.y - 90, `Нужно ${cost} 🪙`, '#f87171', 15); }
-      } else if (act === 'threat') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); this.pushBanner(`⚡ Угроза племени «${def.name}»`, `${def.title} ${def.ruler} в ярости — воины хватаются за оружие`, 4); }
-      else { this.tribeRel[nid] = 'neutral'; this.pushBanner(`👋 Знакомство с «${def.name}»`, `${def.title} ${def.ruler} кивнул в ответ — пока нейтралитет`, 3.5); }
+        if (this.res.gold >= cost) { this.res.gold -= cost; this.tribeRel[nid] = 'friend'; this.pushBanner(`{i:handshake} Дружба с «${def.name}»`, `${def.title} ${def.ruler} обещает не трогать ваши караваны и границы`, 4); this.sound.coin(); }
+        else { this.floater(this.cam.x, this.cam.y - 90, `Нужно ${cost} {i:gold}`, '#f87171', 15); }
+      } else if (act === 'threat') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); this.pushBanner(`{i:spark} Угроза племени «${def.name}»`, `${def.title} ${def.ruler} в ярости — воины хватаются за оружие`, 4); }
+      else { this.tribeRel[nid] = 'neutral'; this.pushBanner(`{i:wave} Знакомство с «${def.name}»`, `${def.title} ${def.ruler} кивнул в ответ — пока нейтралитет`, 3.5); }
     }
     this.pushHud();
   }
@@ -1057,10 +1232,21 @@ export class Game {
     r += this.relicsHeld * 0.8;
     // призванный Айтеке би ускоряет и саму «культурную» линию
     if (this.hasGreat('aiteke')) r *= 1.15;
-    return r;
+    return r * this.eraWisdomMult();        // Иман/тёмный век (п.22)
   }
 
   hasGreat(id: GreatId): boolean { return this.greatsCalled.includes(id); }
+
+  // ── множители века (п.22 плана) ──
+  private ded(id: DedicationId): number {
+    if (this.eraState !== 'golden' || this.eraDedication !== id) return 0;
+    return this.eraHeroic ? 1.5 : 1;               // героический век усиливает посвящение в полтора раза
+  }
+  eraGatherMult(): number { return this.eraState === 'dark' ? 0.9 : 1 + 0.15 * this.ded('daulet'); }
+  eraKoshMult(): number { return this.eraState === 'dark' ? 1.25 : 1 - 0.3 * this.ded('kosh'); }
+  eraWisdomMult(): number { return this.eraState === 'dark' ? 0.9 : 1 + 0.3 * this.ded('iman'); }
+  eraSpeedMult(): number { return this.eraState === 'dark' ? 0.97 : 1 + 0.05 * this.ded('kosh'); }
+  eraImanMult(): number { return 1 + 0.25 * this.ded('iman'); }
 
   updateWisdom(dt: number) {
     const rate = this.wisdomRate();
@@ -1101,7 +1287,7 @@ export class Game {
     }
     // aiteke — постоянные множители, читаются из hasGreat() в местах расчёта
 
-    this.pushBanner(`✨ ${def.name} — ${def.title}`, def.lore, 6);
+    this.pushBanner(`{i:sparkle} ${def.name} — ${def.title}`, def.lore, 6);
     this.sound.ageup();
     this.burst(HOME.x, HOME.y, 36, ['#f6d47c', '#fff', '#a3e635'], 150);
     this.pushHud();
@@ -1127,7 +1313,7 @@ export class Game {
     if (have >= this.UNITE_NEED) {
       if (!this.uniteAnn) {
         this.uniteAnn = true;
-        this.pushBanner('🤝 СТЕПЬ ОБЪЕДИНЯЕТСЯ!',
+        this.pushBanner('{i:handshake} СТЕПЬ ОБЪЕДИНЯЕТСЯ!',
           `${have} народов признали вас сюзереном. Удержите союз ${Math.round(this.UNITE_HOLD / 60)} мин — и ханство победит без большой войны`, 6);
         this.sound.ageup();
       }
@@ -1136,7 +1322,7 @@ export class Game {
     } else if (this.uniteT > 0) {
       if (this.uniteAnn) {
         this.uniteAnn = false;
-        this.pushBanner('💔 Союз распадается',
+        this.pushBanner('{i:heartbreak} Союз распадается',
           `Народов под вашей рукой осталось ${have} из ${this.UNITE_NEED} — отсчёт откатывается`, 4);
       }
       this.uniteT = Math.max(0, this.uniteT - dt * 0.5);
@@ -1162,7 +1348,7 @@ export class Game {
     if (this.tribeRel[nid] === 'hostile') { this.floater(this.cam.x, this.cam.y - 100, 'Племя враждебно — сначала помиритесь', '#f87171', 15); this.sound.error(); return false; }
     const have = this.envoys[nid] ?? 0;
     const cost = envoyCost(have);
-    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙`, '#f87171', 15); this.sound.error(); return false; }
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 15); this.sound.error(); return false; }
     const wasSuz = this.suzerain(nid);
     const wasLv = this.envoyLevel(nid);
     this.res.gold -= cost;
@@ -1174,14 +1360,14 @@ export class Game {
     const kind = this.tribeKind(nid);
     const t = kind ? TRIBE_TYPES[kind] : null;
     if (lv > wasLv && t) {
-      this.pushBanner(`${t.icon} Влияние у «${def.name}» — уровень ${lv}`, t.levels[lv - 1], 4.5);
+      this.pushBanner(`{i:${t.icon}} Влияние у «${def.name}» — уровень ${lv}`, t.levels[lv - 1], 4.5);
       this.sound.quest();
     } else {
-      this.pushBanner(`🤝 Посланник к «${def.name}»`, `Посланников: ${this.envoys[nid]} · до следующего уровня ${this.envoysToNext(nid)}`, 3);
+      this.pushBanner(`{i:handshake} Посланник к «${def.name}»`, `Посланников: ${this.envoys[nid]} · до следующего уровня ${this.envoysToNext(nid)}`, 3);
     }
     const nowSuz = this.suzerain(nid);
     if (nowSuz === 'player' && wasSuz !== 'player') {
-      this.pushBanner(`👑 Сюзеренитет: «${def.name}»`, 'Народ признал ваше главенство — джунгары отступили', 4.5);
+      this.pushBanner(`{i:crown} Сюзеренитет: «${def.name}»`, 'Народ признал ваше главенство — джунгары отступили', 4.5);
       this.score += 250;
     }
     this.pushHud();
@@ -1211,7 +1397,7 @@ export class Game {
     this.rivalEnvoys[nid] = (this.rivalEnvoys[nid] ?? 0) + 1;
     if (this.suzerain(nid) === 'rival' && was === 'player') {
       const def = NATION_BY_ID[nid];
-      this.pushBanner(`⚠️ «${def?.name ?? nid}» под джунгарами`, 'Хунтайджи перекупил народ — бонусы утрачены. Шлите посланников!', 5);
+      this.pushBanner(`{i:warn} «${def?.name ?? nid}» под джунгарами`, 'Хунтайджи перекупил народ — бонусы утрачены. Шлите посланников!', 5);
       this.sound.error();
       this.pushHud();
     }
@@ -1236,7 +1422,7 @@ export class Game {
       const u = this.addUnit(key, 'player', tc.x + rand(-40, 40), tc.y + 60 + rand(-20, 20));
       u.state = 'idle';
       const def = NATION_BY_ID[nid];
-      this.pushBanner(`🎁 Дар от «${def?.name ?? nid}»`, `Союзники прислали воина: ${UNIT_DEFS[key].name}`, 4);
+      this.pushBanner(`{i:gift} Дар от «${def?.name ?? nid}»`, `Союзники прислали воина: ${UNIT_DEFS[key].name}`, 4);
       this.burst(u.x, u.y, 12, ['#fde68a', '#fff'], 90, 0.7);
       this.sound.train();
     }
@@ -1246,7 +1432,7 @@ export class Game {
       if (this.tribeGoldT >= 8) {
         this.tribeGoldT = 0;
         // Казыбек би («торговля»): караваны идут чаще и с большим прибытком
-        this.res.gold += this.hasGreat('kazybek') ? 6 : 3;
+        this.res.gold += (this.hasGreat('kazybek') ? 6 : 3) * (1 + 0.15 * this.ded('daulet'));
         if (Math.random() < 0.35) this.sound.coin();
       }
     }
@@ -1261,59 +1447,139 @@ export class Game {
     const herd = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null).length;
     return [
       {
-        id: 'jut', icon: '❄️', title: 'Джут — ледяная зима',
+        id: 'jut', icon: 'snow', title: 'Джут — ледяная зима',
         text: 'Степь сковало гололёдом, из-под наста не добыть траву. Скот слабеет на глазах, и старейшины ждут вашего слова.',
         can: () => herd() >= 3,
         opts: [
-          { label: '🔪 Зарезать часть стада', desc: '+еда сейчас, но поголовье уменьшится' },
-          { label: '🐎 Откочевать на юг', desc: 'Стадо цело, но шаруа теряют время (−дерево)' },
+          { label: '{i:saber} Зарезать часть стада', desc: '+еда сейчас, но поголовье уменьшится' },
+          { label: '{i:horse} Откочевать на юг', desc: 'Стадо цело, но шаруа теряют время (−дерево)' },
         ],
       },
       {
-        id: 'birth', icon: '🐑', title: 'Богатый приплод',
+        id: 'birth', icon: 'sheep', title: 'Богатый приплод',
         text: 'Весна выдалась щедрой: в загонах прибавление, ягнята крепки и здоровы.',
         can: () => this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1),
         opts: [
-          { label: '🎉 Отпраздновать', desc: 'Прибавление в стаде и немного еды' },
+          { label: '{i:party} Отпраздновать', desc: 'Прибавление в стаде и немного еды' },
         ],
       },
       {
-        id: 'caravan', icon: '🐫', title: 'Караван Шёлкового пути',
+        id: 'caravan', icon: 'camel', title: 'Караван Шёлкового пути',
         text: 'К вашей ставке подошёл чужеземный караван. Купцы предлагают сделку: дерево и ткани в обмен на серебро.',
         can: () => this.res.gold >= 90,
         opts: [
-          { label: '🤝 Купить товар (90🪙)', desc: 'Много дерева и еды разом' },
-          { label: '🚫 Отказать', desc: 'Ничего не тратим' },
+          { label: '{i:handshake} Купить товар (90{i:gold})', desc: 'Много дерева и еды разом' },
+          { label: '{i:ban} Отказать', desc: 'Ничего не тратим' },
         ],
       },
       {
-        id: 'plague', icon: '🤒', title: 'Поветрие в аулах',
+        id: 'plague', icon: 'sick', title: 'Поветрие в аулах',
         text: 'Среди шаруа пошла хворь. Работа встала, люди слабы — но в мечети есть кому лечить.',
         can: () => this.units.filter(u => u.owner === 'player' && u.key === 'villager').length >= 4,
         opts: [
-          { label: '🕌 Просить имамов лечить (60🪙)', desc: 'Хворь отступит быстро' },
-          { label: '⏳ Перетерпеть', desc: 'Добыча замедлится на время' },
+          { label: '{i:mosque} Просить имамов лечить (60{i:gold})', desc: 'Хворь отступит быстро' },
+          { label: '{i:clock} Перетерпеть', desc: 'Добыча замедлится на время' },
         ],
       },
       {
-        id: 'drought', icon: '🌵', title: 'Засуха',
+        id: 'drought', icon: 'cactus', title: 'Засуха',
         text: 'Реки обмелели, травы выгорели. Пашни родят скудно, пока не пройдут дожди.',
         can: () => this.blds.some(b => b.owner === 'player' && b.key === 'farm' && b.done >= 1),
         opts: [
-          { label: '💧 Рыть арыки (80🪵)', desc: 'Смягчить засуху трудом' },
-          { label: '🙏 Ждать дождя', desc: 'Пашни дают меньше еды долгое время' },
+          { label: '{i:water} Рыть арыки (80{i:wood})', desc: 'Смягчить засуху трудом' },
+          { label: '{i:pray} Ждать дождя', desc: 'Пашни дают меньше еды долгое время' },
         ],
       },
       {
-        id: 'kurgan', icon: '⚱️', title: 'Находка в кургане',
+        id: 'kurgan', icon: 'urn', title: 'Находка в кургане',
         text: 'Барлаушы наткнулись на древний курган. Под каменной насыпью что-то блестит — но тревожить предков боязно.',
         can: () => this.units.some(u => u.owner === 'player' && u.key === 'scout'),
         opts: [
-          { label: '⛏️ Вскрыть курган', desc: 'Клад золота, но народ ропщет' },
-          { label: '🕯️ Почтить предков', desc: 'Немного очков и спокойствие' },
+          { label: '{i:pick} Вскрыть курган', desc: 'Клад золота, но народ ропщет' },
+          { label: '{i:candle} Почтить предков', desc: 'Немного очков и спокойствие' },
         ],
       },
     ];
+  }
+  // ── ПОГОДА ──
+  weatherActive(k: WeatherKind): boolean { return this.settings.weather && this.weather === k; }
+  weatherSpeedMult(): number { return this.weatherActive('rain') ? 0.85 : this.weatherActive('buran') ? 0.7 : 1; }
+  weatherRangeMult(): number { return this.weatherActive('rain') ? 0.85 : this.weatherActive('fog') ? 0.75 : this.weatherActive('buran') ? 0.7 : 1; }
+  weatherSightMult(): number { return this.weatherActive('fog') ? 0.55 : this.weatherActive('buran') ? 0.6 : this.weatherActive('rain') ? 0.85 : 1; }
+  // Выбор следующей погоды. Засуха и дождь несовместимы: пока тикает засуха,
+  // небо ясное — иначе игрок справедливо спросит, почему пашни сохнут под ливнем.
+  // Буран — редкость и чаще ночью (в степи ночью холоднее).
+  pickWeather(): WeatherKind {
+    if (this.weather !== 'clear') return 'clear';              // после ненастья всегда просвет
+    if (this.droughtT > 0) return 'clear';
+    const r = Math.random();
+    const buranP = this.isNight() ? 0.18 : 0.08;
+    if (r < buranP) return 'buran';
+    if (r < buranP + 0.22) return 'fog';
+    if (r < buranP + 0.22 + 0.3) return 'rain';
+    return 'clear';
+  }
+  setWeather(k: WeatherKind, dur?: number) {
+    const prev = this.weather;
+    this.weather = k;
+    this.weatherT = dur ?? (k === 'clear' ? rand(120, 240) : k === 'buran' ? rand(45, 80) : rand(70, 130));
+    if (k !== prev && k !== 'clear') { const d = WEATHER_DEFS[k]; this.pushBanner(`${d.icon} ${d.name}`, d.desc, 3.5); }
+    else if (k === 'clear' && prev !== 'clear') this.pushBanner('☀️ Прояснилось', 'Небо над степью чистое', 2.5);
+    if (k === 'clear') this.weatherFx.length = 0;
+    this.pushHud();
+  }
+  updateWeather(dt: number) {
+    if (!this.settings.weather) { if (this.weather !== 'clear') { this.weather = 'clear'; this.weatherFx.length = 0; } return; }
+    this.weatherT -= dt;
+    if (this.weatherT <= 0) this.setWeather(this.pickWeather());
+    else if (this.weather === 'rain' && this.droughtT > 0) this.setWeather('clear'); // засуха началась событием — дождь уходит
+    // экранные частицы: капли/снежинки в координатах экрана, независимо от камеры
+    const kind = this.weather;
+    if (kind === 'rain' || kind === 'buran') {
+      const cap = Math.min(220, Math.round(this.vw * this.vh / 6000));
+      const spawn = Math.min(cap - this.weatherFx.length, Math.ceil(cap * dt * 1.6));
+      for (let i = 0; i < spawn; i++) {
+        if (kind === 'rain') this.weatherFx.push({ x: rand(-40, this.vw + 40), y: rand(-60, -10), vx: rand(-60, -30), vy: rand(520, 700), len: rand(9, 16) });
+        else this.weatherFx.push({ x: rand(-80, this.vw + 40), y: rand(-40, this.vh), vx: rand(160, 260), vy: rand(60, 120), len: rand(1.2, 2.6) });
+      }
+      for (let i = this.weatherFx.length - 1; i >= 0; i--) {
+        const p = this.weatherFx[i];
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (kind === 'buran') p.y += Math.sin((p.x + this.time * 90) * 0.02) * 40 * dt;
+        if (p.y > this.vh + 20 || p.x > this.vw + 60 || p.x < -100) this.weatherFx.splice(i, 1);
+      }
+    } else if (this.weatherFx.length) this.weatherFx.length = 0;
+  }
+  // Экранный слой погоды: рисуется после ночного освещения, до HUD.
+  drawWeather(ctx: CanvasRenderingContext2D) {
+    if (!this.settings.weather || this.weather === 'clear') return;
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (this.weather === 'rain') {
+      ctx.fillStyle = 'rgba(30,40,70,0.16)'; ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.strokeStyle = 'rgba(190,210,240,0.55)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const p of this.weatherFx) { ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.vx * 0.02, p.y + p.vy * 0.02 * (p.len / 12)); }
+      ctx.stroke();
+    } else if (this.weather === 'fog') {
+      // два слоя тумана, ползут в разные стороны — ощущение глубины без текстур
+      const t = this.time;
+      for (let L = 0; L < 2; L++) {
+        const off = ((t * (L ? 14 : 22)) % this.vw);
+        for (let i = -1; i < 3; i++) {
+          const cx = i * (this.vw / 2) + off * (L ? -1 : 1), cy = this.vh * (L ? 0.65 : 0.35);
+          const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, this.vw * 0.55);
+          g.addColorStop(0, 'rgba(215,220,230,0.22)'); g.addColorStop(1, 'rgba(215,220,230,0)');
+          ctx.fillStyle = g; ctx.fillRect(0, 0, this.vw, this.vh);
+        }
+      }
+      ctx.fillStyle = 'rgba(200,205,215,0.14)'; ctx.fillRect(0, 0, this.vw, this.vh);
+    } else if (this.weather === 'buran') {
+      ctx.fillStyle = 'rgba(210,220,235,0.2)'; ctx.fillRect(0, 0, this.vw, this.vh);
+      ctx.fillStyle = 'rgba(245,248,255,0.85)';
+      for (const p of this.weatherFx) ctx.fillRect(p.x, p.y, p.len, p.len);
+    }
+    ctx.restore();
   }
   // планировщик: раз в 3–5 минут поднимаем подходящее событие
   updateEvents(dt: number) {
@@ -1346,17 +1612,18 @@ export class Game {
     const herdUnits = () => this.units.filter(u => u.owner === 'neutral' && (u.key === 'sheep' || u.key === 'cow') && u.pastureId != null);
     switch (def.id) {
       case 'jut':
+        this.setWeather('buran', 70);   // джут приходит с бураном
         if (idx === 0) {
           const herd = herdUnits();
           const kill = Math.max(1, Math.floor(herd.length / 3));
           for (let i = 0; i < kill && i < herd.length; i++) { herd[i].hp = 0; this.burst(herd[i].x, herd[i].y, 8, ['#fb7185'], 70, 0.6); }
           const food = kill * 45;
           this.res.food += food;
-          this.pushBanner('🔪 Забой скота', `Кладовые полны: +${food}🍖, но стадо поредело на ${kill}`, 4);
+          this.pushBanner('{i:saber} Забой скота', `Кладовые полны: +${food}{i:food}, но стадо поредело на ${kill}`, 4);
         } else {
           const w = Math.min(this.res.wood, 90);
           this.res.wood -= w;
-          this.pushBanner('🐎 Откочевали на юг', `Стадо спасено, но перекочёвка стоила ${Math.round(w)}🪵`, 4);
+          this.pushBanner('{i:horse} Откочевали на юг', `Стадо спасено, но перекочёвка стоила ${Math.round(w)}{i:wood}`, 4);
         }
         break;
       case 'birth': {
@@ -1369,44 +1636,44 @@ export class Game {
           }
         }
         this.res.food += 80;
-        this.pushBanner('🐑 Приплод', 'В загоне прибавление: +3 головы и +80🍖', 4);
+        this.pushBanner('{i:sheep} Приплод', 'В загоне прибавление: +3 головы и +80{i:food}', 4);
         break;
       }
       case 'caravan':
         if (idx === 0 && this.res.gold >= 90) {
           this.res.gold -= 90; this.res.wood += 260; this.res.food += 160;
           this.sound.coin();
-          this.pushBanner('🐫 Сделка с караваном', '+260🪵 и +160🍖 за 90🪙', 4);
+          this.pushBanner('{i:camel} Сделка с караваном', '+260{i:wood} и +160{i:food} за 90{i:gold}', 4);
         } else {
-          this.pushBanner('🚫 Караван ушёл', 'Купцы отправились дальше на запад', 3);
+          this.pushBanner('{i:ban} Караван ушёл', 'Купцы отправились дальше на запад', 3);
         }
         break;
       case 'plague':
         if (idx === 0 && this.res.gold >= 60) {
           this.res.gold -= 60; this.plagueT = 25;
-          this.pushBanner('🕌 Имамы взялись лечить', 'Хворь скоро отступит', 4);
+          this.pushBanner('{i:mosque} Имамы взялись лечить', 'Хворь скоро отступит', 4);
         } else {
           this.plagueT = 100;
-          this.pushBanner('🤒 Поветрие', 'Шаруа работают медленнее, пока хворь не пройдёт', 4);
+          this.pushBanner('{i:sick} Поветрие', 'Шаруа работают медленнее, пока хворь не пройдёт', 4);
         }
         break;
       case 'drought':
         if (idx === 0 && this.res.wood >= 80) {
           this.res.wood -= 80; this.droughtT = 30;
-          this.pushBanner('💧 Арыки прорыты', 'Засуха почти не тронет пашни', 4);
+          this.pushBanner('{i:water} Арыки прорыты', 'Засуха почти не тронет пашни', 4);
         } else {
           this.droughtT = 150;
-          this.pushBanner('🌵 Засуха', 'Пашни родят скудно — переждите', 4);
+          this.pushBanner('{i:cactus} Засуха', 'Пашни родят скудно — переждите', 4);
         }
         break;
       case 'kurgan':
         if (idx === 0) {
           this.res.gold += 220; this.grievance = Math.min(100, this.grievance + 6);
           this.sound.coin();
-          this.pushBanner('⚱️ Курган вскрыт', '+220🪙, но народ шепчется о гневе предков', 4.5);
+          this.pushBanner('{i:urn} Курган вскрыт', '+220{i:gold}, но народ шепчется о гневе предков', 4.5);
         } else {
           this.score += 350;
-          this.pushBanner('🕯️ Предки почтены', 'Народ спокоен, слава хана растёт (+350 очков)', 4.5);
+          this.pushBanner('{i:candle} Предки почтены', 'Народ спокоен, слава хана растёт (+350 очков)', 4.5);
         }
         break;
     }
@@ -1441,15 +1708,15 @@ export class Game {
     if (act === 'gift') {
       const cost = def.choices.find(c => c.act === 'gift')?.gold ?? 40;
       if (rel === 'friend') { this.floater(this.cam.x, this.cam.y - 100, 'Уже дружны', '#94a3b8', 14); return false; }
-      if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙`, '#f87171', 15); return false; }
+      if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 15); return false; }
       this.res.gold -= cost; this.tribeRel[nid] = 'friend';
       // дружеское племя успокаивается
       for (const b of this.blds) { if (!b.tribe || this.tribeNationOf(b) !== nid) continue; for (const e of this.units) if (e.tribe && dist2(e.x, e.y, b.x, b.y) < 400 * 400) { e.aggro = false; e.targetU = -1; e.state = 'idle'; } }
-      this.sound.coin(); this.pushBanner(`🤝 Дружба с «${def.name}»`, `${def.title} ${def.ruler} рад союзу — племя не нападёт`, 4); this.pushHud(); return true;
+      this.sound.coin(); this.pushBanner(`{i:handshake} Дружба с «${def.name}»`, `${def.title} ${def.ruler} рад союзу — племя не нападёт`, 4); this.pushHud(); return true;
     }
     if (act === 'attack') {
       if (rel !== 'hostile') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); }
-      this.pushBanner(`⚔️ Война с «${def.name}»`, 'Воины племени поднимаются по тревоге', 3.5); this.pushHud(); return true;
+      this.pushBanner(`{i:swords} Война с «${def.name}»`, 'Воины племени поднимаются по тревоге', 3.5); this.pushHud(); return true;
     }
     return false;
   }
@@ -1513,7 +1780,10 @@ export class Game {
     else if (k === 'g') { if (this.selUnits().length) { this.attackArmed = !this.attackArmed; this.rallyArmed = false; this.patrolArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === 'y') { if (this.selUnits().some(u => u.key !== 'villager')) { this.patrolArmed = !this.patrolArmed; this.attackArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === '.' || k === 'ю') this.jumpToIdleVillager();
-    else if (k === 'm') this.toggleMute();
+    // Home — камера к Ханской ставке (не зависит от раскладки). Раньше «домой» не было вовсе.
+    else if (k === 'home') { this.centerTC(); e.preventDefault(); }
+    // N (рус. Т) — звук. Раньше висело на M, но M перехватывала мечеть — ветка была мёртвой.
+    else if (k === 'n' || k === 'т') this.toggleMute();
     else if (k === '+' || k === '=') this.zoomBy(0.15);
     else if (k === '-' || k === '_') this.zoomBy(-0.15);
     else if (k === 'a' && e.ctrlKey === false && e.metaKey === false) { /* camera handled in update via keys */ }
@@ -1582,6 +1852,7 @@ export class Game {
     if (this.fogT > 0) return;
     this.fogT = 0.15;
     this.fogVis.fill(0);
+    const wm = this.weatherSightMult();   // туман и буран режут обзор
     const mark = (wx: number, wy: number, sight: number) => {
       const r = Math.ceil(sight / this.fogCell);
       const cx = (wx / this.fogCell) | 0, cy = (wy / this.fogCell) | 0;
@@ -1597,11 +1868,12 @@ export class Game {
       if (u.key === 'scout' && u.infDone) sight = Math.max(sight, 720);
       // пастух в поле видит далеко — чтобы его стадо на дальнем пастбище всегда было видно
       if (u.key === 'villager' && u.herder) sight = 560;
-      mark(u.x, u.y, sight);
+      mark(u.x, u.y, sight * wm);
     }
-    for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight);
+    for (const b of this.blds) if (b.owner === 'player' && b.done >= 1) mark(b.x, b.y, BUILDING_DEFS[b.key].sight * wm);
   }
-  fogAt(wx: number, wy: number): { vis: boolean; expl: boolean } {
+  fogAt(wx0: number, wy0: number): { vis: boolean; expl: boolean } {
+    const wx = wrapW(wx0), wy = wrapH(wy0);
     const gx = (wx / this.fogCell) | 0, gy = (wy / this.fogCell) | 0;
     if (gx < 0 || gy < 0 || gx >= this.fogGW || gy >= this.fogGH) return { vis: false, expl: false };
     const idx = gy * this.fogGW + gx;
@@ -1860,9 +2132,9 @@ export class Game {
     this.clampCam();
   }
   clampCam() {
-    const mx = this.vw / 2 / this.cam.zoom, my = this.vh / 2 / this.cam.zoom;
-    this.cam.x = clamp(this.cam.x, -mx + 80, WORLD.w + mx - 80);
-    this.cam.y = clamp(this.cam.y, -my + 80, WORLD.h + my - 80);
+    // круглая земля: краёв нет — камера заворачивается по стыку тора
+    this.cam.x = wrapW(this.cam.x);
+    this.cam.y = wrapH(this.cam.y);
   }
 
   // ── Курсор под целью ──────────────────────────────────────────────────────
@@ -2062,7 +2334,7 @@ export class Game {
     monk.state = 'move'; monk.tx = r.x; monk.ty = r.y; monk.targetU = -1; monk.targetB = -1;
     this.sound.move();
     this.spawnRing(r.x, r.y, '#fde047');
-    this.floater(r.x, r.y - 30, '📿 Реликвия!', '#fde047', 14);
+    this.floater(r.x, r.y - 30, '{i:beads} Реликвия!', '#fde047', 14);
     this.pushHud();
   }
   collectRelic(u: Unit, r: Relic) {
@@ -2072,8 +2344,8 @@ export class Game {
     this.score += 200;
     this.sound.coin();
     this.burst(r.x, r.y - 10, 20, ['#fde047', '#facc15', '#fff'], 120, 0.9);
-    this.floater(r.x, r.y - 30, '+150 🪙 реликвия!', '#fde047', 16, true);
-    this.pushBanner('📿 Реликвия обретена!', '+150 золота и +золото каждые ~10 сек, пока вы владеете реликвиями', 4);
+    this.floater(r.x, r.y - 30, '+150 {i:gold} реликвия!', '#fde047', 16, true);
+    this.pushBanner('{i:beads} Реликвия обретена!', '+150 золота и +золото каждые ~10 сек, пока вы владеете реликвиями', 4);
     this.checkQuests();
     this.pushHud();
   }
@@ -2199,7 +2471,7 @@ export class Game {
     // own DAMAGED building → repair
     if (tb && tb.owner === 'player' && tb.done >= 1 && tb.hp < tb.maxHp - 1 && hasVill) {
       for (const v of us.filter(u => u.key === 'villager')) { v.state = 'build'; v.buildId = tb.id; v.tx = tb.x + rand(-50, 50); v.ty = tb.y + rand(-46, 46); }
-      this.sound.move(); this.sound.playPhrase('за работу'); this.floater(tb.x, tb.y - 60, '🔧 Ремонт!', '#7dd3fc', 15); this.spawnRing(x, y, '#7dd3fc'); return;
+      this.sound.move(); this.sound.playPhrase('за работу'); this.floater(tb.x, tb.y - 60, '{i:wrench} Ремонт!', '#7dd3fc', 15); this.spawnRing(x, y, '#7dd3fc'); return;
     }
     // default: military attack-move, villagers move
     if (hasMil && !hasVill) this.orderAttackMove(us, x, y);
@@ -2289,7 +2561,7 @@ export class Game {
     }
     this.sound.move();
     this.spawnRing(x, y, '#a78bfa');
-    this.floater(x, y - 40, '👁 Патруль', '#c4b5fd', 14);
+    this.floater(x, y - 40, '{i:eye} Патруль', '#c4b5fd', 14);
     this.pushHud();
   }
   get selStance(): string | null {
@@ -2410,11 +2682,11 @@ export class Game {
     if ((b.upg[kind] ?? 0) >= max) { this.floater(b.x, b.y - 60, 'Максимальный уровень', '#94a3b8', 14); return false; }
     const lvl = b.upg[kind] ?? 0;
     const gold = this.towerUpgradeCost(kind, lvl);
-    if (this.res.gold < gold) { this.floater(b.x, b.y - 60, `Нужно ${gold} 🪙`, '#f87171', 15); this.sound.error(); return false; }
+    if (this.res.gold < gold) { this.floater(b.x, b.y - 60, `Нужно ${gold} {i:gold}`, '#f87171', 15); this.sound.error(); return false; }
     this.res.gold -= gold;
     b.upg[kind] = lvl + 1;
     if (kind === 'dmg') { b.maxHp += 80; b.hp += 80; } // укрепление при уроне
-    const nm = kind === 'range' ? '📐 Дальность обзора' : kind === 'dmg' ? '🏹 Сила урона' : '🎯 Лучники на башне';
+    const nm = kind === 'range' ? '{i:ruler} Дальность обзора' : kind === 'dmg' ? '{i:bow} Сила урона' : '{i:target} Лучники на башне';
     this.burst(b.x, b.y - 60, 14, ['#fde047', '#f6d47c', '#fff'], 120, 0.7);
     this.sound.coin();
     this.floater(b.x, b.y - 70, `${nm} ур.${lvl + 1}`, '#fde047', 15);
@@ -2426,22 +2698,26 @@ export class Game {
   serialize(): string {
     const data = {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
+      mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep),
+      loyal: [...this.loyal.entries()].filter(([, v]) => Math.abs(v) < 1), lostHexes: this.lostHexes, wonHexes: this.wonHexes,
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
       kills: this.kills, razed: this.razed, gatheredTotal: this.gatheredTotal, woodGathered: this.woodGathered,
       gotWood: this.gotWood, gotFood: this.gotFood, gotGold: this.gotGold, ageMark: this.ageMark,
       soldiersTrained: this.soldiersTrained, barracksBuilt: this.barracksBuilt, wolvesSlain: this.wolvesSlain,
       cam: this.cam, tech: this.tech, questsDone: this.questsDone,
-      units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0 })),
-      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null })),
+      units: this.units.map(u => ({ key: u.key, owner: u.owner, x: u.x, y: u.y, hp: u.hp, state: u.state, tx: u.tx, ty: u.ty, targetU: u.targetU, targetB: u.targetB, face: u.face, carryType: u.carry.type, carryAmt: u.carry.amt, xp: u.xp || 0, level: u.level || 1, kills: u.kills || 0, tribe: u.tribe || undefined, bandit: u.bandit || undefined, campI: u.bandit ? this.blds.findIndex(b => b.id === u.campId) : undefined, hx: u.homeX, hy: u.homeY })),
+      blds: this.blds.map(b => ({ key: b.key, owner: b.owner, x: b.x, y: b.y, hp: b.hp, done: b.done, queue: b.queue, rallyX: b.rallyX, rallyY: b.rallyY, axis: b.axis ?? null, upg: b.upg ?? null, tribe: b.tribe || undefined, nationId: b.nationId, bandit: b.bandit || undefined, raidT: b.raidT })),
+      banditsCleared: this.banditsCleared, banditRespawnT: this.banditRespawnT,
       nodes: this.nodes.map(n => ({ kind: n.kind as string, x: n.x, y: n.y, amount: n.amount, r: n.r })),
       relicsHeld: this.relicsHeld,
       wisdom: this.wisdom, greatsCalled: this.greatsCalled,
       dip: { atWar: this.atWar, grievance: this.grievance, casusBelli: this.casusBelli, warT: this.warT, peaceT: this.peaceT, morale: this.morale, wonderT: this.wonderT,
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT,
         uniteT: this.uniteT, uniteAnn: this.uniteAnn },
+      era: { s: this.eraState, d: this.eraDedication, h: this.eraHeroic, c: this.eraHeroicCharge },
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
-      events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT },
+      events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT, weather: this.weather, weatherT: this.weatherT },
       day: { dayT: this.dayT, dayF: this.dayPhase(), dayNum: this.dayNum, restedTotal: this.restedTotal },
       pray: { azanDone: this.azanDone, berekeT: this.berekeT, berekePower: this.berekePower, prayerCount: this.prayerCount },
       scoutM: this.units.filter(u => u.key === 'scout').map(u => ({ mission: u.mission ?? null, mNation: u.mNation ?? null })),
@@ -2475,7 +2751,7 @@ export class Game {
     } catch { /* noop */ }
   }
   saveGame() {
-    if (this.saveTo()) this.floater(this.cam.x, this.cam.y - 80, '💾 Партия сохранена', '#a3e635', 16);
+    if (this.saveTo()) this.floater(this.cam.x, this.cam.y - 80, '{i:save} Партия сохранена', '#a3e635', 16);
   }
 
   /**
@@ -2528,6 +2804,12 @@ export class Game {
         // восстановить ранг героя и его боевые бонусы
         const lv = ud.level || 1;
         if (lv > 1) { u.level = lv; u.xp = ud.xp || 0; u.kills = ud.kills || 0; u.atk *= Math.pow(1.09, lv - 1); u.maxHp *= Math.pow(1.10, lv - 1); u.hp = Math.min(u.maxHp, Math.max(u.hp, ud.hp)); }
+        // флаги племени/разбойника (1.0.106): раньше не сохранялись, и после загрузки
+        // воины племён превращались в обычных нейтралов без лагеря
+        const x = ud as unknown as { tribe?: boolean; bandit?: boolean; campI?: number; hx?: number; hy?: number };
+        if (x.tribe) { u.tribe = true; u.aggro = false; }
+        if (x.bandit) { u.bandit = true; u.aggro = true; u.stance = 'defensive'; (u as Unit & { _campI?: number })._campI = x.campI; }
+        if (typeof x.hx === 'number') { u.homeX = x.hx; u.homeY = x.hy ?? u.y; u.wx = x.hx; u.wy = x.hy ?? u.y; }
         uMap.set(i, u.id);
       });
       (d.blds || []).forEach((bd: { key: BuildingKey; owner: 'player'|'enemy'; x: number; y: number; hp: number; done: number; queue: { key: UnitKey; t: number; total: number }[]; rallyX: number; rallyY: number; axis?: 'x'|'y'|null }, i: number) => {
@@ -2535,8 +2817,16 @@ export class Game {
         b.hp = bd.hp; b.done = bd.done; b.queue = bd.queue || []; b.rallyX = bd.rallyX; b.rallyY = bd.rallyY;
         if ((bd as unknown as { upg?: { range: number; dmg: number; archers: number } }).upg) b.upg = (bd as unknown as { upg: { range: number; dmg: number; archers: number } }).upg;
         if ((bd.key === 'wall' || bd.key === 'gate') && bd.axis) b.axis = bd.axis;
+        const xb = bd as unknown as { tribe?: boolean; nationId?: string; bandit?: boolean; raidT?: number };
+        if (xb.tribe) { b.tribe = true; b.nationId = xb.nationId ?? this.tribeNationAt(b.x, b.y); }
+        if (xb.bandit) { b.bandit = true; b.raidT = xb.raidT ?? 90; b.maxHp = 520; b.hp = Math.min(b.hp, 520); }
         bMap.set(i, b.id);
       });
+      // привязка разбойников к юртам по индексу здания в сейве
+      for (const u of this.units) { const ci = (u as Unit & { _campI?: number })._campI; if (u.bandit && typeof ci === 'number' && ci >= 0) u.campId = bMap.get(ci); }
+      this.banditsCleared = d.banditsCleared ?? 0; this.banditRespawnT = d.banditRespawnT ?? this.DAY_LEN * 2;
+      // старый сейв без стоянок разбойников — расставить заново
+      if (!this.blds.some(b => b.bandit)) this.planBanditCamps();
       (d.nodes || []).forEach((nd: { kind: 'wood'|'gold'|'food'|'fish'; x: number; y: number; amount: number; r: number }) => this.addNode(nd.kind, nd.x, nd.y, nd.amount));
       // цели не сохраняем — юниты перенацелятся сами; декор оставляем от genWorld
       void uMap; void bMap;
@@ -2549,6 +2839,8 @@ export class Game {
       // добычу «с нуля» и следующий отчёт получился бы завышенным
       this.gotWood = d.gotWood || 0; this.gotFood = d.gotFood || 0; this.gotGold = d.gotGold || 0;
       if (d.ageMark) this.ageMark = d.ageMark;
+      if (d.era) { this.eraState = d.era.s ?? 'normal'; this.eraDedication = d.era.d ?? null;
+        this.eraHeroic = !!d.era.h; this.eraHeroicCharge = d.era.c ?? 0; }
       this.soldiersTrained = d.soldiersTrained || 0; this.barracksBuilt = d.barracksBuilt || 0; this.wolvesSlain = d.wolvesSlain || 0;
       this.relicsHeld = d.relicsHeld || 0;
       this.wisdom = d.wisdom || 0;
@@ -2559,7 +2851,10 @@ export class Game {
       if (d.dip) { this.atWar = !!d.dip.atWar; this.grievance = d.dip.grievance ?? 8; this.casusBelli = d.dip.casusBelli ?? 0; this.warT = d.dip.warT ?? 0; this.peaceT = d.dip.peaceT ?? 0; this.morale = d.dip.morale ?? 1; this.wonderT = d.dip.wonderT ?? 0;
         this.uniteT = d.dip.uniteT ?? 0; this.uniteAnn = !!d.dip.uniteAnn;
         this.tradeRoute = !!d.dip.tradeRoute; this.napT = d.dip.napT ?? 0; this.condemned = !!d.dip.condemned; this.tributeT = d.dip.tributeT ?? 0; }
-      if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0; }
+      if (d.events) { this.eventT = d.events.eventT ?? 0; this.eventSeen = d.events.seen || []; this.droughtT = d.events.drought ?? 0; this.plagueT = d.events.plague ?? 0;
+        // старые сейвы без погоды: ясно, первая смена по обычному расписанию
+        this.weather = (['clear', 'rain', 'fog', 'buran'] as WeatherKind[]).includes(d.events.weather) ? d.events.weather : 'clear';
+        this.weatherT = typeof d.events.weatherT === 'number' ? d.events.weatherT : 0; }
       if (d.day) {
         // Старые сейвы писали dayT в пределах прежних 240-секундных суток. Если
         // подставить это число в 30-минутные сутки, часы застрянут около полудня,
@@ -2574,7 +2869,22 @@ export class Game {
       if (d.pray) { this.azanDone = d.pray.azanDone || []; this.berekeT = clamp(d.pray.berekeT ?? 0, 0, this.BEREKE_LEN); this.berekePower = clamp(d.pray.berekePower ?? 0, 0, 1); this.prayerCount = d.pray.prayerCount ?? 0; }
       if (d.nations) { this.rivalMet = !!d.nations.rivalMet; this.tribeMet = d.nations.tribeMet || {}; this.tribeRel = d.nations.tribeRel || {}; this.envoys = d.nations.envoys || {}; this.rivalEnvoys = d.nations.rivalEnvoys || {}; if (this.rivalMet) this.greetShown.add('rival'); for (const k of Object.keys(this.tribeMet)) this.greetShown.add(k); }
       if (d.cam) this.cam = { ...this.cam, ...d.cam };
-      this.pushBanner('💾 Сохранение загружено', 'Империя восстановлена', 3);
+      this.mode = d.mode === 'nomad' ? 'nomad' : 'settled';
+      // лояльность (1.0.104): старые сейвы без поля — все гексы полностью лояльны штампу
+      this.loyal = new Map(Array.isArray(d.loyal) ? d.loyal : []);
+      this.lostHexes = d.lostHexes ?? 0; this.wonHexes = d.wonHexes ?? 0;
+      if (this.mode === 'nomad' && Array.isArray(d.siteDep)) {
+        d.siteDep.forEach((v: number, i: number) => { if (this.sites[i]) this.sites[i].dep = v; });
+        this.siteI = typeof d.siteI === 'number' ? Math.min(Math.max(0, d.siteI), this.sites.length - 1) : 0;
+      }
+      for (const b of this.blds) { b.x = wrapW(b.x); b.y = wrapH(b.y); }
+      for (const u of this.units) { u.x = wrapW(u.x); u.y = wrapH(u.y); }
+      for (const n of this.nodes) { n.x = wrapW(n.x); n.y = wrapH(n.y); }
+      for (const rl of this.relics) { rl.x = wrapW(rl.x); rl.y = wrapH(rl.y); }
+      // тор изменил террейн: стягиваем постройки с воды на ближайшую сушу
+      for (const b of this.blds) if (!this.terrain.isLand(b.x, b.y)) { const sl = this.nearLand(b.x, b.y); b.x = sl[0]; b.y = sl[1]; }
+      this.terrDirty = true;
+      this.pushBanner('{i:save} Сохранение загружено', 'Империя восстановлена', 3);
       return true;
     } catch { return false; }
   }
@@ -2653,7 +2963,7 @@ export class Game {
     }
     this.sound.research();
     this.burst(this.cam.x, this.cam.y - 60, 20, [up.plume, '#f6d47c', '#fff'], 120, 0.9);
-    this.pushBanner(`${up.icon} ${up.newName}!`, n > 0 ? `Улучшено воинов: ${n}` : up.desc, 3.2);
+    this.pushBanner(`{i:${up.icon}} ${up.newName}!`, n > 0 ? `Улучшено воинов: ${n}` : up.desc, 3.2);
     this.score += 200;
     this.pushHud();
   }
@@ -2661,9 +2971,9 @@ export class Game {
   upgradeRows(bldKey: BuildingKey): { id: string; name: string; desc: string; icon: string; cost: string; done: boolean; available: boolean; locked: boolean }[] {
     const costTxt = (c: { wood: number; food: number; gold: number }) => {
       const p: string[] = [];
-      if (c.wood) p.push(`${c.wood}🪵`);
-      if (c.food) p.push(`${c.food}🍖`);
-      if (c.gold) p.push(`${c.gold}🪙`);
+      if (c.wood) p.push(`${c.wood}{i:wood}`);
+      if (c.food) p.push(`${c.food}{i:food}`);
+      if (c.gold) p.push(`${c.gold}{i:gold}`);
       return p.join(' ');
     };
     return Object.values(UPGRADES).filter(u => u.bld === bldKey).map(u => {
@@ -2681,9 +2991,9 @@ export class Game {
   techTreeData(): TechTreeRow[] {
     const costTxt = (c: { wood: number; food: number; gold: number }) => {
       const p: string[] = [];
-      if (c.wood) p.push(`${c.wood}🪵`);
-      if (c.food) p.push(`${c.food}🍖`);
-      if (c.gold) p.push(`${c.gold}🪙`);
+      if (c.wood) p.push(`${c.wood}{i:wood}`);
+      if (c.food) p.push(`${c.food}{i:food}`);
+      if (c.gold) p.push(`${c.gold}{i:gold}`);
       return p.join(' ');
     };
     const busyId = this.blds.find(b => b.owner === 'player' && b.research)?.research?.id ?? null;
@@ -2743,21 +3053,21 @@ export class Game {
     switch (id) {
       case 'sharpBlades': for (const u of us()) if (u.owner === 'player') u.atk *= 1.25; break;
       case 'forgedArmor': for (const u of us()) if (u.owner === 'player') { u.maxHp *= 1.25; u.hp *= 1.25; } break;
-      case 'infantryDrill': for (const u of us()) if (u.owner === 'player' && u.key !== 'knight' && u.key !== 'cavalry') u.speed *= 1.15; break;
-      case 'horseBreeding': for (const u of us()) if (u.owner === 'player' && (u.key === 'knight' || u.key === 'cavalry')) { u.speed *= 1.15; u.maxHp *= 1.15; u.hp *= 1.15; } break;
+      case 'infantryDrill': for (const u of us()) if (u.owner === 'player' && u.key !== 'knight' && u.key !== 'cavalry' && u.key !== 'horsearcher') u.speed *= 1.15; break;
+      case 'horseBreeding': for (const u of us()) if (u.owner === 'player' && (u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher')) { u.speed *= 1.15; u.maxHp *= 1.15; u.hp *= 1.15; } break;
       case 'heavyShot': for (const u of us()) if (u.owner === 'player' && u.key === 'catapult') u.atk *= 1.35; break;
       default: break;
     }
     this.sound.research();
     this.burst(this.cam.x, this.cam.y - 60, 18, ['#93c5fd', '#f6d47c', '#fff'], 110, 0.8);
-    this.pushBanner(`📜 ${t.name}!`, t.desc, 2.8);
+    this.pushBanner(`{i:scroll} ${t.name}!`, t.desc, 2.8);
     this.score += 250;
     this.pushHud();
   }
   // множитель дальности стрелков/башен
   rangeMult(key: string, owner: string): number {
     if (owner !== 'player' || !this.hasTech('eagleEye')) return 1;
-    if (key === 'archer' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
+    if (key === 'archer' || key === 'horsearcher' || key === 'musketeer' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
     return 1;
   }
   gatherMult(): number {
@@ -2814,9 +3124,9 @@ export class Game {
   }
   dayIcon(): string {
     const p = this.dayPhase(), d = Math.abs(p - 0.5);
-    if (d <= this.nightHalf) return '🌙';
-    if (d >= this.duskEdge) return '☀️';
-    return p < 0.5 ? '🌇' : '🌅';
+    if (d <= this.nightHalf) return 'moon';
+    if (d >= this.duskEdge) return 'sun';
+    return p < 0.5 ? 'sunset' : 'sunrise';
   }
   // Ночные правила действуют ровно в те 4 минуты, что отведены ночи.
   isNight(): boolean { return Math.abs(this.dayPhase() - 0.5) <= this.nightHalf; }
@@ -2927,7 +3237,7 @@ export class Game {
       u.resting = false; u.restT = 0; u.restKind = undefined;
       u.fatigue = 0; u.freshT = this.FRESH_TIME;
       this.restedTotal++;
-      this.floater(u.x, u.y - 34, '✨ Отдохнул!', '#86efac', 13);
+      this.floater(u.x, u.y - 34, '{i:sparkle} Отдохнул!', '#86efac', 13);
       const back = u.shiftBack; u.shiftBack = null;
       if (back && back.nodeId >= 0) {
         const n = this.nodes.find(nn => nn.id === back.nodeId && nn.amount > 0);
@@ -3056,7 +3366,7 @@ export class Game {
     }
     this.callToPrayer(mosque, -1);
     const late = agoMin > 3 ? ` (${Math.round(agoMin)} мин назад)` : '';
-    this.pushBanner(`🕌 ${nm.kz} — ${at}`,
+    this.pushBanner(`{i:mosque} ${nm.kz} — ${at}`,
       `${city.name}: время ${nm.ru} намаза${late}. Шаруа идут к мешіті`, 5);
   }
 
@@ -3080,7 +3390,7 @@ export class Game {
     // Если враг у ворот — сообщаем игроку, что набег замер: иначе перемирие
     // выглядело бы как «противник завис», а не как осознанное уважение.
     if (this.enemyNearHome()) {
-      this.pushBanner('🤍 Враг опустил оружие',
+      this.pushBanner('{i:heart} Враг опустил оружие',
         'Из уважения к азану джунгары приостановили атаку. Перемирие продлится до конца намаза', 4);
     }
     const played = this.sound.azan(mosque);
@@ -3107,10 +3417,10 @@ export class Game {
       called++;
     }
     const names = ['Таң намазы', 'Бесін намазы', 'Ақшам намазы'];
-    this.pushBanner(`🕌 Азан — ${names[idx] ?? 'намаз'}`,
+    this.pushBanner(`{i:mosque} Азан — ${names[idx] ?? 'намаз'}`,
       called ? `Жители идут на молитву: ${called}` : 'Мечеть зовёт, но идти некому', 4);
     this.spawnRing(mosque.x, mosque.y, '#5eead4');
-    if (!played) this.floater(mosque.x, mosque.y - 60, '🕌 Азан', '#5eead4', 16);
+    if (!played) this.floater(mosque.x, mosque.y - 60, '{i:mosque} Азан', '#5eead4', 16);
   }
   finishPrayer() {
     const mosque = this.mosqueOf();
@@ -3139,10 +3449,10 @@ export class Game {
       if (this.berekePower >= 0.9 && this.prayerCount % 5 === 0) {
         const friends = ['khwarezm', 'kokand', 'bukhara'].filter(nid => this.tribeMet[nid] && this.tribeRel[nid] !== 'hostile');
         for (const nid of friends) this.envoys[nid] = (this.envoys[nid] ?? 0) + 1;
-        if (friends.length) this.pushBanner('🕌 Слава благочестия', `Единоверцы шлют посланников: ${friends.length}`, 3.5);
+        if (friends.length) this.pushBanner('{i:mosque} Слава благочестия', `Единоверцы шлют посланников: ${friends.length}`, 3.5);
       }
       if (mosque) this.burst(mosque.x, mosque.y - 20, 18, ['#5eead4', '#a7f3d0', '#fff'], 110, 0.9);
-      this.pushBanner('🤲 Береке!', `Намаз совершён (${arrived} чел.) — благодать общины`, 3.2);
+      this.pushBanner('{i:hands} Береке!', `Намаз совершён (${arrived} чел.) — благодать общины`, 3.2);
     }
     this.pushHud();
   }
@@ -3176,7 +3486,7 @@ export class Game {
       if ((u.freshT ?? 0) > 0) u.freshT = Math.max(0, (u.freshT ?? 0) - dt);
       // усталость копится только за настоящей работой
       const working = !u.resting && (u.state === 'gather' || u.state === 'return' || u.state === 'build');
-      if (working) u.fatigue = Math.min(1, (u.fatigue ?? 0) + dt * this.TIRE_RATE * (this.isNight() ? 1.6 : 1));
+      if (working) u.fatigue = Math.min(1, (u.fatigue ?? 0) + dt * this.TIRE_RATE * (this.isNight() ? 1.6 : 1) * (this.weatherActive('buran') ? 1.5 : 1));
     }
     // раз в 2 с решаем, кого отпустить на отдых
     this.restCycleT += dt;
@@ -3197,6 +3507,202 @@ export class Game {
     for (const u of tired.slice(0, cap - resting)) this.sendToRest(u);
   }
   // итоговая цена постройки с учётом союза с ремесленниками (скидка на дерево)
+  // ─────────── ТЕРРИТОРИЯ (оседлый) И КОШ (кочевой) ───────────
+  koshBusy(): boolean { return this.mode === 'nomad' && this.migrating > 0; }
+  // КРУГЛАЯ ЗЕМЛЯ: кратчайшая дельта через стык тора
+  tdx(d: number): number { return d - WORLD.w * Math.round(d / WORLD.w); }
+  tdy(d: number): number { return d - WORLD.h * Math.round(d / WORLD.h); }
+  nearLand(x: number, y: number): [number, number] {
+    if (this.terrain.isLand(x, y)) return [x, y];
+    for (let rad = 40; rad <= 480; rad += 40)
+      for (let a = 0; a < 12; a++) {
+        const t = a * Math.PI / 6;
+        const px = wrapW(x + Math.cos(t) * rad), py = wrapH(y + Math.sin(t) * rad);
+        if (this.terrain.isLand(px, py)) return [px, py];
+      }
+    return [x, y];
+  }
+  pastureMult(): number { const s = this.sites[this.siteI]; return s ? 1 - 0.45 * s.dep : 1; }
+  private hexLand(q: number, r: number): boolean {
+    const [wx, wy] = hexCenterWorld(q, r);
+    const c = this.terrain.classAt(wx, wy);
+    return c !== 'water' && c !== 'deep' && c !== 'mountain';
+  }
+  countValleyLand() {
+    // долина победы = два столичных круга: держим знаменатель досягаемым
+    const R = this.valley.r; let n = 0;
+    const seen = new Set<string>();
+    for (const C of [this.valleyLandP, this.valleyLandE]) {
+      const [cq, cr] = worldToHex(C.x, C.y);
+      const qR = Math.ceil(R / (HS * 1.5)) + 1, rR = Math.ceil(R / (HS * Math.sqrt(3))) + 1;
+      for (let dq = -qR; dq <= qR; dq++) for (let dr = -rR; dr <= rR; dr++) {
+        const q = cq + dq, r = cr + dr, k = q + ',' + r;
+        if (seen.has(k)) continue; seen.add(k);
+        const [wx, wy] = hexCenterWorld(q, r);
+        const dx = wx - C.x, dy = wy - C.y;
+        if (dx * dx + dy * dy <= R * R && this.hexLand(q, r)) n++;
+      }
+    }
+    this.terrLand = n;
+  }
+  discoverSites(P: { x: number; y: number }) {
+    this.sites = [{ x: P.x, y: P.y, dep: 0, tag: 'родовой жайляу' }];
+    const tags = ['сочные луга', 'у воды', 'укрытая падь'];
+    const angs = [0.7, 2.6, 4.4];
+    for (let i = 0; i < 3; i++) {
+      let best: { x: number; y: number } | null = null;
+      for (let rad = 480; rad <= 1150 && !best; rad += 70) {
+        const x = P.x + Math.cos(angs[i]) * rad, y = P.y + Math.sin(angs[i]) * rad;
+        const c = this.terrain.classAt(x, y);
+        if (c === 'grass' || c === 'field') best = { x, y };
+      }
+      if (!best) best = { x: P.x + Math.cos(angs[i]) * 620, y: P.y + Math.sin(angs[i]) * 620 };
+      this.sites.push({ x: best.x, y: best.y, dep: 0, tag: tags[i] });
+    }
+  }
+  recomputeTerr() {
+    this.terr.clear(); this.terrCount = 0;
+    if (this.mode !== 'settled') return;
+    const stamp = (owner: 1 | 2) => {
+      for (const b of this.blds) {
+        if (b.owner !== (owner === 1 ? 'player' : 'enemy') || b.done < 1) continue;
+        let R = 0;
+        if (b.key === 'towncenter') R = 6 + (owner === 1 ? this.cityTier * 2 : 0);
+        else if (b.key === 'tower' || b.key === 'mosque' || b.key === 'house' || b.key === 'wonder') R = 3;
+        else if (b.key === 'market' || b.key === 'storehouse') R = 2;
+        else continue;
+        const [cq, cr] = worldToHex(b.x, b.y);
+        for (let dq = -R; dq <= R; dq++) {
+          for (let dr = Math.max(-R, -dq - R); dr <= Math.min(R, -dq + R); dr++) {
+            const q = cq + dq, r = cr + dr;
+            if (this.hexLand(q, r)) this.terr.set(q + ',' + r, owner);
+          }
+        }
+      }
+    };
+    stamp(1); stamp(2);   // враг печатает поверх: фронт границ честный
+    // лояльность переписывает штамп: гекс, перетянутый давлением, принадлежит тому,
+    // к кому склонился канат, пока штамп владельца не восстановит контр-давление
+    for (const [k, v] of this.loyal) {
+      if (!this.terr.has(k)) { this.loyal.delete(k); continue; }
+      if (v <= -1) this.terr.set(k, 2); else if (v >= 1) this.terr.set(k, 1);
+    }
+    this.terrCount = 0; this.rebelCount = 0;
+    for (const [k, v] of this.terr) {
+      const l = this.loyal.get(k) ?? (v === 1 ? 1 : -1);
+      if (v === 1) { if (l >= 0.5) this.terrCount++; else this.rebelCount++; }
+    }
+  }
+  // Давление на гекс от построек и отрядов стороны: ближе — сильнее, гарнизон и
+  // башни — якоря. Радиус в гексах; вес затухает линейно.
+  private loyalPressure(owner: 'player' | 'enemy', q: number, r: number): number {
+    let p = 0;
+    const [wx, wy] = hexCenterWorld(q, r);
+    for (const b of this.blds) {
+      if (b.owner !== owner || b.done < 1) continue;
+      const d = Math.hypot(b.x - wx, b.y - wy);
+      const R = b.key === 'towncenter' ? 420 : b.key === 'tower' ? 300 : b.key === 'mosque' ? 320 : b.key === 'wonder' ? 360 : 200;
+      if (d > R) continue;
+      const w = b.key === 'towncenter' ? 3 : b.key === 'tower' ? 2 : b.key === 'mosque' ? 2 : b.key === 'wonder' ? 2.5 : b.key === 'house' ? 0.8 : 0.5;
+      p += w * (1 - d / R) + (b.garrison?.length ?? 0) * 0.15;
+    }
+    for (const u of this.units) {
+      if (u.owner !== owner || u.hp <= 0 || u.key === 'villager' || u.key === 'trader' || u.key === 'scout') continue;
+      const d = Math.hypot(u.x - wx, u.y - wy);
+      if (d > 160) continue;
+      p += 0.35 * (1 - d / 160);
+    }
+    return p;
+  }
+  updateLoyalty(dt: number) {
+    if (this.mode !== 'settled' || !this.terr.size) return;
+    this.loyalT += dt;
+    if (this.loyalT < 1.5) return;
+    const step = this.loyalT; this.loyalT = 0;
+    let changed = false;
+    for (const [k, ow] of this.terr) {
+      const [q, r] = k.split(',').map(Number);
+      const pp = this.loyalPressure('player', q, r), pe = this.loyalPressure('enemy', q, r);
+      // порог: без чужого давления гекс сам возвращается к владельцу штампа
+      const cur = this.loyal.get(k) ?? (ow === 1 ? 1 : -1);
+      let drift: number;
+      if (pp < 0.05 && pe < 0.05) drift = ow === 1 ? 0.04 : -0.04;
+      else drift = clamp((pp - pe) * 0.03, -0.06, 0.06);   // разница давлений; кап ±0.06/с → полный переход ~35 с
+      const next = clamp(cur + drift * step, -1, 1);
+      if (Math.abs(next - cur) > 1e-4) this.loyal.set(k, next);
+      if ((ow === 1 && next <= -1) || (ow === 2 && next >= 1)) {
+        changed = true;
+        if (ow === 1) { this.lostHexes++; if (this.lostHexes % 3 === 1) { this.pushBanner('{i:flag} Гекс отпал к джунгарам', 'Без башни, мечети или войск граница не держится', 3); } }
+        else { this.wonHexes++; if (this.wonHexes % 3 === 1) this.pushBanner('{i:flag} Гекс перешёл к нам', 'Давление форпоста склонило степь', 3); }
+      }
+    }
+    if (changed) this.terrDirty = true;
+    else {
+      // счётчики мятежных обновляем без полного пересчёта штампов
+      let tc = 0, rc = 0;
+      for (const [k, v] of this.terr) if (v === 1) { const l = this.loyal.get(k) ?? 1; if (l >= 0.5) tc++; else rc++; }
+      this.terrCount = tc; this.rebelCount = rc;
+    }
+  }
+  startKosh(i: number) {
+    if (this.mode !== 'nomad' || this.migrating > 0 || i === this.siteI || !this.sites[i]) return;
+    this.migrating = Math.max(5, Math.round(20 * this.eraKoshMult())); this.koshTarget = i; // Ұлы көш (п.22)
+    this.pushBanner('{i:camel} Аттан! Көш собирается', 'Производство и стройка паузятся на 20 секунд марша');
+  }
+  private doKosh() {
+    const old = this.sites[this.siteI], site = this.sites[this.koshTarget];
+    if (!site || !old) { this.migrating = 0; this.koshTarget = -1; return; }
+    const dx = site.x - old.x, dy = site.y - old.y;
+    const PACK = new Set(['towncenter', 'house', 'pen', 'barracks', 'stable', 'blacksmith', 'market', 'storehouse', 'mosque']);
+    const keep: Bld[] = [];
+    for (const b of this.blds) {
+      if (b.owner !== 'player') { keep.push(b); continue; }
+      if (PACK.has(b.key)) {
+        b.x += dx; b.y += dy; b.rallyX += dx; b.rallyY += dy; keep.push(b); continue;
+      }
+      // недвижимое разбираем с возвратом 40%; склад оставляет қыстау-тайник
+      if (b.key === 'storehouse') {
+        this.nodes.push({ id: 900000 + this.nodes.length, kind: 'food', x: old.x + 70, y: old.y + 50, amount: 260, max: 260, r: 46, phase: 0 });
+        this.decor.push({ x: old.x, y: old.y, k: 3, s: 1.1, c: '#8a6d3b' });
+      }
+      const c = this.bldCost(b.key);
+      this.res.wood += Math.floor(c.wood * 0.4); this.res.food += Math.floor(c.food * 0.4); this.res.gold += Math.floor(c.gold * 0.4);
+    }
+    this.blds = keep;
+    for (const u of this.units) if (u.owner === 'player') { u.x += dx; u.y += dy; u.path = undefined; }
+    this.cam.x = site.x; this.cam.y = site.y;
+    this.ensureChunks(site.x, site.y, 2);
+    old.dep = 0.05; this.siteI = this.koshTarget; this.koshTarget = -1; this.migrating = 0;
+    this.pushBanner('{i:yurt} Новый жайляу!', 'Пастбища отдохнули; на старом месте остался қыстау с тайником');
+  }
+  private updateModes(dt: number) {
+    if (this.mode === 'settled') {
+      if (this.terrDirty) { this.terrDirty = false; this.recomputeTerr(); }
+      this.updateLoyalty(dt);
+      this.cityT += dt;
+      if (this.cityT > 2) {
+        this.cityT = 0;
+        const tc = this.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
+        if (tc) {
+          const n = this.blds.filter(b => b.owner === 'player' && b.done >= 1 && Math.hypot(b.x - tc.x, b.y - tc.y) < 300).length;
+          const tier = n >= 12 ? 2 : n >= 6 ? 1 : 0;
+          if (tier !== this.cityTier) {
+            this.cityTier = tier; this.terrDirty = true;
+            this.pushBanner('{i:star} ' + ['Аул', 'Қала', 'Астана'][tier] + '!', 'Город вырос: граница от центра шире на 1 гекс');
+          }
+        }
+        if (!this.over && this.terrLand > 0 && this.terrCount / this.terrLand >= 0.6) {
+          this.pushBanner('{i:flag} Границы ханства!', '60% долины под вашей властью — территориальная победа');
+          this.finish('victory');
+        }
+      }
+    } else {
+      const pens = this.blds.filter(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1).length;
+      const s = this.sites[this.siteI];
+      if (s && this.migrating <= 0) s.dep = Math.min(1, s.dep + dt * (0.00009 + pens * 0.00003));
+      if (this.migrating > 0) { this.migrating -= dt; if (this.migrating <= 0) this.doKosh(); }
+    }
+  }
   bldCost(key: BuildingKey): { wood: number; food: number; gold: number } {
     const c = BUILDING_DEFS[key].cost;
     const d = this.woodDiscount();
@@ -3210,6 +3716,7 @@ export class Game {
     if (this.bonusTier('farm', 3)) m = 1.35;
     else if (this.bonusTier('farm', 1)) m = 1.15;
     if (this.droughtT > 0) m *= 0.55;   // засуха: пашни родят скудно
+    if (this.weatherActive('rain')) m *= 1.2; // дождь поит пашни
     return m;
   }
   // скидка на дерево от ремесленных союзников (10% / 20%)
@@ -3274,7 +3781,7 @@ export class Game {
     if (!crew.length) { this.floater(b.x, b.y - 60, 'Нет свободных шаруа', '#f87171', 14); this.sound.error(); return; }
     for (const v of crew) { v.state = 'build'; v.buildId = b.id; v.tx = b.x + rand(-50, 50); v.ty = b.y + rand(-46, 46); }
     this.sound.move(); this.sound.playPhrase('за работу');
-    this.floater(b.x, b.y - 60, `🔧 Ремонт: ${crew.length} кр.`, '#7dd3fc', 15);
+    this.floater(b.x, b.y - 60, `{i:wrench} Ремонт: ${crew.length} кр.`, '#7dd3fc', 15);
     this.pushHud();
   }
 
@@ -3303,11 +3810,11 @@ export class Game {
   trade(from: 'wood' | 'food'): boolean {
     if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен: Базар!', '#f87171', 16); this.sound.error(); return false; }
     const rate = this.tradeRate();
-    if (this.res[from] < rate) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${rate} ${from === 'wood' ? '🪵' : '🍖'}`, '#f87171', 16); this.sound.error(); return false; }
+    if (this.res[from] < rate) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${rate} ${from === 'wood' ? '{i:wood}' : '{i:food}'}`, '#f87171', 16); this.sound.error(); return false; }
     this.res[from] -= rate;
     this.res.gold += 10;
     this.sound.coin();
-    this.floater(this.cam.x, this.cam.y - 90, `+10 🪙`, '#fde047', 16, true);
+    this.floater(this.cam.x, this.cam.y - 90, `+10 {i:gold}`, '#fde047', 16, true);
     this.pushHud();
     return true;
   }
@@ -3342,7 +3849,7 @@ export class Game {
     this.burst(bx, by, 14, ['#d6a45c', '#8b5e2e'], 120, 0.8);
     this.sound.boom();
     this.trauma = Math.min(1, this.trauma + 0.1);
-    this.floater(bx, by - 54, '🔨 Снесено', '#fca5a5', 15);
+    this.floater(bx, by - 54, '{i:hammer} Снесено', '#fca5a5', 15);
     this.blds = this.blds.filter(x => x.id !== buildId);
     if (this.selBld === buildId) this.selBld = -1;
     for (const u of this.units) if (u.buildId === buildId) { u.buildId = -1; if (u.state === 'build') u.state = 'idle'; }
@@ -3366,7 +3873,7 @@ export class Game {
     gate.buildT = 0;
     this.burst(gate.x, gate.y, 24, ['#d6a45c', '#8b5e2e', '#f6d47c'], 120);
     this.sound.place();
-    this.floater(gate.x, gate.y - 50, '🚪 Ворота поставлены', '#f6d47c', 15);
+    this.floater(gate.x, gate.y - 50, '{i:door} Ворота поставлены', '#f6d47c', 15);
     this.selBld = gate.id;
     this.pushHud();
     return true;
@@ -3378,19 +3885,19 @@ export class Game {
     if (isWallLike) { x = Math.round(x / TILE_STEP) * TILE_STEP; y = Math.round(y / TILE_STEP) * TILE_STEP; }
     else { const sx = snapToHexWorld(x, y); x = sx[0]; y = sx[1]; }
     const s = BUILDING_DEFS[key].size / 2 + (isWallLike ? 2 : 8);
-    if (x < s + 10 || y < s + 10 || x > WORLD.w - s - 10 || y > WORLD.h - s - 10) return false;
+    // тор: краёв нет — стройка у стыка разрешена (s остаётся для интервалов)
     for (const b of this.blds) {
       const bWall = b.key === 'wall' || b.key === 'gate';
       // стена к стене — вплотную (допускаем минимальное перекрытие фундаментов)
       const need = isWallLike && bWall
         ? BUILDING_DEFS[key].size / 2 + b.size / 2 - 16
         : s + b.size / 2 + (isWallLike ? -4 : 6);
-      if (Math.abs(x - b.x) < need && Math.abs(y - b.y) < need) return false;
+      if (Math.abs(this.tdx(x - b.x)) < need && Math.abs(this.tdy(y - b.y)) < need) return false;
     }
     for (const n of this.nodes) {
       if (n.amount <= 0) continue;
       const need = s + n.r;
-      if (Math.abs(x - n.x) < need && Math.abs(y - n.y) < need) return false;
+      if (Math.abs(this.tdx(x - n.x)) < need && Math.abs(this.tdy(y - n.y)) < need) return false;
     }
     // террейн: ни на горах, ни на воде (фундамент по сетке точек вокруг центра)
     for (let ox = -s; ox <= s; ox += 22) for (let oy = -s; oy <= s; oy += 22) {
@@ -3484,7 +3991,7 @@ export class Game {
     const next = AGES[this.age + 1];
     if (!next.cost) return;
     if (this.res.food < next.cost.food || this.res.gold < (next.cost.gold || 0)) {
-      this.floater(this.cam.x, this.cam.y - 100, `Нужно: ${next.cost.food}🍖 ${next.cost.gold ? next.cost.gold + '🪙' : ''}`, '#f87171', 18);
+      this.floater(this.cam.x, this.cam.y - 100, `Нужно: ${next.cost.food}{i:food} ${next.cost.gold ? next.cost.gold + '{i:gold}' : ''}`, '#f87171', 18);
       this.sound.error(); return;
     }
     this.res.food -= next.cost.food; this.res.gold -= next.cost.gold || 0;
@@ -3496,21 +4003,39 @@ export class Game {
     this.score += SCORE.ageUp * this.age;
     this.sound.ageup();
     const ageNews: Record<number, string> = {
-      1: 'Войско крепче! Открыты: башни 🗼 и конюшня 🐴 (батыры/жасауылы)',
-      2: 'Армия сильнее! Открыты: кузница 🔨 и катапульты 🪨',
-      3: 'Мощь ханства! Открыт Мавзолей хана ⭐ — постройте его для победы',
+      1: 'Войско крепче! Открыты: башни {i:tower} и конюшня {i:horse} (батыры/жасауылы)',
+      2: 'Армия сильнее! Открыты: кузница {i:hammer} и катапульты {i:stone}',
+      3: 'Мощь ханства! Открыт Мавзолей хана {i:star} — постройте его для победы',
     };
-    this.pushBanner(`${next.icon} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
+    this.pushBanner(`{i:${next.icon}} ${next.name}!`, ageNews[this.age] || 'Армия сильнее, укрепления крепче', 4);
     this.burst(HOME.x, HOME.y, 40, ['#f6d47c', '#fff'], 160);
     this.checkQuests();
+    // ── ВЕК ЭПОХИ (п.22 плана): золотой / ровный / тёмный по счёту деяний ──
+    const eraScore = Math.max(0, Math.round((this.kills - this.ageMark.kills) * 3
+      + (this.builtCount - this.ageMark.built) * 2
+      + (this.razed - this.ageMark.razed) * 4
+      + (this.gotGold - this.ageMark.gold) / 40
+      + Math.max(0, this.score - this.ageMark.score - SCORE.ageUp * this.age) / 12));
+    const eraThreshold = ERA_THRESHOLD[this.age] ?? 100;
+    let eraState: 'golden' | 'normal' | 'dark' = eraScore >= eraThreshold ? 'golden'
+      : eraScore >= eraThreshold * 0.5 ? 'normal' : 'dark';
+    let eraHeroic = false;
+    if (this.eraState === 'dark') this.eraHeroicCharge += Math.round(eraScore * 0.6);
+    if (this.eraHeroicCharge >= eraThreshold * 0.8 && eraState !== 'dark') {
+      // свершения трудных лет выковали героический век
+      eraState = 'golden'; eraHeroic = true; this.eraHeroicCharge = 0;
+    } else if (eraState !== 'dark') this.eraHeroicCharge = 0;
+    this.eraState = eraState; this.eraHeroic = eraHeroic; this.eraDedication = null;
+    if (eraState === 'golden') this.pushBanner(`{i:${eraHeroic ? 'crown' : 'sun'}} ${eraHeroic ? 'ГЕРОИЧЕСКИЙ ВЕК!' : 'ЗОЛОТОЙ ВЕК!'}`, 'Выберите посвящение в свитке эпохи', 4);
+    else if (eraState === 'dark') this.pushBanner('{i:moon} Тёмный век', 'Добыча −10%, тропы тяжелы. Свершения куют героический век', 4);
     // ── ЭКРАН ИТОГОВ ЭПОХИ (пункт 10 плана) ──
     // Сводка за прожитую эпоху: всё считаем как разницу с меткой на её входе,
     // поэтому цифры относятся именно к этой эпохе, а не ко всей партии.
     const prev = AGES[this.age - 1];
     const unlocks: Record<number, string[]> = {
-      1: ['🗼 Сторожевая башня', '🐴 Конюшня: батыры и жасауылы', '⚒️ Новые улучшения'],
-      2: ['🔨 Кузница', '🪨 Катапульты', '⚒️ Тяжёлая пехота'],
-      3: ['⭐ Мавзолей хана — путь к победе', '⚒️ Высшие улучшения'],
+      1: ['{i:tower} Сторожевая башня', '{i:horse} Конюшня: батыры и жасауылы', '{i:hammerpick} Новые улучшения'],
+      2: ['{i:hammer} Кузница', '{i:stone} Катапульты', '{i:hammerpick} Тяжёлая пехота'],
+      3: ['{i:star} Мавзолей хана — путь к победе', '{i:hammerpick} Высшие улучшения'],
     };
     this.ageReport = {
       fromName: prev.name, fromIcon: prev.icon, toName: next.name, toIcon: next.icon,
@@ -3526,6 +4051,7 @@ export class Game {
       powP: Math.round(this.milStrength('player')), powE: Math.round(this.milStrength('enemy')),
       unlocks: unlocks[this.age] ?? [],
       score: Math.round(this.score - this.ageMark.score),
+      era: eraState, eraScore, eraThreshold, eraHeroic,
     };
     // метка для следующей эпохи
     this.ageMark = { t: this.time, wood: this.gotWood, food: this.gotFood, gold: this.gotGold,
@@ -3534,7 +4060,19 @@ export class Game {
   }
 
   // Закрыть экран итогов эпохи (кнопка «Вести ханство дальше»).
-  closeAgeReport() { this.ageReport = null; this.sound.select(); this.pushHud(); }
+  closeAgeReport() {
+    // золотой век требует посвящения — свиток не закрывается, пока не выбрано (п.22)
+    if (this.ageReport?.era === 'golden' && this.eraState === 'golden' && !this.eraDedication) return;
+    this.ageReport = null; this.sound.select(); this.pushHud();
+  }
+  chooseDedication(id: DedicationId) {
+    if (this.eraState !== 'golden' || this.eraDedication) return;
+    this.eraDedication = id;
+    const d = DEDICATIONS.find(x => x.id === id);
+    if (d) this.pushBanner(`{i:${d.icon}} ${this.eraHeroic ? 'Героический век' : 'Золотой век'}: ${d.name}`, d.desc, 4);
+    this.sound.ageup();
+    this.closeAgeReport();
+  }
 
   // ---------- selection helpers ----------
   selUnits(): Unit[] {
@@ -3664,12 +4202,13 @@ export class Game {
   }
   deposit(v: Unit) {
     if (v.carry.amt <= 0) return;
-    const amt = Math.floor(v.carry.amt);
+    let amt = Math.floor(v.carry.amt);
+    if (v.owner === 'player') amt = Math.max(1, Math.round(amt * this.eraGatherMult())); // Дәулет/тёмный век (п.22)
     // ФИКС: сдача идёт в казну ВЛАДЕЛЬЦА. Раньше добыча вражеских шаруа капала игроку
     // (updateVillager крутится для обеих сторон, а deposit писал только в this.res).
     const bank = v.owner === 'enemy' ? this.eres : this.res;
     if (v.carry.type === 'wood') bank.wood += amt;
-    else if (v.carry.type === 'food') bank.food += amt;
+    else if (v.carry.type === 'food') bank.food += (v.owner === 'player' && this.mode === 'nomad' ? Math.round(amt * this.pastureMult()) : amt);
     else bank.gold += amt;
     if (v.owner === 'player') {
       if (v.carry.type === 'wood') { this.woodGathered += amt; this.gotWood += amt; }
@@ -3678,7 +4217,7 @@ export class Game {
       this.gatheredTotal += amt;
       this.score += amt * 0.35;
       const cols: Record<string, string> = { wood: '#d6a45c', food: '#fda4af', gold: '#fde047' };
-      const icons: Record<string, string> = { wood: '🪵', food: '🍖', gold: '🪙' };
+      const icons: Record<string, string> = { wood: '{i:wood}', food: '{i:food}', gold: '{i:gold}' };
       this.floater(v.x, v.y - 26, `+${amt} ${icons[v.carry.type]}`, cols[v.carry.type], 14);
       if (Math.random() < 0.4) { if (v.carry.type === 'gold') this.sound.coin(); }
     }
@@ -3691,14 +4230,14 @@ export class Game {
       if (!this.questsDone[id] && ok) {
         this.questsDone[id] = true; reward();
         this.sound.quest();
-        this.pushBanner('📜 Задание выполнено!', msg, 2.2);
+        this.pushBanner('{i:scroll} Задание выполнено!', msg, 2.2);
       }
     };
-    q('wood', this.woodGathered >= 60, () => { this.res.food += 40; }, '+40 🍖 — рубите дальше!');
-    q('army', this.soldiersTrained >= 3, () => { this.res.wood += 60; this.res.gold += 40; }, '+60 🪵 +40 🪙 — время набега!');
-    q('rax', this.barracksBuilt >= 1, () => { this.res.food += 80; }, '+80 🍖 — обучайте орду!');
-    q('wolf', this.wolvesSlain >= 4, () => { this.res.gold += 100; }, '+100 🪙 — грозный хищник!');
-    q('age', this.age >= 1, () => { this.res.wood += 120; }, '+120 🪵 — мощь Века жузов!');
+    q('wood', this.woodGathered >= 60, () => { this.res.food += 40; }, '+40 {i:food} — рубите дальше!');
+    q('army', this.soldiersTrained >= 3, () => { this.res.wood += 60; this.res.gold += 40; }, '+60 {i:wood} +40 {i:gold} — время набега!');
+    q('rax', this.barracksBuilt >= 1, () => { this.res.food += 80; }, '+80 {i:food} — обучайте орду!');
+    q('wolf', this.wolvesSlain >= 4, () => { this.res.gold += 100; }, '+100 {i:gold} — грозный хищник!');
+    q('age', this.age >= 1, () => { this.res.wood += 120; }, '+120 {i:wood} — мощь Века жузов!');
   }
 
   // ---------- update ----------
@@ -3777,11 +4316,13 @@ export class Game {
     if (this.dayT >= this.DAY_LEN) {
       this.dayT -= this.DAY_LEN; this.dayNum++;
       this.azanDone = [];          // новые сутки — намазы звучат заново
-      this.pushBanner(`🌅 День ${this.dayNum}`, 'Новый день над степью', 2.4);
+      this.pushBanner(`{i:sunrise} День ${this.dayNum}`, 'Новый день над степью', 2.4);
     }
     this.updatePrayer(dt);         // азан с минарета и намаз
     this.updateShifts(dt);         // усталость, смены, отдых у юрт
     this.updateEvents(dt);         // случайные события степи
+    this.updateWeather(dt);        // погода: дождь, туман, буран
+    this.updateBandits(dt);        // набеги и респавн стоянок разбойников
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
     this.updateFog(dt);
@@ -3805,7 +4346,7 @@ export class Game {
       p.life -= dt;
       if (p.life <= 0) { this.parts.splice(i, 1); continue; }
       p.vy += p.grav * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.x = wrapW(p.x + p.vx * dt); p.y = wrapH(p.y + p.vy * dt);
       p.rot += p.vr * dt;
     }
     for (let i = this.floaters.length - 1; i >= 0; i--) {
@@ -3846,7 +4387,7 @@ export class Game {
         this.relicT -= 10;
         const gold = this.relicsHeld * 30;
         this.res.gold += gold;
-        this.floater(this.cam.x, this.cam.y - 80, `📿 +${gold}🪙 реликвии`, '#fde047', 14, true);
+        this.floater(this.cam.x, this.cam.y - 80, `{i:beads} +${gold}{i:gold} реликвии`, '#fde047', 14, true);
       }
     }
     // Чудо света: обратный отсчёт до победы, если оно цело
@@ -3866,6 +4407,9 @@ export class Game {
     if (!this.over) this.updateWisdom(dt);
     // ── автосохранение партии ──
     this.updateAutosave(dt);
+    // ── режимы: границы / перекочёвки ──
+    this.updateModes(dt);
+    this.cam.x = wrapW(this.cam.x); this.cam.y = wrapH(this.cam.y);
 
     // AI tick
     this.aiT += dt;
@@ -3883,7 +4427,7 @@ export class Game {
       this.hintT = 0;
       if (this.time < 90) {
         const hints = [
-          'Выберите сарбазов → ПКМ по волкам для охоты (+🍖 +очки)',
+          'Выберите сарбазов → ПКМ по волкам для охоты (+{i:food} +очки)',
           'Шаруа: ПКМ по дереву / ягодам / золоту — добыча',
           'Клавиши 2-8 — войско • Q юрта • E казармы • Z конюшня • X кузница • C базар',
           'Стройте пашни (F) — бесконечная еда • Башни (R) — оборона',
@@ -3904,7 +4448,7 @@ export class Game {
     const ddx = this.cam.x - wx, ddy = this.cam.y - wy;
     if (ddx * ddx + ddy * ddy < rc * rc) return true; // рядом с камерой
     const r2 = rad * rad;
-    for (const u of this.units) { if (u.owner === 'neutral') continue; const dx = u.x - wx, dy = u.y - wy; if (dx * dx + dy * dy < r2) return true; }
+    for (const u of this.units) { if (u.owner === 'neutral') continue; const dx = this.tdx(u.x - wx), dy = this.tdy(u.y - wy); if (dx * dx + dy * dy < r2) return true; }
     for (const b of this.blds) { if (b.owner === 'neutral') continue; const dx = b.x - wx, dy = b.y - wy; if (dx * dx + dy * dy < r2) return true; }
     return false;
   }
@@ -3963,12 +4507,12 @@ export class Game {
       if (u.owner === 'neutral' && !u.tribe) {
         const w0 = u.x, z0 = u.y;
         if (u.key === 'wolf') this.updateWolf(u, dt); else this.updateAnimal(u, dt);
-        const moved = Math.hypot(u.x - w0, u.y - z0) > 1.5;
+        const moved = Math.hypot(this.tdx(u.x - w0), this.tdy(u.y - z0)) > 1.5;
         (u as Unit & { walk?: boolean }).walk = moved;
         // изо-направление зверя: волк галопом, скот (овцы/коровы/олени) шагает —
         // у всех теперь есть кадры «сбоку / спереди / со спины»
         if (moved && (u.key === 'wolf' || u.key === 'sheep' || u.key === 'cow' || u.key === 'deer')) {
-          const sxv = (u.x - w0) - (u.y - z0), syv = ((u.x - w0) + (u.y - z0)) * 0.5;
+          const sxv = this.tdx(u.x - w0) - this.tdy(u.y - z0), syv = (this.tdx(u.x - w0) + this.tdy(u.y - z0)) * 0.5;
           u.mvx = (u.mvx ?? sxv) * 0.6 + sxv * 0.4;
           u.mvy = (u.mvy ?? syv) * 0.6 + syv * 0.4;
           if (Math.abs(u.mvy) > Math.abs(u.mvx) * 1.05 && Math.abs(u.mvy) > 0.4) {
@@ -3997,16 +4541,16 @@ export class Game {
         const h = b.size / 2;
         const rad = wallLike ? 13 : 12;
         const cx = clamp(u.x, b.x - h, b.x + h), cy = clamp(u.y, b.y - h, b.y + h);
-        const dx = u.x - cx, dy = u.y - cy, d2 = dx * dx + dy * dy;
+        const dx = this.tdx(u.x - cx), dy = this.tdy(u.y - cy), d2 = dx * dx + dy * dy;
         if (d2 < rad * rad) {
           if (d2 < 0.01) { u.x += rad * dt * 60 * 0.05; continue; }
           const d = Math.sqrt(d2);
           u.x = cx + (dx / d) * rad; u.y = cy + (dy / d) * rad;
         }
       }
-      u.x = clamp(u.x, 14, WORLD.w - 14); u.y = clamp(u.y, 14, WORLD.h - 14);
+      u.x = wrapW(u.x); u.y = wrapH(u.y);   // круглая земля: вместо стен — стык
       // реальное перемещение за кадр (в бою на месте шаг не играем)
-      const distMoved = Math.hypot(u.x - px0, u.y - py0);
+      const distMoved = Math.hypot(this.tdx(u.x - px0), this.tdy(u.y - py0));
       // ── СТОРОЖ ЗАСТРЕВАНИЯ ПАСТУХА ──
       // Замер обязан быть ЗДЕСЬ, после отталкивания от зданий. Внутри herdMove
       // он бесполезен: moveToward честно сдвигает юнита на 3.9 ед., а коллизия
@@ -4020,7 +4564,7 @@ export class Game {
         // никогда не достигается — «дёрг-стоп-дёрг» до бесконечности.
         u.herdProbeT = (u.herdProbeT ?? 0) + dt;
         if (u.herdProbeT >= 2) {
-          const adv = Math.hypot(u.x - (u.herdProbeX ?? u.x), u.y - (u.herdProbeY ?? u.y));
+          const adv = Math.hypot(this.tdx(u.x - (u.herdProbeX ?? u.x)), this.tdy(u.y - (u.herdProbeY ?? u.y)));
           // за 2 с на скорости 175 юнит проходит ~350 ед.; 60 — заведомый затык
           if (adv < 60) u.herdStuckT = (u.herdStuckT ?? 0) + u.herdProbeT;
           else u.herdStuckT = 0;
@@ -4033,7 +4577,7 @@ export class Game {
       // sx = dwx - dwy (право), sy = (dwx + dwy)/2 (вниз к камере). Вниз по экрану → спереди, вверх → спина.
       if (walk) {
         // мировая дельта шага → изо-экранная (toIso): sx вправо, sy вниз к камере
-        const dWx = u.x - px0, dWy = u.y - py0;
+        const dWx = this.tdx(u.x - px0), dWy = this.tdy(u.y - py0);
         const sxv = dWx - dWy, syv = (dWx + dWy) * 0.5;
         // сглаживаем вектор, чтобы режим не «дёргался» на диагоналях
         u.mvx = (u.mvx ?? sxv) * 0.6 + sxv * 0.4;
@@ -4063,13 +4607,13 @@ export class Game {
   }
 
   moveToward(u: Unit, tx: number, ty: number, dt: number, arrive = 6): boolean {
-    const dx = tx - u.x, dy = ty - u.y;
+    const dx = this.tdx(tx - u.x), dy = this.tdy(ty - u.y);
     const d = Math.hypot(dx, dy);
     if (d < arrive) return true;
     // в воде идём медленнее (глубокая — вброд/вплавь); горы непроходимы
-    const midC = this.terrain.classAt((u.x + tx) / 2, (u.y + ty) / 2);
+    const midC = this.terrain.classAt(u.x + dx / 2, u.y + dy / 2);
     const wade = midC === 'deep' ? 0.55 : midC === 'water' ? 0.75 : 1;
-    const s = Math.min(u.speed * wade * dt, d);
+    const s = Math.min(u.speed * wade * this.eraSpeedMult() * this.weatherSpeedMult() * dt, d);
     const nx = u.x + (dx / d) * s, ny = u.y + (dy / d) * s;
     // горы непроходимы: пробуем скольжение вдоль преграды (по одной оси), иначе стоим
     if (!this.terrainBlocked(nx, ny)) { u.x = nx; u.y = ny; }
@@ -4225,14 +4769,14 @@ export class Game {
     }
     // идём по первому waypoint'у; пройденные — выкидываем (сразу все достигнутые,
     // не тратя по кадру на каждый — иначе юнит «залипает» на плотной цепочке точек)
-    while (u.path.length && Math.hypot(u.path[0].x - u.x, u.path[0].y - u.y) < 8) u.path.shift();
+    while (u.path.length && Math.hypot(this.tdx(u.path[0].x - u.x), this.tdy(u.path[0].y - u.y)) < 8) u.path.shift();
     if (!u.path.length) { u.path = undefined; return this.moveToward(u, tx, ty, dt, arrive); }
     const wp = u.path[0];
     this.moveToward(u, wp.x, wp.y, dt, 6);
     // Детекция застревания (юнит упёрся в гору/здание и не продвигается) — перепроложить.
     // Считаем ВСЕГДА: раньше проверка жила внутри `if (moved)`, поэтому при полностью
     // нулевом смещении (самый частый случай затыка) stuckT не рос и путь не сбрасывался.
-    const lm = Math.hypot(u.x - (u.lastX ?? u.x), u.y - (u.lastY ?? u.y));
+    const lm = Math.hypot(this.tdx(u.x - (u.lastX ?? u.x)), this.tdy(u.y - (u.lastY ?? u.y)));
     u.stuckT = u.stuckT ?? 0;
     if (lm < u.speed * dt * 0.5) u.stuckT += dt; else u.stuckT = Math.max(0, u.stuckT - dt);
     u.lastX = u.x; u.lastY = u.y;
@@ -4261,10 +4805,10 @@ export class Game {
       if (f.tu >= 0) { const cand = this.units.find(e => e.id === f.tu); if (cand && valid(cand) && !isPrey(cand)) { u.targetU = f.tu; tu = cand; } }
     }
     if (tu) {
-      const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+      const d = Math.hypot(this.tdx(tu.x - u.x), this.tdy(tu.y - u.y));
       const reach = u.range + 6;
       if (d <= reach) {
-        if (Math.abs(tu.x - u.x) > 3) u.face = tu.x > u.x ? 1 : -1;
+        if (Math.abs(this.tdx(tu.x - u.x)) > 3) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
         if (u.cd <= 0) this.strike(u, tu, undefined);
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
       } else {
@@ -4418,10 +4962,10 @@ export class Game {
         this.herdMove(u, cx, cy, dt, 40);
         if (dist2(u.x, u.y, cx, cy) < 260 * 260 && !herd.length) {
           this.stockPasture(cx, cy, pen.id);
-          this.floater(cx, cy - 40, '🐑 Новое стадо', '#a3e635', 14);
+          this.floater(cx, cy - 40, '{i:sheep} Новое стадо', '#a3e635', 14);
         }
       }
-      if (u.herdStateT >= GRAZE_T) { u.herdState = 'home'; u.herdStateT = 0; this.pushBanner('🐎 Перегон', 'Пастух гонит стадо с пастбища в загон', 3); }
+      if (u.herdStateT >= GRAZE_T) { u.herdState = 'home'; u.herdStateT = 0; this.pushBanner('{i:horse} Перегон', 'Пастух гонит стадо с пастбища в загон', 3); }
     }
     else if (u.herdState === 'home') {
       // ── ПЕРЕГОН: скот бежит к загону, пастух гонит с тыла; ждём, пока стадо дойдёт ──
@@ -4534,7 +5078,7 @@ export class Game {
           a.wx = nx; a.wy = ny; a.path = undefined; a.pathGoal = undefined;
         }
         this.burst(nx, ny - 20, 14, ['#d1fae5', '#a7f3d0', '#fff'], 130, 0.8);
-        this.pushBanner('🐑 Новое пастбище', 'Старое осталось за дуалом — стадо перегнали ближе', 3);
+        this.pushBanner('{i:sheep} Новое пастбище', 'Старое осталось за дуалом — стадо перегнали ближе', 3);
       }
       u.herdState = 'graze'; u.herdStateT = 0;
       u.path = undefined; u.pathGoal = undefined;
@@ -4572,7 +5116,7 @@ export class Game {
     const pens = this.blds
       .filter(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1)
       .sort((a, b) => dist2(a.x, a.y, vills[0].x, vills[0].y) - dist2(b.x, b.y, vills[0].x, vills[0].y));
-    if (!pens.length) { this.floater(this.cam.x, this.cam.y - 90, 'Сначала постройте Загон (🐑, клавиша H)', '#f87171', 15); this.sound.error(); return; }
+    if (!pens.length) { this.floater(this.cam.x, this.cam.y - 90, 'Сначала постройте Загон ({i:sheep}, клавиша H)', '#f87171', 15); this.sound.error(); return; }
     // распределяем: 1 пастух на загон (если уже есть — следующий рабочий к следующему загону)
     let assigned = 0;
     for (const v of vills) {
@@ -4581,7 +5125,7 @@ export class Game {
       this.assignShepherd(v, pen);
       assigned++;
     }
-    this.floater(pens[0].x, pens[0].y - 50, assigned > 1 ? `🐎 Пастухов: ${assigned}` : '🐎 Пастух назначен', '#a3e635', 14);
+    this.floater(pens[0].x, pens[0].y - 50, assigned > 1 ? `{i:horse} Пастухов: ${assigned}` : '{i:horse} Пастух назначен', '#a3e635', 14);
     this.spawnRing(pens[0].x, pens[0].y, '#a3e635');
   }
 
@@ -4602,9 +5146,9 @@ export class Game {
     if (!pen.pastureStocked) { this.stockPasture(pen.pastureX!, pen.pastureY!, pen.id); pen.pastureStocked = true; }
     vill.herdX = pen.pastureX; vill.herdY = pen.pastureY;
     vill.herdState = 'graze'; vill.herdStateT = 0;
-    this.floater(pen.pastureX!, pen.pastureY! - 40, '🐑 Пастбище', '#a3e635', 14);
-    this.floater(pen.x, pen.y - 50, '🐎 Пастух скачет на дальнее пастбище', '#a3e635', 14);
-    this.pushBanner('🐎 Пастух отправился в поле', 'Скачет на дальнее пастбище (5 овец и 5 коров ждут), затем пригонит стадо в загон', 4);
+    this.floater(pen.pastureX!, pen.pastureY! - 40, '{i:sheep} Пастбище', '#a3e635', 14);
+    this.floater(pen.x, pen.y - 50, '{i:horse} Пастух скачет на дальнее пастбище', '#a3e635', 14);
+    this.pushBanner('{i:horse} Пастух отправился в поле', 'Скачет на дальнее пастбище (5 овец и 5 коров ждут), затем пригонит стадо в загон', 4);
     this.sound.ack('villager'); this.pushHud();
   }
 
@@ -4760,7 +5304,7 @@ export class Game {
         return;
       }
       // рабочий на берегу: разворот к воде/косяку
-      if (Math.abs(n.x - u.x) > 4) u.face = n.x > u.x ? 1 : -1;
+      if (Math.abs(this.tdx(n.x - u.x)) > 4) u.face = this.tdx(n.x - u.x) > 0 ? 1 : -1;
       // вид работы: лес — топор, золото/руда — кирка, рыба — удочка (стоит на берегу), фрукты/ягоды — сбор
       u.wkind = n.kind === 'wood' ? 'chop' : n.kind === 'gold' ? 'mine' : n.kind === 'fish' ? 'fish' : 'gather';
       u.gatherT += dt; u.atkAnim = Math.min(1, u.atkAnim + dt * 7);
@@ -4789,7 +5333,7 @@ export class Game {
       // снаружи, не попадая в круг сдачи.
       const dropR = tc.size / 2 + 22;
       const hx = tc.size / 2;
-      const ox = Math.max(0, Math.abs(u.x - tc.x) - hx), oy = Math.max(0, Math.abs(u.y - tc.y) - hx);
+      const ox = Math.max(0, Math.abs(this.tdx(u.x - tc.x)) - hx), oy = Math.max(0, Math.abs(this.tdy(u.y - tc.y)) - hx);
       if (ox * ox + oy * oy < dropR * dropR || dist2(u.x, u.y, tc.x, tc.y) < dropR * dropR) {
         this.deposit(u);
         // после сдачи — обратно к работе
@@ -4809,7 +5353,7 @@ export class Game {
       // Цель — ближняя точка У ГРАНИЦЫ ТЦ (на радиусе сдачи, со стороны подхода): стабильна
       // между кадрами, arrive совпадает с радиусом сдачи — рабочий не доходит до коллизии и
       // не топчется/толкается у угла, а разгружается сразу на входе в зону.
-      const dx = u.x - tc.x, dy = u.y - tc.y;
+      const dx = this.tdx(u.x - tc.x), dy = this.tdy(u.y - tc.y);
       const d = Math.hypot(dx, dy) || 1;
       const rr = Math.max(8, dropR - 6);
       const tx = tc.x + (dx / d) * rr, ty = tc.y + (dy / d) * rr;
@@ -4874,7 +5418,7 @@ export class Game {
     if (!tc) return;
     // стабильная точка сдачи у кромки здания (а не в центре зоны коллизии — там рабочий
     // толкается и топчется). Встаём со стороны, откуда пришёл, на радиусе ~TC+8.
-    const dx = u.x - tc.x, dy = u.y - tc.y;
+    const dx = this.tdx(u.x - tc.x), dy = this.tdy(u.y - tc.y);
     const d = Math.hypot(dx, dy) || 1;
     const r = tc.size / 2 + 10;
     u.tx = tc.x + (dx / d) * r;
@@ -4947,7 +5491,7 @@ export class Game {
       if (e.tribe && !e.aggro) continue;
       // пассивный скот не цель авто-боя (бить можно только явным приказом)
       // дичь/скот — добыча охоты (см. acquirePrey); в авто-оборону не входит
-      if (e.owner === 'neutral' && e.key !== 'wolf' && !e.tribe && u.state !== 'attackmove') continue;
+      if (e.owner === 'neutral' && e.key !== 'wolf' && !e.tribe && !e.bandit && u.state !== 'attackmove') continue;
       if (u.owner === 'player' && e.owner === 'neutral' && e.key === 'wolf' && u.state !== 'attackmove') {
         // крестьяне обороняются от волков в малом радиусе (оборона), но не гоняются за ними
         // через всю карту: военные берут волка обычным радиусом, крестьяне — отдельно ниже
@@ -4976,6 +5520,7 @@ export class Game {
       if (u.owner === 'player' && u.key === 'villager') continue;
       let d = dist2(u.x, u.y, b.x, b.y) - b.size * b.size * 0.25;
       if (b.key === 'wonder') d *= 0.15;   // Чудо — приоритетная цель для атаки
+      if (u.key === 'ram' && (b.key === 'wall' || b.key === 'gate')) d *= 0.3;   // таран ищет стены
       if (d < bbd) { bbd = d; bb = b.id; }
     }
     return { tu: -1, tb: bb };
@@ -5003,7 +5548,7 @@ export class Game {
       if (dist2(u.x, u.y, u.homeX, u.homeY) > 120 * 120) this.moveTowardPath(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
       return;
     }
-    const isCata = u.key === 'catapult';
+    const isCata = u.key === 'catapult' || u.key === 'ram';   // осадные: ищут постройки сами (фальконет — нет, он против строя)
     // auto-acquire
     if (u.retarget <= 0 && !tu && !tb) {
       u.retarget = 0.4;
@@ -5012,15 +5557,18 @@ export class Game {
       if (f.tu >= 0) { u.targetU = f.tu; tu = this.units.find(e => e.id === f.tu); }
       else if (f.tb >= 0 && (u.state === 'attackmove' || isCata)) { u.targetB = f.tb; tb = this.blds.find(b => b.id === f.tb); }
     }
-    const uRange = u.range * (u.owner === 'player' ? this.rangeMult(u.key, u.owner) : 1);
+    const uRange = u.range * (u.owner === 'player' ? this.rangeMult(u.key, u.owner) : 1) * (u.range > 40 ? this.weatherRangeMult() : 1);
     if (tu) {
       if (tu.owner === u.owner) { u.targetU = -1; }
       else {
-        const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+        const d = Math.hypot(this.tdx(tu.x - u.x), this.tdy(tu.y - u.y));
         if (d <= uRange + (tu.key === 'wolf' ? 4 : 6)) {
-          if (Math.abs(tu.x - u.x) > 4) u.face = tu.x > u.x ? 1 : -1;
+          if (Math.abs(this.tdx(tu.x - u.x)) > 4) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
           if (u.key === 'archer') u.aiming = true;
           if (u.cd <= 0) this.strike(u, tu, undefined);
+          // жалған шегініс (п.24): конный лучник после залпа отскакивает от ближнего боя.
+          // Пассив включён всегда, кроме стойки «стоять»; пока перезаряжается — держит дистанцию.
+          if (u.key === 'horsearcher' && u.stance !== 'stand' && this.kiteFrom(u, tu, uRange, dt)) return;
         } else {
           this.moveTowardPath(u, tu.x, tu.y, dt, uRange * 0.7);
         }
@@ -5029,11 +5577,11 @@ export class Game {
     }
     if (tb) {
       const edge = tb.size / 2 + uRange * 0.6;
-      const dx = u.x - tb.x, dy = u.y - tb.y;
+      const dx = this.tdx(u.x - tb.x), dy = this.tdy(u.y - tb.y);
       const overlapX = Math.max(Math.abs(dx) - tb.size / 2, 0), overlapY = Math.max(Math.abs(dy) - tb.size / 2, 0);
       const ed = Math.hypot(overlapX, overlapY);
       if (ed <= uRange * 0.7 + 8) {
-        if (Math.abs(tb.x - u.x) > 4) u.face = tb.x > u.x ? 1 : -1;
+        if (Math.abs(this.tdx(tb.x - u.x)) > 4) u.face = this.tdx(tb.x - u.x) > 0 ? 1 : -1;
         if (u.key === 'archer') u.aiming = true;
         if (u.cd <= 0) this.strike(u, undefined, tb);
       } else this.moveTowardPath(u, tb.x, tb.y, dt, edge);
@@ -5080,6 +5628,12 @@ export class Game {
           const f = this.acquireEnemy(u, 240);
           if (f.tu >= 0) { u.targetU = f.tu; u.state = 'attackmove'; return; }
           u.state = 'idle';
+        } else if (u.bandit) {
+          // разбойник: цели нет — домой к юрте; дома — стоим
+          const f = this.acquireEnemy(u, 200);
+          if (f.tu >= 0) { u.targetU = f.tu; u.state = 'attackmove'; return; }
+          if (dist2(u.x, u.y, u.homeX, u.homeY) > 80 * 80) { u.state = 'move'; u.tx = u.homeX; u.ty = u.homeY; }
+          else u.state = 'idle';
         } else {
           // вернулись домой из погони (stand) — встаём
           u.state = 'idle';
@@ -5097,7 +5651,7 @@ export class Game {
       // в стойке «держать позицию» воин не сходит с места: цель только если враг в радиусе удара
       if (f.tu >= 0) {
         const e = this.units.find(x => x.id === f.tu);
-        const inReach = e && Math.hypot(e.x - u.x, e.y - u.y) <= u.range + 14;
+        const inReach = e && Math.hypot(this.tdx(e.x - u.x), this.tdy(e.y - u.y)) <= u.range + 14;
         if (u.stance !== 'stand' || inReach) { u.targetU = f.tu; u.state = 'attackmove'; }
       }
       else if (isCata && f.tb >= 0) { u.targetB = f.tb; u.state = 'attackmove'; }
@@ -5112,10 +5666,10 @@ export class Game {
     let tu = u.targetU >= 0 ? this.units.find(e => e.id === u.targetU) : undefined;
     if (tu && (tu.hp <= 0 || !this.scoutHostile(u, tu))) { tu = undefined; u.targetU = -1; }
     if (tu) {
-      const d = Math.hypot(tu.x - u.x, tu.y - u.y);
+      const d = Math.hypot(this.tdx(tu.x - u.x), this.tdy(tu.y - u.y));
       const reach = u.range + 6;
       if (d <= reach) {
-        if (Math.abs(tu.x - u.x) > 3) u.face = tu.x > u.x ? 1 : -1;
+        if (Math.abs(this.tdx(tu.x - u.x)) > 3) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
         if (u.cd <= 0) this.strike(u, tu, undefined);
         u.atkAnim = Math.min(1, u.atkAnim + dt * 6);
       } else {
@@ -5177,7 +5731,7 @@ export class Game {
   // выдать разведчику приказ-задание
   scoutOrder(mission: 'explore' | 'bases' | 'diplomacy' | 'infiltrate') {
     const us = this.selUnits().filter(u => u.owner === 'player' && u.key === 'scout');
-    if (!us.length) { this.floater(this.cam.x, this.cam.y - 90, 'Выберите разведчика 🧭', '#94a3b8', 14); this.sound.error(); return; }
+    if (!us.length) { this.floater(this.cam.x, this.cam.y - 90, 'Выберите разведчика {i:compass}', '#94a3b8', 14); this.sound.error(); return; }
     for (const u of us) {
       u.mission = mission; u.infDone = false; u.infT = 0; u.mNation = undefined;
       u.idleT = 0.9; // сразу тикнуть
@@ -5193,7 +5747,7 @@ export class Game {
       }
     }
     const names: Record<string, string> = { explore: 'Исследовать карту', bases: 'Искать базы', diplomacy: 'Наладить связь', infiltrate: 'Внедриться кротом' };
-    this.floater(this.cam.x, this.cam.y - 90, `🧭 ${names[mission]}`, '#7dd3fc', 15);
+    this.floater(this.cam.x, this.cam.y - 90, `{i:compass} ${names[mission]}`, '#7dd3fc', 15);
     this.sound.ack('soldier');
     this.pushHud();
   }
@@ -5250,13 +5804,13 @@ export class Game {
           // внедрён: держим расширенный обзор у базы (ничего не делаем — стоит/осматривается),
           // изредка «доносит» — небольшой доход золота
           const it = (u.infT ?? 0) + 0.5; u.infT = it;
-          if (it > 12) { u.infT = 0; this.res.gold += 6; this.floater(u.x, u.y - 30, '📿 донесение +6🪙', '#fde047', 12, true); }
+          if (it > 12) { u.infT = 0; this.res.gold += 6; this.floater(u.x, u.y - 30, '{i:beads} донесение +6{i:gold}', '#fde047', 12, true); }
           break;
         }
         if (u.mtx == null) { const b = this.nearestEnemyBase(u.x, u.y); if (b) { u.mtx = b.x; u.mty = b.y; u.infBaseId = b.id; } }
         if (u.mtx != null && u.mty != null) {
           // цель — точка РЯДОМ с базой (не в центр, чтобы не агрить вплотную): встаём у кромки обзора
-          const dx = u.x - u.mtx, dy = u.y - u.mty, d = Math.hypot(dx, dy) || 1;
+          const dx = this.tdx(u.x - u.mtx), dy = this.tdy(u.y - u.mty), d = Math.hypot(dx, dy) || 1;
           const stand = 230;
           if (d > stand) { u.tx = u.mtx + (dx / d) * stand; u.ty = u.mty + (dy / d) * stand; u.state = 'move'; }
           else { u.state = 'idle'; u.infT = (u.infT ?? 0) + 0.5; this.scoutInfiltrateProgress(u); }
@@ -5275,7 +5829,7 @@ export class Game {
         this.intelBase = base.id;
         const nid = base.owner === 'enemy' ? 'rival' : this.tribeNationOf(base);
         const def = nid ? NATION_BY_ID[nid] : null;
-        this.pushBanner('🕵️ Крот внедрился!', def ? `Разведчик под видом торговца проник к «${def.name}»: база раскрыта, идут донесения` : 'База раскрыта, идут донесения', 4.5);
+        this.pushBanner('{i:spy} Крот внедрился!', def ? `Разведчик под видом торговца проник к «${def.name}»: база раскрыта, идут донесения` : 'База раскрыта, идут донесения', 4.5);
         this.sound.quest();
         // внедрение во враждебную базу может спровоцировать племя
         if (base.tribe) { const nid2 = this.tribeNationOf(base); if (nid2 && this.tribeRel[nid2] !== 'friend') { /* тихо проник — не провоцируем сразу */ } }
@@ -5342,7 +5896,7 @@ export class Game {
           return;
         }
         // стоим и камлаем
-        u.convT = (u.convT ?? 0) + dt;
+        u.convT = (u.convT ?? 0) + dt * this.eraImanMult();
         t!.convertedBy = u.id;
         t!.convProg = Math.min(1, u.convT / this.CONV_TIME);
         u.atkAnim = Math.min(1, u.atkAnim + dt * 3);
@@ -5384,7 +5938,7 @@ export class Game {
       }
       if (best) {
         u.cd = 1.1;
-        const heal = 22;
+        const heal = Math.round(22 * this.eraImanMult());
         best.hp = Math.min(best.maxHp, best.hp + heal);
         u.atkAnim = 1; u.face = best.x >= u.x ? 1 : -1;
         this.sound.heal();
@@ -5413,7 +5967,7 @@ export class Game {
     if (any) {
       this.sound.select();
       this.spawnRing(target.x, target.y, '#c4b5fd');
-      this.floater(target.x, target.y - 40, '☾ Камлание', '#c4b5fd', 14);
+      this.floater(target.x, target.y - 40, '{i:crescent} Камлание', '#c4b5fd', 14);
     }
     return any;
   }
@@ -5441,8 +5995,8 @@ export class Game {
     this.sound.heal();
     if (m.owner === 'player') {
       this.score += 120;
-      this.floater(t.x, t.y - 40, `☾ ${UNIT_DEFS[t.key].name} обращён!`, '#e9d5ff', 15);
-      this.pushBanner('☾ Камлание удалось', `Имам обратил врага: ${UNIT_DEFS[t.key].name} теперь ваш`, 3.5);
+      this.floater(t.x, t.y - 40, `{i:crescent} ${UNIT_DEFS[t.key].name} обращён!`, '#e9d5ff', 15);
+      this.pushBanner('{i:crescent} Камлание удалось', `Имам обратил врага: ${UNIT_DEFS[t.key].name} теперь ваш`, 3.5);
     } else if (wasOwner === 'player') {
       // нас обокрали — это важное событие, поднимаем тревогу
       this.raiseAlert(t.x, t.y, `Имам джунгар переманил: ${UNIT_DEFS[t.key].name}`);
@@ -5456,7 +6010,7 @@ export class Game {
     if (this.time - this.lastAlertT < 12) return;
     this.lastAlertT = this.time;
     this.alert = { x, y, t: 0, sub };
-    this.pushBanner('⚠️ Нас атакуют!', sub, 4);
+    this.pushBanner('{i:warn} Нас атакуют!', sub, 4);
     this.sound.alarm();
     this.pushHud();
   }
@@ -5550,7 +6104,7 @@ export class Game {
         bank.gold += g;
         if (u.owner === 'player') {
           this.score += g * 0.4;
-          this.floater(u.x, u.y - 28, `+${g} 🪙`, '#fde047', 14);
+          this.floater(u.x, u.y - 28, `+${g} {i:gold}`, '#fde047', 14);
           this.sound.coin();
           this.checkQuests();
         }
@@ -5652,8 +6206,23 @@ export class Game {
     u.x += Math.sign(u.tx - u.x) * u.speed * dt; u.y += Math.sign(u.ty - u.y) * u.speed * dt;
   }
 
+  // Отход конного лучника от ближнего противника: назад по линии цель→юнит на
+  // ~0.75 дальности, пока идёт перезарядка. Возвращает true, если отходил.
+  kiteFrom(u: Unit, tu: Unit, uRange: number, dt: number): boolean {
+    if (tu.range > 60) return false;                 // от стрелков не бегаем — перестрелка
+    const dx = this.tdx(u.x - tu.x), dy = this.tdy(u.y - tu.y);
+    const d = Math.hypot(dx, dy) || 1;
+    if (d > uRange * 0.72) return false;             // дистанция уже безопасная
+    const back = uRange * 0.85;
+    const tx = u.x + (dx / d) * (back - d), ty = u.y + (dy / d) * (back - d);
+    if (this.terrainBlocked(tx, ty)) return false;   // упёрлись — стоим и стреляем
+    this.moveToward(u, tx, ty, dt, 4);
+    u.face = dx > 0 ? -1 : 1;                        // лицом к цели — парфянский выстрел
+    return true;
+  }
   strike(att: Unit, tu?: Unit, tb?: Bld) {
-    const isRanged = att.key === 'archer' || att.key === 'catapult';
+    const isRanged = att.key === 'archer' || att.key === 'catapult' || att.key === 'horsearcher' || att.key === 'musketeer' || att.key === 'falconet';
+    const isGun = att.key === 'musketeer' || att.key === 'falconet';
     const isCata = att.key === 'catapult';
     // удар по ИИ в мирное время = игрок сам начинает войну (волки не в счёт)
     if (att.owner === 'player' && !this.atWar) {
@@ -5663,7 +6232,7 @@ export class Game {
     // боевой клич (редко, чтобы не трещало) / вой волка
     if (att.key === 'wolf') { if (Math.random() < 0.08) this.sound.wolf(); }
     else if (att.owner === 'player' && (tu || tb) && Math.random() < 0.12) this.sound.voice(att.key, 'attack');
-    att.cd = isCata ? 3.2 : att.key === 'archer' ? 1.35 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
+    att.cd = isCata ? 3.2 : att.key === 'ram' ? 2.2 : att.key === 'musketeer' ? 3.0 : att.key === 'falconet' ? 4.2 : att.key === 'archer' ? 1.35 : att.key === 'horsearcher' ? 1.5 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
     att.atkAnim = 1;
     const variance = rand(0.85, 1.15);
     let dmg = att.atk * variance;
@@ -5671,17 +6240,24 @@ export class Game {
     if (att.owner === 'enemy' && att.key !== 'villager') dmg *= this.morale;
     // типы урона: камень-ножницы-бумага против юнитов
     if (tu) dmg *= dmgMult(att.key, tu.key);
+    if (tu?.key === 'ram' && dmgType(att.key) === 'pierce') dmg *= 0.4; // обитый кожей навес — стрелы вязнут
     if (isCata && tb) dmg *= 1.7; // катапульта особенно разрушительна для зданий
+    if (att.key === 'falconet' && tb) dmg *= 0.6; // фальконет — против строя, не стен
+    if (att.key === 'ram' && tb) dmg *= (tb.key === 'wall' || tb.key === 'gate') ? 3 : 1.5; // таран: стены и ворота
     if (isRanged) {
       const tx = tu ? tu.x : tb ? tb.x : att.tx, ty = tu ? tu.y : tb ? tb.y : att.ty;
-      const dx = tx - att.x, dy = ty - att.y, d = Math.max(1, Math.hypot(dx, dy));
-      const sp = isCata ? 300 : 420;
-      this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind: isCata ? 'rock' : 'arrow', srcU: att.id });
+      const dx = this.tdx(tx - att.x), dy = this.tdy(ty - att.y), d = Math.max(1, Math.hypot(dx, dy));
+      const sp = isCata ? 300 : att.key === 'falconet' ? 520 : att.key === 'musketeer' ? 900 : 420;
+      const kind: Proj['kind'] = isCata ? 'rock' : att.key === 'falconet' ? 'ball' : att.key === 'musketeer' ? 'shot' : 'arrow';
+      this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : att.key === 'horsearcher' ? 26 : att.key === 'falconet' ? 12 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind, srcU: att.id });
+      if (isGun) { // вспышка и дым у дула
+        this.sound.boom(); this.burst(att.x + (dx / d) * 14, att.y - 12, att.key === 'falconet' ? 10 : 4, ['#e5e7eb', '#9ca3af', '#fde68a'], 40, 0.7);
+        if (att.key === 'falconet') this.trauma = Math.min(1, this.trauma + 0.05);
+      }
       if (isCata) { this.sound.boom(); this.trauma = Math.min(1, this.trauma + 0.12); this.burst(att.x, att.y - 26, 8, ['#a8a29e', '#78716c'], 120, 0.5); }
       else { this.sound.arrow(att); this.spark(att.x, att.y - 14, '#fef3c7'); }
     } else {
-      // копейщик бьёт конницу с бонусом
-      if (att.key === 'spearman' && tu && (tu.key === 'knight' || tu.key === 'cavalry')) dmg *= 1.8;
+      // контры уже применены единой таблицей dmgMult (без дубля ×1.8 у копейщика)
       if (tu) this.damageUnit(tu, dmg, att);
       if (tb) this.damageBld(tb, dmg, att.owner);
       this.sound.sword(att);
@@ -5755,7 +6331,7 @@ export class Game {
       const hpBoost = killer.maxHp * 0.10;
       killer.maxHp += hpBoost;
       killer.hp = Math.min(killer.maxHp, killer.hp + hpBoost * 1.5);
-      this.floater(killer.x, killer.y - 34, `⭐ Уровень ${level + 1}!`, '#fde047', 16, true);
+      this.floater(killer.x, killer.y - 34, `{i:star} Уровень ${level + 1}!`, '#fde047', 16, true);
       this.burst(killer.x, killer.y - 10, 16, ['#fde047', '#facc15', '#fff'], 110, 0.9);
       this.sound.quest();
     }
@@ -5780,7 +6356,7 @@ export class Game {
       this.kills++;
       this.score += SCORE.kill;
       this.res.gold += 8;
-      this.floater(t.x, t.y - 34, `+${SCORE.kill} ⚔️ +8🪙`, "#fde047", 15, true);
+      this.floater(t.x, t.y - 34, `+${SCORE.kill} {i:swords} +8{i:gold}`, "#fde047", 15, true);
       this.trauma = Math.min(1, this.trauma + 0.08);
       if (killer) this.gainXp(killer, t);
       this.checkQuests();
@@ -5793,14 +6369,14 @@ export class Game {
         this.wolvesSlain++;
         this.score += SCORE.wolfKill;
         this.res.food += 35;
-        this.floater(t.x, t.y - 34, `+${SCORE.wolfKill} 🐺 +35🍖`, '#a3e635', 15, true);
+        this.floater(t.x, t.y - 34, `+${SCORE.wolfKill} {i:wolf} +35{i:food}`, '#a3e635', 15, true);
       } else {
         // скот/дичь — еда
         const food = t.key === 'cow' ? 90 : t.key === 'deer' ? 55 : 45;
         this.res.food += food;
         this.score += 15;
         this.burst(t.x, t.y - 8, 14, ['#fca5a5', '#fb7185', '#fff'], 100, 0.7);
-        this.floater(t.x, t.y - 34, `+${food}🍖`, '#a3e635', 15, true);
+        this.floater(t.x, t.y - 34, `+${food}{i:food}`, '#a3e635', 15, true);
       }
       this.checkQuests();
     }
@@ -5815,14 +6391,27 @@ export class Game {
     this.trauma = Math.min(1, this.trauma + (b.key === 'towncenter' ? 1 : 0.55));
     this.burst(b.x, b.y - 20, 46, ['#f59e0b', '#78716c', '#44403c', '#fde68a'], 220, 1.1);
     this.burst(b.x, b.y - 30, 20, ['#ef4444', '#f97316'], 160, 0.9);
-    this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '💥 ХАНСКАЯ СТАВКА УНИЧТОЖЕНА!' : `💥 ${BUILDING_DEFS[b.key].name} разрушен(о)!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
+    this.floater(b.x, b.y - 70, b.key === 'towncenter' ? '{i:explosion} ХАНСКАЯ СТАВКА УНИЧТОЖЕНА!' : `{i:explosion} ${BUILDING_DEFS[b.key].name} разрушен(о)!`, '#f87171', b.key === 'towncenter' ? 24 : 17);
+    if (b.bandit && byOwner !== 'neutral') {
+      // зачистка стоянки: клад. Кто снёс юрту — того и добыча. Остатки шайки разбегаются.
+      this.banditsCleared++;
+      const roll = Math.random();
+      const res = byOwner === 'player' ? this.res : this.eres;
+      let what: string;
+      if (roll < 0.45) { const g = 120 + Math.floor(Math.random() * 100); res.gold += g; what = `+${g} {i:gold} клад`; }
+      else if (roll < 0.75) { const fd = 150 + Math.floor(Math.random() * 120); res.food += fd; what = `+${fd} {i:food} угнанный скот`; }
+      else if (roll < 0.9 && byOwner === 'player') { this.relicsHeld++; what = '{i:beads} реликвия из награбленного'; }
+      else { what = 'пленные шаруа освобождены'; for (let i = 0; i < 2; i++) this.addUnit('villager', byOwner, b.x + rand(-40, 40), b.y + rand(-30, 30)); }
+      for (const g of this.units) if (g.bandit && g.campId === b.id) { g.hp = 0; this.burst(g.x, g.y, 6, ['#9ca3af'], 60, 0.5); }
+      if (byOwner === 'player') { this.score += 150; this.floater(b.x, b.y - 95, what, '#fde047', 15, true); this.pushBanner('{i:skull} Стоянка зачищена', what.replace(/\{i:\w+\}/g, '').trim(), 4); }
+    }
     if (byOwner === 'player' && b.owner === 'enemy') {
       this.razed++;
       const pts = b.key === 'towncenter' ? SCORE.tc : SCORE.building;
       this.score += pts;
       this.floater(b.x, b.y - 95, `+${pts} очков`, '#fde047', 16, true);
       // добыча с руин (особенно лагерей/башен)
-      if (b.key !== 'towncenter') { const loot = 40; this.res.gold += loot; this.floater(b.x, b.y - 75, `+${loot}🪙 добыча`, '#fde047', 14, true); }
+      if (b.key !== 'towncenter') { const loot = 40; this.res.gold += loot; this.floater(b.x, b.y - 75, `+${loot}{i:gold} добыча`, '#fde047', 14, true); }
     }
     // free villagers building it
     for (const u of this.units) if (u.buildId === b.id) { u.buildId = -1; if (u.state === 'build') u.state = 'idle'; }
@@ -5833,7 +6422,7 @@ export class Game {
     for (const b of this.blds) {
       b.flash = Math.max(0, b.flash - dt * 4);
       // construction
-      if (b.done < 1) {
+      if (b.done < 1 && !this.koshBusy()) {
         const def = BUILDING_DEFS[b.key];
         let rate = b.owner === 'enemy' ? 1 / (def.buildTime * 0.8) : 1 / (def.buildTime * 2.2);
         // союз с научными племенами (ур.3) ускоряет возведение построек
@@ -5861,7 +6450,7 @@ export class Game {
               this.wonderT = this.WONDER_HOLD;
               this.atWar = true; this.casusBelli = 1.1; this.morale = 1.12;
               this.sound.ageup();
-              this.pushBanner('⭐ МАВЗОЛЕЙ ХАНА ВОЗВЕДЁН!', `Защитите монумент ${Math.round(this.WONDER_HOLD / 60)} мин — и ханство победит! Джунгары идут на штурм!`, 6);
+              this.pushBanner('{i:star} МАВЗОЛЕЙ ХАНА ВОЗВЕДЁН!', `Защитите монумент ${Math.round(this.WONDER_HOLD / 60)} мин — и ханство победит! Джунгары идут на штурм!`, 6);
               this.waveT = Math.min(this.waveT, 10);
               this.trauma = Math.min(1, this.trauma + 0.3);
             }
@@ -5901,7 +6490,7 @@ export class Game {
       }
       // research progress
       if (b.research && b.owner === 'player') {
-        b.research.t += dt * this.researchMult();
+        if (!this.koshBusy()) b.research.t += dt * this.researchMult();
         if (Math.random() < dt * 2) this.spark(b.x + rand(-16, 16), b.y - 36, '#93c5fd');
         if (b.research.t >= b.research.total) { const id = b.research.id; b.research = null; this.applyTech(id); }
       }
@@ -5909,7 +6498,7 @@ export class Game {
       if (b.queue.length) {
         const q = b.queue[0];
         // resource trickle for enemy handled in AI; player pop check
-        q.t += dt;
+        if (!this.koshBusy()) q.t += dt;
         if (Math.random() < dt * 3) this.spark(b.x + rand(-20, 20), b.y - 30, '#fde68a');
         if (q.t >= q.total) {
           b.queue.shift();
@@ -5953,7 +6542,7 @@ export class Game {
         const dmgUp = b.owner === 'player' && up ? 1 + up.dmg * 0.35 : 1;
         const archers = b.owner === 'player' && up ? up.archers : 0; // лучники: до 2 доп. залпов
         b.cd -= dt;
-        const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1) * rangeUp;
+        const tRange = atk.range * (b.owner === 'player' ? this.rangeMult(b.key, b.owner) : 1) * rangeUp * this.weatherRangeMult();
         if (b.cd <= 0) {
           let best: Unit | null = null; let bd = tRange * tRange;
           for (const e of this.units) {
@@ -6004,17 +6593,17 @@ export class Game {
     for (let i = this.projs.length - 1; i >= 0; i--) {
       const p = this.projs[i];
       p.life -= dt;
-      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.x = wrapW(p.x + p.vx * dt); p.y = wrapH(p.y + p.vy * dt);
       let hit = false;
       const tu = p.targetU >= 0 ? this.units.find(u => u.id === p.targetU) : undefined;
       if (tu && tu.hp > 0) {
-        if (dist2(p.x, p.y, tu.x, tu.y - 10) < 20 * 20) {
+        if (this.tdx(tu.x - p.x) ** 2 + this.tdy(tu.y - 10 - p.y) ** 2 < 20 * 20) {
           const shooter = p.srcU != null ? this.units.find(u => u.id === p.srcU) : undefined;
           this.damageUnit(tu, p.dmg, shooter);
           // credit kills to owner side loosely for score if player-owned arrow
           if (tu.hp <= 0 && p.owner === 'player') {
-            if (tu.owner === 'enemy') { this.kills++; this.score += SCORE.kill; this.res.gold += 8; this.floater(tu.x, tu.y - 30, `+${SCORE.kill} 🏹`, '#fde047', 14, true); }
-            if (tu.owner === 'neutral') { this.wolvesSlain++; this.score += SCORE.wolfKill; this.res.food += 35; this.floater(tu.x, tu.y - 30, `+${SCORE.wolfKill} 🐺`, '#a3e635', 14, true); }
+            if (tu.owner === 'enemy') { this.kills++; this.score += SCORE.kill; this.res.gold += 8; this.floater(tu.x, tu.y - 30, `+${SCORE.kill} {i:bow}`, '#fde047', 14, true); }
+            if (tu.owner === 'neutral') { this.wolvesSlain++; this.score += SCORE.wolfKill; this.res.food += 35; this.floater(tu.x, tu.y - 30, `+${SCORE.wolfKill} {i:wolf}`, '#a3e635', 14, true); }
             if (shooter) this.gainXp(shooter, tu);
           }
           hit = true;
@@ -6023,11 +6612,23 @@ export class Game {
         const tb = p.targetB >= 0 ? this.blds.find(b => b.id === p.targetB) : undefined;
         if (tb && tb.hp > 0) {
           const h = tb.size / 2;
-          if (Math.abs(p.x - tb.x) < h && Math.abs(p.y - (tb.y - 20)) < h + 20) { this.damageBld(tb, p.dmg, p.owner); hit = true; }
-        } else if (Math.hypot(p.x - p.tx, p.y - p.ty) < 14) hit = true;
+          if (Math.abs(this.tdx(p.x - tb.x)) < h && Math.abs(this.tdy(p.y - (tb.y - 20))) < h + 20) { this.damageBld(tb, p.dmg, p.owner); hit = true; }
+        } else if (Math.hypot(this.tdx(p.x - p.tx), this.tdy(p.y - p.ty)) < 14) hit = true;
       }
       if (hit || p.life <= 0) {
-        this.spark(p.x, p.y, p.kind === 'rock' ? '#d6d3d1' : '#fde68a');
+        if (p.kind === 'ball') {
+          // ядро: урон по площади 55 px всем ЧУЖИМ вокруг точки падения (кроме уже задетой цели)
+          const shooter = p.srcU != null ? this.units.find(u => u.id === p.srcU) : undefined;
+          for (const v of this.units) {
+            if (v.hp <= 0 || v.owner === p.owner || v.id === p.targetU || v.hidden) continue;
+            if (v.owner === 'neutral' && !v.bandit && !(v.tribe && v.aggro) && v.key !== 'wolf') continue;
+            const d2 = this.tdx(v.x - p.x) ** 2 + this.tdy(v.y - p.y) ** 2;
+            if (d2 < 55 * 55) this.damageUnit(v, p.dmg * (0.75 - Math.sqrt(d2) / 55 * 0.35), shooter);
+          }
+          this.burst(p.x, p.y, 14, ['#78716c', '#a8a29e', '#fbbf24'], 110, 0.6);
+          this.trauma = Math.min(1, this.trauma + 0.04);
+        }
+        this.spark(p.x, p.y, p.kind === 'rock' ? '#d6d3d1' : p.kind === 'shot' ? '#fef3c7' : '#fde68a');
         this.projs.splice(i, 1);
       }
     }
@@ -6043,6 +6644,12 @@ export class Game {
     if (this.wave >= 2) for (let i = 0; i < Math.ceil(n * 0.5); i++) comp.push('spearman');
     if ((this.eage >= 1 && this.wave >= 3) || this.wave >= 5) for (let i = 0; i < Math.ceil(n * 0.4); i++) comp.push('knight');
     if ((this.eage >= 1 && this.wave >= 5) || this.wave >= 8) for (let i = 0; i < Math.ceil(n * 0.35); i++) comp.push('cavalry');
+    if (this.eage >= 2 && this.wave >= 7) for (let i = 0; i < Math.ceil(n * 0.2); i++) comp.push('horsearcher');
+    // порох (п.27): в Веке Абылай хана джунгары приводят мылтықшы, а каждую 3-ю волну — фальконет
+    if (this.eage >= 3) { for (let i = 0; i < Math.ceil(n * 0.25); i++) comp.push('musketeer'); if (this.wave % 3 === 0) comp.push('falconet'); }
+    // штурм (п.26): если у игрока есть стены — с 4-й волны идут тараны, чтобы не упираться
+    const walls = this.blds.filter(b => b.owner === 'player' && (b.key === 'wall' || b.key === 'gate') && b.done >= 1).length;
+    if (walls >= 6 && this.wave >= 4) for (let i = 0; i < 1 + Math.floor(walls / 14); i++) comp.push('ram');
     // босс-отряд с катапультами каждую 6-ю волну
     if (this.wave >= 6 && this.wave % 6 === 0) { for (let i = 0; i < 2 + Math.floor(this.wave / 6); i++) comp.push('catapult'); }
     return comp;
@@ -6050,7 +6657,7 @@ export class Game {
   waveSummary(comp: UnitKey[]): string {
     const cnt: Record<string, number> = {};
     for (const k of comp) cnt[k] = (cnt[k] || 0) + 1;
-    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'catapult'];
+    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'musketeer', 'ram', 'falconet', 'catapult'];
     // имена с учётом ступени врага — игрок сразу видит, что идёт тяжёлая пехота
     return order.filter(k => cnt[k]).map(k => `${cnt[k]}×${this.unitName(k, 'enemy')}`).join(', ');
   }
@@ -6122,7 +6729,7 @@ export class Game {
       if (this.tributeT <= 0) {
         this.tributeT = 0;
         this.res.gold += this.tributeGold;
-        this.floater(this.cam.x, this.cam.y - 110, `💰 Дань: +${this.tributeGold}🪙`, '#fde047', 16, true);
+        this.floater(this.cam.x, this.cam.y - 110, `{i:moneybag} Дань: +${this.tributeGold}{i:gold}`, '#fde047', 16, true);
         this.sound.coin();
         // унижение данью копит неприязнь (повод для будущей войны)
         this.grievance = Math.min(100, this.grievance + 6);
@@ -6183,7 +6790,7 @@ export class Game {
     this.sound.horn();
     const just = cb >= 0.85;
     this.pushBanner(
-      just ? '⚔️ ВОЙНА ОБЪЯВЛЕНА!' : '⚠️ ВЕРОЛОМНОЕ НАПАДЕНИЕ!',
+      just ? '{i:swords} ВОЙНА ОБЪЯВЛЕНА!' : '{i:warn} ВЕРОЛОМНОЕ НАПАДЕНИЕ!',
       `Джунгары напали: ${reason}. ${just ? 'Их армия сражается с полным боевым духом.' : 'Повод надуман — их войска неуверенны (−боевая мощь).'}`,
       5
     );
@@ -6197,12 +6804,12 @@ export class Game {
   bribe() {
     if (this.over || this.atWar) return false;
     const cost = 75;
-    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙`, '#f87171', 16); this.sound.error(); return false; }
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 16); this.sound.error(); return false; }
     this.res.gold -= cost;
     this.grievance = Math.max(0, this.grievance - 28);
     this.casusBelli = Math.max(0, this.casusBelli - 0.2);
     this.sound.coin();
-    this.pushBanner('🤝 Дары отправлены', 'Хунтайджи доволен — неприязнь снижена, война отсрочена', 3);
+    this.pushBanner('{i:handshake} Дары отправлены', 'Хунтайджи доволен — неприязнь снижена, война отсрочена', 3);
     this.pushHud();
     return true;
   }
@@ -6213,12 +6820,12 @@ export class Game {
     if (this.tradeRoute) { this.floater(this.cam.x, this.cam.y - 100, 'Торговля уже идёт', '#94a3b8', 14); return false; }
     if (!this.marketCount()) { this.floater(this.cam.x, this.cam.y - 100, 'Нужен Базар для торговли!', '#f87171', 15); this.sound.error(); return false; }
     const cost = 60;
-    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙 на караван`, '#f87171', 15); this.sound.error(); return false; }
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold} на караван`, '#f87171', 15); this.sound.error(); return false; }
     this.res.gold -= cost;
     this.tradeRoute = true; this.tradeT = 0;
     this.grievance = Math.max(0, this.grievance - 10);
     this.sound.coin();
-    this.pushBanner('🐪 Торговый договор заключён', 'Караваны ходят между городами: пассивное золото обеим сторонам и рост доверия', 4);
+    this.pushBanner('{i:camel} Торговый договор заключён', 'Караваны ходят между городами: пассивное золото обеим сторонам и рост доверия', 4);
     this.pushHud();
     return true;
   }
@@ -6228,12 +6835,12 @@ export class Game {
     if (this.over || this.atWar) { this.floater(this.cam.x, this.cam.y - 100, 'Сначала заключите мир', '#f87171', 15); this.sound.error(); return false; }
     if (this.napT > 0) { this.floater(this.cam.x, this.cam.y - 100, `Пакт действует ещё ${Math.ceil(this.napT)}с`, '#94a3b8', 14); return false; }
     const cost = 120;
-    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙 на посольство`, '#f87171', 15); this.sound.error(); return false; }
+    if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold} на посольство`, '#f87171', 15); this.sound.error(); return false; }
     this.res.gold -= cost;
     this.napT = 120; // 2 минуты гарантированного мира
     this.grievance = Math.max(0, this.grievance - 6);
     this.sound.quest();
-    this.pushBanner('📜 Пакт о ненападении подписан', 'Джунгары не нападут ~2 минуты. Если хунтайджи нарушит слово — у вас будет полное право на войну', 4.5);
+    this.pushBanner('{i:scroll} Пакт о ненападении подписан', 'Джунгары не нападут ~2 минуты. Если хунтайджи нарушит слово — у вас будет полное право на войну', 4.5);
     this.pushHud();
     return true;
   }
@@ -6247,7 +6854,7 @@ export class Game {
     this.grievance = Math.min(100, this.grievance + 12);
     this.casusBelli = Math.min(this.casusBelli, 0.5);
     this.sound.ack('soldier');
-    this.pushBanner('📢 ДЖУНГАРЫ ОСУЖДЕНЫ', 'Ваше порицание озвучено на всю степь: теперь у хунтайджи нет «чистого повода» для войны (его атака будет вероломной → низкий боевой дух), но он раздражён', 4.5);
+    this.pushBanner('{i:megaphone} ДЖУНГАРЫ ОСУЖДЕНЫ', 'Ваше порицание озвучено на всю степь: теперь у хунтайджи нет «чистого повода» для войны (его атака будет вероломной → низкий боевой дух), но он раздражён', 4.5);
     this.pushHud();
     return true;
   }
@@ -6264,7 +6871,7 @@ export class Game {
     this.grievance = Math.min(100, this.grievance + 14);
     this.casusBelli = Math.max(this.casusBelli, 0.4);
     this.sound.coin();
-    this.pushBanner('💰 Дань получена', `Джунгары выплачивают +${immediate}🪙 сразу и будут платить ещё. Но унижение не забыто — копится обида`, 4);
+    this.pushBanner('{i:moneybag} Дань получена', `Джунгары выплачивают +${immediate}{i:gold} сразу и будут платить ещё. Но унижение не забыто — копится обида`, 4);
     this.pushHud();
     return true;
   }
@@ -6273,7 +6880,7 @@ export class Game {
   sueForPeace(auto = false) {
     if (this.over || !this.atWar) return false;
     const cost = auto ? 0 : 120;
-    if (!auto && this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} 🪙 на переговоры`, '#f87171', 16); this.sound.error(); return false; }
+    if (!auto && this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold} на переговоры`, '#f87171', 16); this.sound.error(); return false; }
     if (!auto) this.res.gold -= cost;
     this.atWar = false;
     this.peaceT = 0;
@@ -6284,7 +6891,7 @@ export class Game {
     // мир обнуляет взаимные претензии: осуждение снимается, пакт/дань/торговля сброшены
     this.condemned = false; this.napT = 0; this.tributeT = 0; this.tradeRoute = false;
     this.sound.quest();
-    this.pushBanner('🕊️ Мир заключён', auto ? 'Хунтайджи сам запросил мир — война была несправедливой' : 'Переговоры успешны — у вас снова мир', 4);
+    this.pushBanner('{i:dove} Мир заключён', auto ? 'Хунтайджи сам запросил мир — война была несправедливой' : 'Переговоры успешны — у вас снова мир', 4);
     // вражеские войска возвращаются к обороне
     for (const u of this.units) if (u.owner === 'enemy' && u.key !== 'villager') { u.state = 'idle'; u.targetU = -1; u.targetB = -1; }
     this.waveT = DIFF[this.difficulty].waveInterval;
@@ -6317,8 +6924,8 @@ export class Game {
       u.tx = (ptc ? ptc.x : HOME.x) + rand(-80, 80); u.ty = (ptc ? ptc.y : HOME.y) + rand(-80, 80);
     }
     this.sound.horn();
-    const boss = this.wave % 6 === 0 && this.wave >= 6 ? ' 💥 Идут ОСАДНЫЕ ОРУДИЯ!' : '';
-    this.pushBanner(`⚔️ Волна ${this.wave} — набег!`, `${this.waveSummary(comp)}${boss}`, 3.4);
+    const boss = this.wave % 6 === 0 && this.wave >= 6 ? ' {i:explosion} Идут ОСАДНЫЕ ОРУДИЯ!' : '';
+    this.pushBanner(`{i:swords} Волна ${this.wave} — набег!`, `${this.waveSummary(comp)}${boss}`, 3.4);
     this.trauma = Math.min(1, this.trauma + 0.15);
   }
   // предупреждение о составе следующей волны
@@ -6327,7 +6934,7 @@ export class Game {
     const saved = this.wave; this.wave = future;
     const comp = this.waveComp();
     this.wave = saved;
-    this.pushBanner('⚠️ Набег близко!', `Волна ${future}: ${this.waveSummary(comp)}`, 3);
+    this.pushBanner('{i:warn} Набег близко!', `Волна ${future}: ${this.waveSummary(comp)}`, 3);
   }
 
   enemyAI() {
@@ -6467,7 +7074,7 @@ export class Game {
       sel, placement: this.placement, attackArmed: this.attackArmed, rallyArmed: this.rallyArmed, patrolArmed: this.patrolArmed, panMode: this.panMode, camFollow: this.camFollow,
       banner,
       quests: [
-        { id: 'wood', label: 'Нарубить 60 🪵', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
+        { id: 'wood', label: 'Нарубить 60 {i:wood}', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
         { id: 'army', label: 'Собрать 3 сарбазов', done: !!this.questsDone.army, progress: `${Math.min(3, this.soldiersTrained)}/3` },
         { id: 'rax', label: 'Построить казармы (E)', done: !!this.questsDone.rax, progress: this.barracksBuilt ? '1/1' : '0/1' },
         { id: 'wolf', label: 'Убить 4 волка', done: !!this.questsDone.wolf, progress: `${Math.min(4, this.wolvesSlain)}/4` },
@@ -6478,7 +7085,7 @@ export class Game {
       eTc: etc ? Math.max(0, Math.ceil(etc.hp)) : 0, eTcMax: etc ? etc.maxHp : 1,
       dmgFlash: this.dmgFlash,
       ageAfford: next?.cost ? this.res.food >= next.cost.food && this.res.gold >= (next.cost.gold || 0) : false,
-      ageCost: next?.cost ? `${next.cost.food}🍖${next.cost.gold ? ` ${next.cost.gold}🪙` : ''}` : 'MAX',
+      ageCost: next?.cost ? `${next.cost.food}{i:food}${next.cost.gold ? ` ${next.cost.gold}{i:gold}` : ''}` : 'MAX',
       hint: this.hint,
       ageReport: this.ageReport,
       prayerTruce: this.prayerTruce(),
@@ -6492,12 +7099,18 @@ export class Game {
       unite: { have: this.uniteCount(), need: this.UNITE_NEED,
         t: Math.floor(this.uniteT), hold: this.UNITE_HOLD },
       wisdom: Math.floor(this.wisdom), wisdomRate: Math.round(this.wisdomRate() * 10) / 10,
-      realAzan: this.settings.realAzan ? (() => {
+      era: (() => {
+        const d = this.eraDedication ? DEDICATIONS.find(x => x.id === this.eraDedication) : undefined;
+        return { state: this.eraState, heroic: this.eraHeroic, dedication: this.eraDedication,
+                 dedName: d?.name ?? '', dedIcon: d?.icon ?? '', dedDesc: d?.desc ?? '' };
+      })(),
+      // ближнее время намаза показываем ВСЕГДА (справочно), on = включена ли механика
+      realAzan: (() => {
         const nx = nextPrayer(new Date(), this.azanCity());
-        return { on: true, city: this.azanCity().name,
+        return { on: this.settings.realAzan, city: this.azanCity().name,
           next: PRAYER_NAMES[nx.key].kz, nextAt: fmtHM(nx.at), inMin: Math.round(nx.inMin),
           times: this.realPrayerSchedule() };
-      })() : null,
+      })(),
       greats: GREATS.map(g => ({ id: g.id, name: g.name, title: g.title, portrait: g.portrait,
         cost: g.cost, effect: g.effect, called: this.hasGreat(g.id),
         afford: this.wisdom >= g.cost && !this.hasGreat(g.id) })),
@@ -6515,9 +7128,19 @@ export class Game {
         return d ? { id: d.id, icon: d.icon, title: d.title, text: d.text, opts: d.opts } : null;
       })() : null,
       drought: Math.ceil(this.droughtT), plague: Math.ceil(this.plagueT),
+      weather: this.weather !== 'clear' && this.settings.weather ? { kind: this.weather, t: Math.ceil(this.weatherT), ...WEATHER_DEFS[this.weather] } : null,
       alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
       unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
-        archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
+        archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player'), horsearcher: this.unitName('horsearcher', 'player') },
+      mode: this.mode,
+      terrCount: this.terrCount, terrLand: this.terrLand, rebelCount: this.rebelCount,
+      cityTier: this.cityTier, cityName: ['Аул', 'Қала', 'Астана'][this.cityTier],
+      pasture: this.mode === 'nomad' ? Math.round((1 - (this.sites[this.siteI]?.dep ?? 0)) * 100) : 100,
+      migrating: Math.max(0, Math.ceil(this.migrating)),
+      sites: this.mode === 'nomad'
+        ? this.sites.map((s, i) => ({ i, tag: s.tag, dep: Math.round(s.dep * 100), cur: i === this.siteI,
+            dist: Math.round(Math.hypot(s.x - (this.sites[this.siteI]?.x ?? s.x), s.y - (this.sites[this.siteI]?.y ?? s.y)) / 10) * 10 }))
+        : undefined,
       day: { num: this.dayNum, name: this.dayName(), icon: this.dayIcon(), phase: this.dayPhase(),
         night: this.isNight(),
         resting: this.units.filter(u => u.owner === 'player' && u.key === 'villager' && u.resting).length,
@@ -6572,9 +7195,9 @@ export class Game {
       if (!b) { this.selBld = -1; return { kind: 'none' }; }
       const costTxt = (c: { wood: number; food: number; gold: number }) => {
         const p: string[] = [];
-        if (c.wood) p.push(`${c.wood}🪵`);
-        if (c.food) p.push(`${c.food}🍖`);
-        if (c.gold) p.push(`${c.gold}🪙`);
+        if (c.wood) p.push(`${c.wood}{i:wood}`);
+        if (c.food) p.push(`${c.food}{i:food}`);
+        if (c.gold) p.push(`${c.gold}{i:gold}`);
         return p.join(' ');
       };
       return {
@@ -6607,7 +7230,7 @@ export class Game {
     }
     return {
       kind: 'units', count: us.length,
-      types: [...map.entries()].map(([key, e]) => ({ key, label: this.unitName(key as UnitKey, 'player'), count: e.count, level: e.level, kills: e.kills })),
+      types: [...map.entries()].map(([key, e]) => ({ key, label: this.unitName(key as UnitKey, 'player'), count: e.count, level: e.level, kills: e.kills, counter: counterText(key as UnitKey) || undefined })),
       avgHp: hp, maxHp: max, maxLevel, totalKills, stance: this.selStance,
       canGather: us.some(u => u.key === 'villager'),
     };
@@ -6755,6 +7378,31 @@ export class Game {
         ctx.drawImage(tile, hx - TCX, hy - TCY - up);
         // обрывы высот тоже прячем в неосвещённых областях (их грани несут «сетку» вверх)
         if (lit) drawCliffsHex(hx, hy, up, cls, q, r);
+        // границы режима «оседлый»: тонировка гекса + кант по передним рёбрам
+        if (this.mode === 'settled' && lit && this.terr.size) {
+          const ow = this.terr.get(q + ',' + r);
+          if (ow) {
+            const col = ow === 1 ? '246,212,124' : '248,113,113';
+            const ly = this.loyal.get(q + ',' + r) ?? (ow === 1 ? 1 : -1);
+            const rebel = Math.abs(ly) < 0.5;   // спорный гекс: серый налёт, мерцает тем сильнее, чем ближе к переходу
+            ctx.fillStyle = rebel
+              ? `rgba(150,150,160,${(0.16 + (0.5 - Math.abs(ly)) * 0.3 * (0.6 + 0.4 * Math.sin(this.time * 4 + q))).toFixed(3)})`
+              : `rgba(${col},0.10)`;
+            ctx.beginPath();
+            ctx.moveTo(hx + HEX_PTS[0][0], hy - up + HEX_PTS[0][1]);
+            for (let i = 1; i < 6; i++) ctx.lineTo(hx + HEX_PTS[i][0], hy - up + HEX_PTS[i][1]);
+            ctx.closePath(); ctx.fill();
+            const nb: [number, number, number, number][] = [[0, 1, q + 1, r], [1, 2, q, r + 1], [5, 0, q + 1, r - 1]];
+            ctx.strokeStyle = `rgba(${col},0.55)`; ctx.lineWidth = 2;
+            for (const [a, b2, nq, nr] of nb) {
+              if (this.terr.get(nq + ',' + nr) === ow) continue;
+              ctx.beginPath();
+              ctx.moveTo(hx + HEX_PTS[a][0], hy - up + HEX_PTS[a][1]);
+              ctx.lineTo(hx + HEX_PTS[b2][0], hy - up + HEX_PTS[b2][1]);
+              ctx.stroke();
+            }
+          }
+        }
       }
     }
     // upAt для объектов (деревья/юниты/здания/декор) — высота гекса под мировой точкой
@@ -6899,9 +7547,10 @@ export class Game {
     for (const p of this.projs) {
       const [px, py] = toIso(p.x, p.y);
       const [px2, py2] = toIso(p.x - p.vx * 0.03, p.y - p.vy * 0.03);
-      ctx.strokeStyle = p.kind === 'rock' ? '#d6d3d1' : '#fef3c7'; ctx.lineWidth = p.kind === 'rock' ? 4 : 2.5;
+      ctx.strokeStyle = p.kind === 'rock' ? '#d6d3d1' : p.kind === 'shot' ? '#fde68a' : '#fef3c7'; ctx.lineWidth = p.kind === 'rock' ? 4 : p.kind === 'shot' ? 1.5 : 2.5;
       ctx.beginPath(); ctx.moveTo(px2, py2 - 16); ctx.lineTo(px, py - 16); ctx.stroke();
       if (p.kind === 'rock') { ctx.fillStyle = '#a8a29e'; ctx.beginPath(); ctx.arc(px, py - 16, 4, 0, 7); ctx.fill(); }
+      else if (p.kind === 'ball') { ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(px, py - 16, 3.2, 0, 7); ctx.fill(); }
     }
     // ── particles ──
     for (const p of this.parts) {
@@ -6928,8 +7577,9 @@ export class Game {
       ctx.globalAlpha = Math.min(1, a * 2);
       ctx.font = `800 ${f.size}px Inter, sans-serif`;
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-      ctx.strokeText(f.text, fx, fy - 30 + (1 - a) * 20);
-      ctx.fillStyle = f.color; ctx.fillText(f.text, fx, fy - 30 + (1 - a) * 20);
+      const fyv = fy - 30 + (1 - a) * 20;
+      strokeRich(ctx, f.text, fx, fyv, f.size);
+      drawRich(ctx, f.text, fx, fyv, f.color, f.size);
     }
     ctx.globalAlpha = 1;
     // ── туман войны (поверх мира, в той же iso-трансформации) ──
@@ -7040,6 +7690,7 @@ export class Game {
       }
     }
 
+    this.drawWeather(ctx);
     this.drawNodePlate(ctx);
     this.drawEdgeArrows(ctx);
     this.drawMinimap(ctx);
@@ -7219,7 +7870,7 @@ export class Game {
     const NAME: Record<string, string> = {
       wood: 'Лес', gold: 'Золотая жила', food: 'Ягодник', fish: 'Рыбное место',
     };
-    const ICON: Record<string, string> = { wood: '🪵', gold: '🪙', food: '🍖', fish: '🐟' };
+    const ICON: Record<string, string> = { wood: '{i:wood}', gold: '{i:gold}', food: '{i:food}', fish: '{i:fish}' };
     const COLOR: Record<string, string> = {
       wood: '#a3e635', gold: '#facc15', food: '#fb7185', fish: '#7dd3fc',
     };
@@ -7234,9 +7885,9 @@ export class Game {
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.font = '800 13px Inter, sans-serif';
-    const w1 = ctx.measureText(title).width;
+    const w1 = measureRich(ctx, title, 13);
     ctx.font = '700 12px Inter, sans-serif';
-    const w2 = ctx.measureText(sub).width;
+    const w2 = measureRich(ctx, sub, 12);
     const pw = Math.max(w1, w2) + 26, ph = 40;
     const px = clamp(sx - pw / 2, 6, this.vw - pw - 6);
     const py = clamp(sy - ph, 6, this.vh - ph - 6);
@@ -7254,11 +7905,9 @@ export class Game {
 
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.font = '800 13px Inter, sans-serif';
-    ctx.fillStyle = '#f6e7c1';
-    ctx.fillText(title, px + 8, py + 17);
+    drawRich(ctx, title, px + 8, py + 17, '#f6e7c1', 13);
     ctx.font = '700 12px Inter, sans-serif';
-    ctx.fillStyle = COLOR[n.kind] ?? '#f6d47c';
-    ctx.fillText(sub, px + 8, py + 32);
+    drawRich(ctx, sub, px + 8, py + 32, COLOR[n.kind] ?? '#f6d47c', 12);
     // мини-полоска остатка внутри плашки
     const s = clamp(n.amount / n.max, 0, 1);
     ctx.fillStyle = 'rgba(255,255,255,0.16)';
@@ -7302,7 +7951,7 @@ export class Game {
     ctx.fillStyle = '#b45309'; ctx.fillRect(ix - 8, y - 8, 16, 5);
     ctx.fillStyle = '#fde047'; ctx.fillRect(ix - 2, y - 7, 4, 4); // замок
     ctx.font = '11px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('📿', ix, y - 14);
+    drawIcon(ctx, 'beads', ix - 6, y - 20, 12, '#fde047');
   }
 
   drawWallGate(b: Bld, ix: number, iy: number, selected: boolean) {
@@ -7467,8 +8116,7 @@ export class Game {
     // сияющая звезда на вершине
     ctx.save();
     ctx.globalAlpha = 0.55 + glow * 0.45;
-    ctx.font = '22px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('⭐', ix, topY - 8);
+    drawIcon(ctx, 'star', ix - 11, topY - 19, 22, '#fde68a');
     ctx.restore();
     if (selected) diamondRingHalf(ctx, ix, iy, S * 1.03, S * 1.03 / 2, '#f6d47c', false);
 
@@ -7667,6 +8315,15 @@ export class Game {
     // вспышка урона — красный спрайт, иначе обычный
     const img: HTMLImageElement | HTMLCanvasElement = (b.flash > 0.05 && sp.flash) ? sp.flash : sp.img;
     ctx.drawImage(img, dx, dy, w, h);
+    if (b.bandit) {
+      // тёмная юрта: затемнение поверх спрайта + чёрный бунчук на шесте
+      ctx.save(); ctx.globalCompositeOperation = 'source-atop'; ctx.fillStyle = 'rgba(20,16,24,0.55)'; ctx.fillRect(dx, dy, w, h); ctx.restore();
+      const px0 = ix + S * 0.35, py0 = iy - S * 0.1;
+      ctx.strokeStyle = '#3f2a14'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px0, py0 - 46); ctx.stroke();
+      const fl = Math.sin(this.time * 5 + b.id) * 3;
+      ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.moveTo(px0, py0 - 46); ctx.lineTo(px0 + 16, py0 - 41 + fl); ctx.lineTo(px0, py0 - 34); ctx.closePath(); ctx.fill();
+      drawIcon(ctx, 'skull', px0 - 6, py0 - 62, 12, '#e5e7eb');
+    }
     // ночные факелы по бокам от входа (сам свет — в drawNightLight)
     this.drawBldTorches(b, ix, iy, S);
     // ближняя половина кольца выделения — ПОВЕРХ здания (передняя кромка фундамента)
@@ -7713,7 +8370,7 @@ export class Game {
       ctx.fillStyle = '#e9d5ff';
       ctx.font = '700 9px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('☾', ix, y - 2);
+      drawIcon(ctx, 'crescent', ix - 5, y - 11, 10, '#e9d5ff');
     }
   }
 
@@ -7817,10 +8474,11 @@ export class Game {
       let col = '#7cb7ff';
       if (b.owner !== 'player') {
         if (b.tribe) { const nid = this.tribeNationOf(b); col = nid ? (NATION_BY_ID[nid]?.color ?? '#e0b050') : '#e0b050'; }
+        else if (b.bandit) col = '#1f2937';   // тёмная юрта разбойников — чёрная метка
         else col = this.rivalMet ? '#f87171' : '#5b4a4a';
       }
       ctx.fillStyle = col;
-      const s = b.key === 'towncenter' ? 6 : b.tribe ? 5 : 3.4;
+      const s = b.key === 'towncenter' ? 6 : b.tribe || b.bandit ? 5 : 3.4;
       const [mx, my] = toMap(b.x, b.y);
       ctx.fillRect(mx - s / 2, my - s / 2, s, s);
     }
@@ -7831,7 +8489,7 @@ export class Game {
       if (u.owner === 'player') { ctx.fillStyle = '#eaf4ff'; ctx.fillRect(mx - 1.4, my - 1.4, 2.8, 2.8); }
       else {
         if (!this.canSeeEnemy(u.x, u.y)) continue;
-        ctx.fillStyle = u.tribe ? '#e0b050' : u.owner === 'neutral' ? '#eab308' : '#fecaca';
+        ctx.fillStyle = u.tribe ? '#e0b050' : u.bandit ? '#374151' : u.owner === 'neutral' ? '#eab308' : '#fecaca';
         ctx.fillRect(mx - 1.2, my - 1.2, 2.4, 2.4);
       }
     }
@@ -7860,7 +8518,9 @@ export class Game {
     ctx.restore();
     ctx.restore();
     ctx.fillStyle = 'rgba(253,230,138,0.9)'; ctx.font = '700 9px Inter';
-    ctx.textAlign = 'left'; ctx.fillText('🗺 КАРТА МИРА — клик/перетаскивание для перехода', x - 2, y - 8);
+    ctx.textAlign = 'left';
+    drawIcon(ctx, 'map', x - 2, y - 16, 10, 'rgba(253,230,138,0.9)');
+    ctx.fillText('КАРТА МИРА — клик/перетаскивание для перехода', x + 11, y - 8);
   }
 }
 

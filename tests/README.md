@@ -6,6 +6,14 @@
 ```bash
 node tests/shift-test.mjs      # посменная работа, сутки, усталость (1.0.068)
 node tests/rest-check.cjs      # габариты спрайтов сценок отдыха (1.0.068)
+node tests/hotkeys-test.mjs    # горячие клавиши без дублей, Home/N (1.0.101)
+node tests/weather-test.mjs    # погода степи: эффекты, сейв, честность (1.0.102)
+node tests/icons-scale.mjs     # масштаб иконок: порог 12px, inline-block, обводка (1.0.103)
+node tests/loyalty-sim.mjs     # лояльность границ: канат давлений, сейв (1.0.104)
+node tests/horsearcher-sim.mjs # атты-мерген: контры, кайт, подключение (1.0.105)
+node tests/bandits-sim.mjs     # лагеря бандитов: набеги, лут, респавн, сейв (1.0.106)
+node tests/siege-sim.mjs       # таран: стены/ворота, стойкость к стрелам, ИИ (1.0.107)
+node tests/gunpowder-sim.mjs   # порох: мылтықшы без брони, фальконет сплеш (1.0.108)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —

@@ -9,10 +9,10 @@ export const RIVAL = { x: 27200, y: 23400 };
 
 // Эпохи ханства (были: Тёмный/Феодальный/Замковый/Имперский век)
 export const AGES = [
-  { id: 0, name: 'Заря степи', cost: null as null | { food: number; gold: number }, mult: 1.0, icon: '🌄' },
-  { id: 1, name: 'Век жузов', cost: { food: 450, gold: 0 }, mult: 1.15, icon: '⚔️' },
-  { id: 2, name: 'Век батыров', cost: { food: 800, gold: 350 }, mult: 1.32, icon: '🏰' },
-  { id: 3, name: 'Век Абылай хана', cost: { food: 1200, gold: 750 }, mult: 1.55, icon: '👑' },
+  { id: 0, name: 'Заря степи', cost: null as null | { food: number; gold: number }, mult: 1.0, icon: 'sunrise' },
+  { id: 1, name: 'Век жузов', cost: { food: 450, gold: 0 }, mult: 1.15, icon: 'swords' },
+  { id: 2, name: 'Век батыров', cost: { food: 800, gold: 350 }, mult: 1.32, icon: 'castle' },
+  { id: 3, name: 'Век Абылай хана', cost: { food: 1200, gold: 750 }, mult: 1.55, icon: 'crown' },
 ];
 
 export const UNIT_DEFS = {
@@ -22,6 +22,10 @@ export const UNIT_DEFS = {
   archer:      { name: 'Мерген',      hp: 70,  atk: 9,  range: 175, speed: 126, cost: { food: 0, wood: 45, gold: 55 },  trainTime: 10, pop: 1, gather: false, desc: 'Меткий стрелок из степного лука', bld: 'barracks', ageReq: 0 },
   knight:      { name: 'Батыр',       hp: 190, atk: 16, range: 30,  speed: 178, cost: { food: 90, wood: 0, gold: 70 },  trainTime: 13, pop: 1, gather: false, desc: 'Прославленный воин-богатырь на коне', bld: 'barracks', ageReq: 1 },
   cavalry:     { name: 'Жасауыл',     hp: 250, atk: 19, range: 30,  speed: 200, cost: { food: 90, wood: 0, gold: 90 },  trainTime: 15, pop: 1, gather: false, desc: 'Тяжёлая конница — стремительный удар', bld: 'stable', ageReq: 1 },
+  horsearcher: { name: 'Атты-мерген', hp: 130, atk: 10, range: 150, speed: 205, cost: { food: 70, wood: 40, gold: 70 }, trainTime: 14, pop: 1, gather: false, desc: 'Конный лучник: стреляет на ходу, после залпа отскакивает от пехоты (жалған шегініс). Слаб вблизи, боится найзагеров', bld: 'stable', ageReq: 2 },
+  ram:         { name: 'Таран',       hp: 320, atk: 30, range: 34,  speed: 62,  cost: { food: 0, wood: 140, gold: 40 }, trainTime: 18, pop: 2, gather: false, desc: 'Осадный таран: ×3 по стенам и воротам, стрелы почти не берут (−60%). По живым бесполезен — прикрывайте пехотой', bld: 'blacksmith', ageReq: 1 },
+  musketeer:   { name: 'Мылтықшы',    hp: 95,  atk: 26, range: 200, speed: 120, cost: { food: 40, wood: 0, gold: 95 },  trainTime: 14, pop: 1, gather: false, desc: 'Стрелок с фитильным мылтық: тяжёлая пуля пробивает любую броню (контры не действуют), но заряжает долго и беспомощен вблизи', bld: 'barracks', ageReq: 3 },
+  falconet:    { name: 'Фальконет',   hp: 140, atk: 34, range: 240, speed: 64,  cost: { food: 0, wood: 90, gold: 180 }, trainTime: 22, pop: 2, gather: false, desc: 'Лёгкая пушка: ядро бьёт по площади — рвёт плотный строй, но по одиночкам и постройкам слаба', bld: 'blacksmith', ageReq: 3 },
   catapult:    { name: 'Катапульта',  hp: 160, atk: 46, range: 285, speed: 58,  cost: { food: 0, wood: 120, gold: 120 }, trainTime: 20, pop: 2, gather: false, desc: 'Осадная машина: сносит здания издалека', bld: 'blacksmith', ageReq: 2 },
   monk:        { name: 'Имам',        hp: 50,  atk: 0,  range: 135, speed: 108, cost: { food: 0, wood: 0, gold: 110 },  trainTime: 14, pop: 1, gather: false, desc: 'Служитель мечети — лечит ваше войско', bld: 'mosque', ageReq: 0 },
   trader:      { name: 'Көпес (торговец)', hp: 90, atk: 0, range: 16, speed: 104, cost: { food: 0, wood: 0, gold: 80 }, trainTime: 12, pop: 1, gather: false, desc: 'Караванщик: возит товар в дружественные города и племена — привозит золото', bld: 'market', ageReq: 0 },
@@ -37,15 +41,15 @@ export type UnitKey = keyof typeof UNIT_DEFS;
 // ── Технологии (исследуются в зданиях) ──
 export interface TechDef { id: string; name: string; desc: string; bld: BuildingKey; ageReq: number; cost: { wood: number; food: number; gold: number }; time: number; icon: string }
 export const TECHS: Record<string, TechDef> = {
-  sharpBlades: { id: 'sharpBlades', name: 'Дамасские сабли', desc: '+25% к атаке всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 0, food: 120, gold: 150 }, time: 20, icon: '⚔️' },
-  forgedArmor:  { id: 'forgedArmor', name: 'Кольчуга батыра', desc: '+25% к здоровью всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 150, food: 0, gold: 150 }, time: 20, icon: '🛡️' },
-  infantryDrill:{ id: 'infantryDrill', name: 'Выучка сарбазов', desc: '+15% к скорости пехоты', bld: 'barracks', ageReq: 0, cost: { wood: 0, food: 150, gold: 60 }, time: 18, icon: '🎖️' },
-  eagleEye:     { id: 'eagleEye', name: 'Глаз беркута', desc: '+20% к дальности стрелков и башен', bld: 'barracks', ageReq: 1, cost: { wood: 100, food: 0, gold: 120 }, time: 18, icon: '🦅' },
-  horseBreeding:{ id: 'horseBreeding', name: 'Аргамаки', desc: '+15% к скорости и HP конницы', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 180, gold: 140 }, time: 22, icon: '🐴' },
-  heavyShot:    { id: 'heavyShot', name: 'Тяжёлые снаряды', desc: '+35% к урону катапульт', bld: 'blacksmith', ageReq: 2, cost: { wood: 200, food: 0, gold: 200 }, time: 24, icon: '🪨' },
-  ironTools:    { id: 'ironTools', name: 'Железные орудия', desc: '+30% к скорости добычи', bld: 'towncenter', ageReq: 0, cost: { wood: 120, food: 0, gold: 80 }, time: 16, icon: '⛏️' },
-  wheelbarrow:  { id: 'wheelbarrow', name: 'Арба', desc: 'Шаруа переносят больше груза', bld: 'towncenter', ageReq: 0, cost: { wood: 100, food: 60, gold: 0 }, time: 16, icon: '🛞' },
-  coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: '🪙' },
+  sharpBlades: { id: 'sharpBlades', name: 'Дамасские сабли', desc: '+25% к атаке всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 0, food: 120, gold: 150 }, time: 20, icon: 'swords' },
+  forgedArmor:  { id: 'forgedArmor', name: 'Кольчуга батыра', desc: '+25% к здоровью всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 150, food: 0, gold: 150 }, time: 20, icon: 'shield' },
+  infantryDrill:{ id: 'infantryDrill', name: 'Выучка сарбазов', desc: '+15% к скорости пехоты', bld: 'barracks', ageReq: 0, cost: { wood: 0, food: 150, gold: 60 }, time: 18, icon: 'medal' },
+  eagleEye:     { id: 'eagleEye', name: 'Глаз беркута', desc: '+20% к дальности стрелков и башен', bld: 'barracks', ageReq: 1, cost: { wood: 100, food: 0, gold: 120 }, time: 18, icon: 'eagle' },
+  horseBreeding:{ id: 'horseBreeding', name: 'Аргамаки', desc: '+15% к скорости и HP конницы', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 180, gold: 140 }, time: 22, icon: 'horse' },
+  heavyShot:    { id: 'heavyShot', name: 'Тяжёлые снаряды', desc: '+35% к урону катапульт', bld: 'blacksmith', ageReq: 2, cost: { wood: 200, food: 0, gold: 200 }, time: 24, icon: 'stone' },
+  ironTools:    { id: 'ironTools', name: 'Железные орудия', desc: '+30% к скорости добычи', bld: 'towncenter', ageReq: 0, cost: { wood: 120, food: 0, gold: 80 }, time: 16, icon: 'pick' },
+  wheelbarrow:  { id: 'wheelbarrow', name: 'Арба', desc: 'Шаруа переносят больше груза', bld: 'towncenter', ageReq: 0, cost: { wood: 100, food: 60, gold: 0 }, time: 16, icon: 'wheel' },
+  coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: 'gold' },
 };
 
 // ── ЛИНИИ АПГРЕЙДА ЮНИТОВ (AoE) ────────────────────────────────────────────
@@ -61,17 +65,17 @@ export interface UpgradeDef extends TechDef {
 }
 export const UPGRADES: Record<string, UpgradeDef> = {
   // Сарбаз: пехота ханского ополчения
-  swordHeavy: { id: 'swordHeavy', unit: 'swordsman', tier: 1, newName: 'Ауыр сарбаз', name: 'Ауыр сарбаз (тяжёлый)', desc: 'Сарбазы получают кольчугу и щит: +25% HP, +20% к атаке', bld: 'barracks', ageReq: 1, cost: { wood: 0, food: 160, gold: 100 }, time: 25, icon: '🗡️', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
-  swordGuard: { id: 'swordGuard', unit: 'swordsman', tier: 2, newName: 'Хан сарбазы', name: 'Хан сарбазы (гвардия)', desc: 'Гвардия хана: ещё +30% HP, +30% к атаке', bld: 'barracks', ageReq: 2, cost: { wood: 0, food: 280, gold: 220 }, time: 32, icon: '🛡️', hpMult: 1.30, atkMult: 1.30, plume: '#fbbf24' },
+  swordHeavy: { id: 'swordHeavy', unit: 'swordsman', tier: 1, newName: 'Ауыр сарбаз', name: 'Ауыр сарбаз (тяжёлый)', desc: 'Сарбазы получают кольчугу и щит: +25% HP, +20% к атаке', bld: 'barracks', ageReq: 1, cost: { wood: 0, food: 160, gold: 100 }, time: 25, icon: 'saber', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
+  swordGuard: { id: 'swordGuard', unit: 'swordsman', tier: 2, newName: 'Хан сарбазы', name: 'Хан сарбазы (гвардия)', desc: 'Гвардия хана: ещё +30% HP, +30% к атаке', bld: 'barracks', ageReq: 2, cost: { wood: 0, food: 280, gold: 220 }, time: 32, icon: 'shield', hpMult: 1.30, atkMult: 1.30, plume: '#fbbf24' },
   // Найзагер: копейщики против конницы
-  spearHeavy: { id: 'spearHeavy', unit: 'spearman', tier: 1, newName: 'Ауыр найзагер', name: 'Ауыр найзагер (тяжёлый)', desc: 'Длинная пика и панцирь: +25% HP, +20% к атаке', bld: 'barracks', ageReq: 1, cost: { wood: 60, food: 150, gold: 80 }, time: 25, icon: '🔱', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
-  spearWall: { id: 'spearWall', unit: 'spearman', tier: 2, newName: 'Қалқан найзагер', name: 'Қалқан найзагер (щитоносец)', desc: 'Стена щитов: ещё +35% HP, +25% к атаке', bld: 'barracks', ageReq: 2, cost: { wood: 120, food: 260, gold: 180 }, time: 32, icon: '🛡️', hpMult: 1.35, atkMult: 1.25, plume: '#fbbf24' },
+  spearHeavy: { id: 'spearHeavy', unit: 'spearman', tier: 1, newName: 'Ауыр найзагер', name: 'Ауыр найзагер (тяжёлый)', desc: 'Длинная пика и панцирь: +25% HP, +20% к атаке', bld: 'barracks', ageReq: 1, cost: { wood: 60, food: 150, gold: 80 }, time: 25, icon: 'spear', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
+  spearWall: { id: 'spearWall', unit: 'spearman', tier: 2, newName: 'Қалқан найзагер', name: 'Қалқан найзагер (щитоносец)', desc: 'Стена щитов: ещё +35% HP, +25% к атаке', bld: 'barracks', ageReq: 2, cost: { wood: 120, food: 260, gold: 180 }, time: 32, icon: 'shield', hpMult: 1.35, atkMult: 1.25, plume: '#fbbf24' },
   // Мерген: степные лучники
-  archEagle: { id: 'archEagle', unit: 'archer', tier: 1, newName: 'Қыран мерген', name: 'Қыран мерген (беркут)', desc: 'Тугой лук: +20% HP, +25% к атаке, +8% дальности', bld: 'barracks', ageReq: 1, cost: { wood: 120, food: 0, gold: 110 }, time: 25, icon: '🏹', hpMult: 1.20, atkMult: 1.25, rangeMult: 1.08, plume: '#cbd5e1' },
-  archFalcon: { id: 'archFalcon', unit: 'archer', tier: 2, newName: 'Сұңқар мерген', name: 'Сұңқар мерген (сокол)', desc: 'Бронебойные стрелы: ещё +25% HP, +30% к атаке, +10% дальности', bld: 'barracks', ageReq: 2, cost: { wood: 220, food: 0, gold: 230 }, time: 32, icon: '🎯', hpMult: 1.25, atkMult: 1.30, rangeMult: 1.10, plume: '#fbbf24' },
+  archEagle: { id: 'archEagle', unit: 'archer', tier: 1, newName: 'Қыран мерген', name: 'Қыран мерген (беркут)', desc: 'Тугой лук: +20% HP, +25% к атаке, +8% дальности', bld: 'barracks', ageReq: 1, cost: { wood: 120, food: 0, gold: 110 }, time: 25, icon: 'bow', hpMult: 1.20, atkMult: 1.25, rangeMult: 1.08, plume: '#cbd5e1' },
+  archFalcon: { id: 'archFalcon', unit: 'archer', tier: 2, newName: 'Сұңқар мерген', name: 'Сұңқар мерген (сокол)', desc: 'Бронебойные стрелы: ещё +25% HP, +30% к атаке, +10% дальности', bld: 'barracks', ageReq: 2, cost: { wood: 220, food: 0, gold: 230 }, time: 32, icon: 'target', hpMult: 1.25, atkMult: 1.30, rangeMult: 1.10, plume: '#fbbf24' },
   // Жасауыл: тяжёлая конница
-  cavHeavy: { id: 'cavHeavy', unit: 'cavalry', tier: 1, newName: 'Ауыр жасауыл', name: 'Ауыр жасауыл (тяжёлый)', desc: 'Конский доспех: +25% HP, +20% к атаке', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 200, gold: 140 }, time: 28, icon: '🐎', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
-  cavTulpar: { id: 'cavTulpar', unit: 'cavalry', tier: 2, newName: 'Тұлпар жасауыл', name: 'Тұлпар жасауыл (аргамак)', desc: 'Тулпары — кони-легенды: ещё +30% HP, +30% к атаке, +8% скорости', bld: 'stable', ageReq: 2, cost: { wood: 0, food: 320, gold: 260 }, time: 34, icon: '🏇', hpMult: 1.30, atkMult: 1.30, speedMult: 1.08, plume: '#fbbf24' },
+  cavHeavy: { id: 'cavHeavy', unit: 'cavalry', tier: 1, newName: 'Ауыр жасауыл', name: 'Ауыр жасауыл (тяжёлый)', desc: 'Конский доспех: +25% HP, +20% к атаке', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 200, gold: 140 }, time: 28, icon: 'horse', hpMult: 1.25, atkMult: 1.20, plume: '#cbd5e1' },
+  cavTulpar: { id: 'cavTulpar', unit: 'cavalry', tier: 2, newName: 'Тұлпар жасауыл', name: 'Тұлпар жасауыл (аргамак)', desc: 'Тулпары — кони-легенды: ещё +30% HP, +30% к атаке, +8% скорости', bld: 'stable', ageReq: 2, cost: { wood: 0, food: 320, gold: 260 }, time: 34, icon: 'rider', hpMult: 1.30, atkMult: 1.30, speedMult: 1.08, plume: '#fbbf24' },
 };
 // линия апгрейдов конкретного рода войск, по порядку ступеней
 export function upgradeLine(unit: UnitKey): UpgradeDef[] {
@@ -115,7 +119,9 @@ export interface Settings {
   screenShake: boolean;    // тряска камеры
   fogOfWar: boolean;       // туман войны (враг скрыт вне обзора)
   dayNight: boolean;       // суточный цикл освещения
+  weather: boolean;        // погода степи: дождь, туман, буран (и их эффекты)
   biome: Biome;            // тип карты
+  mode: 'settled' | 'nomad'; // оседлый: города/границы; кочевой: перекочёвки
   particles: boolean;      // частицы и пыль
   damageNumbers: boolean;  // всплывающие числа урона/лечения
   autoPauseOnBlur: boolean;// пауза при потере фокуса
@@ -125,13 +131,14 @@ export interface Settings {
 }
 export type Biome = 'green' | 'autumn' | 'winter' | 'desert';
 export const BIOMES: { id: Biome; name: string; icon: string }[] = [
-  { id: 'green', name: 'Лето', icon: '🌳' },
-  { id: 'autumn', name: 'Осень', icon: '🍂' },
-  { id: 'winter', name: 'Зима', icon: '❄️' },
-  { id: 'desert', name: 'Степь', icon: '🏜️' },
+  { id: 'green', name: 'Лето', icon: 'tree' },
+  { id: 'autumn', name: 'Осень', icon: 'leaf' },
+  { id: 'winter', name: 'Зима', icon: 'snow' },
+  { id: 'desert', name: 'Степь', icon: 'desert' },
 ];
 export const DEFAULT_SETTINGS: Settings = {
   difficulty: 'normal',
+  mode: 'settled',
   speed: 1,
   muted: false,
   voices: true,
@@ -139,6 +146,7 @@ export const DEFAULT_SETTINGS: Settings = {
   screenShake: true,
   fogOfWar: true,
   dayNight: true,
+  weather: true,
   biome: 'green',
   particles: true,
   damageNumbers: true,

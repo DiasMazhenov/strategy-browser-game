@@ -17,7 +17,7 @@
 
 ---
 
-## ✨ Что внутри (Вариант A)
+## Что внутри (Вариант A)
 
 ### Геймплей
 - 3 ресурса: 🪵 дерево / 🍖 еда / 🪙 золото
@@ -26,6 +26,7 @@
 - 4 эпохи: Dark → Feudal → Castle → Imperial (баффы к HP/урону)
 - Вражеский AI: копит ресурсы, строит дома/казармы/башни, качает эпохи, шлет волны (horn + баннер)
 - Квесты-туториал: наруби 60 дерева, нанимай армию, построй казарму, убей волков, выйди в Feudal
+- Погода степи: дождь / туман / буран — меняют обзор, скорость, дальность стрельбы и урожай
 - Победа/поражение по уничтожению Town Center
 
 ### Фишки / Juice
@@ -37,13 +38,13 @@
 - Локальная таблица рекордов (localStorage, топ-8)
 
 ### Управление
-**Десктоп:** Drag для бокса, double-click по типу, Right-click приказ, Wheel зум, WASD + edge-pan, 1-4 тренировка, Q/E/R/F стройка, G attack-move, T age-up, H домой, Space пауза, M mute
+**Десктоп:** Drag для бокса, double-click по типу, Right-click приказ, Wheel зум, WASD + edge-pan, 1-4 тренировка, Q/E/R/F стройка, G attack-move, T age-up, H загон, Home камера к ставке, Space пауза, N mute
 
 **Мобилка:** Tap выбор, tap по земле приказ, Box/Pan переключатель, pinch-zoom, minimap tap-to-jump, жирный док внизу
 
 ---
 
-## 🗂️ Структура проекта
+## Структура проекта
 
 ```
 src/
@@ -53,6 +54,8 @@ src/
   assets/
     hero-battle.jpg    # кей-арт для меню
   game/
+    iconset.ts         # векторные иконки (реестр path-данных) + canvas-рендер строк с токенами
+    Ico.tsx            # React-обёртки <Ico/> и <RT/> (строки с токенами {i:name})
     config.ts          # WORLD, AGES, UNIT_DEFS, BUILDING_DEFS, DIFF, SCORE
     audio.ts           # SoundBank (WebAudio synth)
     iso.ts             # ⭐ Вариант A: изометрические хелперы, кэшированные тайлы, isoBox, isoRoof, drawIsoTree/Gold/Berries
