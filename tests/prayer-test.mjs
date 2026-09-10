@@ -165,7 +165,7 @@ ok('отбивающийся от врага не молится', /targetU >= 0
 ok('при враге у ставки намаз пропускается', /enemyNearHome\(\)/.test(eng));
 
 // ── 5. Благодать ────────────────────────────────────────────────────────────
-const mulM = eng.match(/berekeMult\(\)[^{]*\{[^}]*1 \+ ([\d.]+) \* this\.berekePower/);
+const mulM = eng.match(/berekeMult\(\)[^{]*\{[^}]*1 \+ ([\d.]+) \* \(this\.yasaActive\('damel'\)[^{]*\) \* this\.berekePower/);   // 1.0.111: коэффициент усиливает яса «Дәмел»
 ok('berekeMult() зависит от явки', !!mulM);
 if (mulM) {
   const k = parseFloat(mulM[1]);
