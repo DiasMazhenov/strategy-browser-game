@@ -497,11 +497,14 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // олень рисуется процедурно (нет gpt-кадров); овцы/коровы — спрайтами ниже
   if ((u.key as string) === 'deer') return false;
   // казахская раса (игрок) рисуется отдельным набором спрайтов; враги/нейтралы — штатными
-  const isKz = u.owner === 'player' && !!KZ_BASE[u.key];
-  const kzKey = 'kz_' + u.key;
-  const base = isKz ? KZ_BASE[u.key] : UNIT_IMAGES[u.key];
-  const baseAnchorKey = isKz ? kzKey : u.key;
-  if (!ready(base) || !(UNIT_ANCHORS[baseAnchorKey] || UNIT_ANCHORS[u.key])) return false;
+  // атты-мерген (п.24) рисуется кадрами жасауыла с оливковой перекраской и луком — своего арта нет
+  const isHA = u.key === 'horsearcher';
+  const sk = (isHA ? 'cavalry' : u.key) as UnitKey;
+  const isKz = u.owner === 'player' && !!KZ_BASE[sk];
+  const kzKey = 'kz_' + sk;
+  const base = isKz ? KZ_BASE[sk] : UNIT_IMAGES[sk];
+  const baseAnchorKey = isKz ? kzKey : sk;
+  if (!ready(base) || !(UNIT_ANCHORS[baseAnchorKey] || UNIT_ANCHORS[sk])) return false;
   const f = u.face;
   // реальное перемещение по полю (в бою на месте не «шагаем»)
   const move = u.walk ?? moving(u);
@@ -515,7 +518,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isArch = u.key === 'archer';
   const isSpear = u.key === 'spearman';
   const isKnight = u.key === 'knight';
-  const isCavalry = u.key === 'cavalry';
+  const isCavalry = u.key === 'cavalry' || u.key === 'horsearcher';
   const isMonk = u.key === 'monk';
   const isWolf = u.key === 'wolf';
   const isCowUnit = u.key === 'cow';
@@ -568,8 +571,8 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     else { im = base!; anKey = kzKey; flip = f; }
   } else if (kzFB) {
     // «на камеру» (fmode=1) / «от камеры» (fmode=2): в движении — кадры шага, иначе статичный перёд/спина
-    const walkCyc = fmode === 1 ? KZ_WALK_FRONT[u.key] : KZ_WALK_BACK[u.key];
-    const standCyc = fmode === 1 ? KZ_FRONT_CYCLE[u.key] : KZ_BACK_CYCLE[u.key];
+    const walkCyc = fmode === 1 ? KZ_WALK_FRONT[sk] : KZ_WALK_BACK[sk];
+    const standCyc = fmode === 1 ? KZ_FRONT_CYCLE[sk] : KZ_BACK_CYCLE[sk];
     const cyc = move && walkCyc ? walkCyc : standCyc;
     const idx = move && walkCyc ? kzStep : 0;
     const [img0, key0] = cyc && ready(cyc[idx]?.[0]) ? cyc[idx] : [null, kzKey];
@@ -577,7 +580,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     else { im = base!; anKey = kzKey; }
   } else if (isKz) {
     // бок: в движении — 2 фазы шага (отражается по face); покой/бой — статичный кадр
-    const cyc = move ? KZ_WALK_SIDE[u.key] : null;
+    const cyc = move ? KZ_WALK_SIDE[sk] : null;
     if (cyc && ready(cyc[kzStep]?.[0])) { im = cyc[kzStep][0]; anKey = cyc[kzStep][1]; flip = f; }
     else { im = base!; anKey = kzKey; }
   } else if (working) {
@@ -603,7 +606,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
       monk:    { f: MK_WALK_FRONT,  b: MK_WALK_BACK },
       wolf:    { f: WF_WALK_FRONT,  b: WF_WALK_BACK },
     };
-    const cyc = (FB[u.key]?.[u.fmode === 1 ? 'f' : 'b']) ?? null;
+    const cyc = (FB[sk]?.[u.fmode === 1 ? 'f' : 'b']) ?? null;
     const idx = Math.min(3, Math.max(0, Math.floor(((u.anim / (Math.PI * 2)) % 1) * 4)));
     const [img0, key0] = cyc ? cyc[idx] : [null, u.key];
     if (img0 && ready(img0)) { im = img0; anKey = key0; flip = 1; }
@@ -615,7 +618,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     else { im = base!; anKey = u.key; }
   } else if ((isCowUnit || isSheepUnit)) {
     // скот сбоку/в покое: базовый кадр + 2 кадра шага (отражается по face)
-    const wA = UNIT_WALK_A[u.key], wB = UNIT_WALK_B[u.key];
+    const wA = UNIT_WALK_A[sk], wB = UNIT_WALK_B[sk];
     if (move && ready(wA) && ready(wB)) {
       const useB = Math.sin(u.anim) < 0;
       im = (useB ? wB : wA)!;
@@ -638,7 +641,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
       flip = fmode === 0 ? f : 1; // бок — отражение по face; спереди/сзади — без
     } else { im = base!; anKey = u.key; }
   } else {
-    const wA = UNIT_WALK_A[u.key], wB = UNIT_WALK_B[u.key];
+    const wA = UNIT_WALK_A[sk], wB = UNIT_WALK_B[sk];
     if (move && ready(wA) && ready(wB)) {
       // два согласованных кадра шага, переключаются в такт фазе
       const useB = Math.sin(u.anim) < 0;
@@ -676,7 +679,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     else if (move && ready(KZ_FEM_SIDE_W[0])) { im = KZ_FEM_SIDE_W[0]; anKey = KZ_FEM_SIDE_W[1]; flip = f; }
     else if (ready(KZ_FEM_SIDE[0])) { im = KZ_FEM_SIDE[0]; anKey = KZ_FEM_SIDE[1]; flip = f; }
   }
-  const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[u.key];
+  const an = UNIT_ANCHORS[anKey] ?? UNIT_ANCHORS[sk];
   const femMilking = isKz && isVill && (u as U & { female?: boolean }).female && anKey === 'kz_fem_milk';
   // ── МАСШТАБ СЦЕНОК ОТДЫХА ──
   // Считаем от роста шаруа (46px), а не «на глаз»: человек внутри сценки обязан быть
@@ -697,7 +700,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
     : anKey.startsWith('kz_swing') ? Math.round(VILL_H * 1.9)
     : anKey.startsWith('kz_kazan') ? VILL_H
     : anKey.startsWith('kz_asyk') ? Math.round(VILL_H * 1.06) : 0;
-  const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[u.key] ?? 46));
+  const H = restH || (anKey.startsWith('kz_shepherd') ? 54 : femMilking ? 50 : (UNIT_TARGET_H[sk] ?? 46));
   // ── ПОПРАВКА НА «НАДГОЛОВНЫЙ» ВЫНОС ─────────────────────────────────────────
   // UNIT_TARGET_H задаёт высоту КАДРА, а не рост фигуры. У большинства юнитов
   // это одно и то же (макушка у верхней кромки), но у мергена лук поднят над
@@ -766,14 +769,25 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // ступень апгрейда показываем ПЕРЕКРАСКОЙ БРОНИ: султан пришлось бы сажать на макушку,
   // а верхний непрозрачный пиксель кадра — это наконечник пики/лук/пика всадника, не голова.
   const tier = u.upg ?? 0;
-  const drawIm: CanvasImageSource = tier > 0
+  let drawIm: CanvasImageSource = tier > 0
     ? tintedFrame(im, anKey, tier >= 2 ? '#fbbf24' : '#e2e8f0', tier >= 2 ? 0.30 : 0.20)
     : im;
+  if (isHA) drawIm = tintedFrame(im, anKey + '|ha', '#65a30d', 0.28);   // оливковый чапан — отличим от жасауыла
   // Высота отрисовки — an.h * scale, а НЕ H: при поправке на надголовный вынос
   // (лук мергена, пика найзагера) кадр рисуется крупнее целевой H, чтобы рост
   // самой фигуры совпал с остальными. Якорь ay задан от низа кадра и тоже
   // умножен на scale, поэтому ноги остаются на земле.
   ctx.drawImage(drawIm, -an.ax * scale, -an.ay * scale, w, an.h * scale);
+  if (isHA) {
+    // лук за спиной всадника: дуга + тетива, в координатах кадра (после scale/flip)
+    const hh = an.h * scale;
+    const bx = -w * 0.02, by = -hh * 0.62, br = hh * 0.17;
+    ctx.strokeStyle = '#3f2a14'; ctx.lineWidth = Math.max(1.5, hh * 0.022); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(bx, by, br, -Math.PI * 0.55, Math.PI * 0.55); ctx.stroke();
+    ctx.strokeStyle = '#e7e5e4'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(bx + Math.cos(-Math.PI * 0.55) * br, by + Math.sin(-Math.PI * 0.55) * br);
+    ctx.lineTo(bx + Math.cos(Math.PI * 0.55) * br, by + Math.sin(Math.PI * 0.55) * br); ctx.stroke();
+  }
   ctx.restore();
   void selected;
   return true;
@@ -1219,7 +1233,7 @@ const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.sta
 
 export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
   const herder = u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder;
-  const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'trader' || herder;
+  const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'trader' || herder;
   const shadowR = u.key === 'catapult' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
   diamondShadow(ctx, ix + 2, iy + 8, shadowR, shadowR / 2.2, 'rgba(0,0,0,0.28)');
@@ -1283,8 +1297,9 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
   const hp = (u as unknown as { hp?: number; maxHp?: number }).hp;
   const maxHp = (u as unknown as { maxHp?: number }).maxHp;
   if (hp != null && maxHp != null && (hp < maxHp || selected)) {
-    const sprReady = !!(UNIT_IMAGES[u.key] && (UNIT_IMAGES[u.key] as HTMLImageElement).complete && UNIT_ANCHORS[u.key]);
-    const unitH = sprReady ? (UNIT_TARGET_H[u.key] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
+    const hk = (u.key === 'horsearcher' ? 'cavalry' : u.key) as UnitKey;
+    const sprReady = !!(UNIT_IMAGES[hk] && (UNIT_IMAGES[hk] as HTMLImageElement).complete && UNIT_ANCHORS[hk]);
+    const unitH = sprReady ? (UNIT_TARGET_H[hk] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
     const bw = mounted || u.key === 'catapult' ? 40 : 32;
     const bh = 5;
     const by = iy + 8 - unitH - 6;
@@ -1299,8 +1314,9 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
   const lvl = (u as unknown as { level?: number }).level;
   if (u.owner === 'player' && lvl && lvl >= 2) {
     const stars = lvl - 1; // ур.2 → 1 звезда … ур.5 → 4
-    const sprReady = !!(UNIT_IMAGES[u.key] && (UNIT_IMAGES[u.key] as HTMLImageElement).complete && UNIT_ANCHORS[u.key]);
-    const unitH = sprReady ? (UNIT_TARGET_H[u.key] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
+    const hk = (u.key === 'horsearcher' ? 'cavalry' : u.key) as UnitKey;
+    const sprReady = !!(UNIT_IMAGES[hk] && (UNIT_IMAGES[hk] as HTMLImageElement).complete && UNIT_ANCHORS[hk]);
+    const unitH = sprReady ? (UNIT_TARGET_H[hk] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
     const sy = iy + 8 - unitH - 14;
     ctx.font = '8px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const n = Math.min(4, stars);
@@ -1476,7 +1492,7 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
 // ── конь ──
 function drawHorse(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw: number, _time: number) {
   const blue = u.owner === 'player';
-  const isCav = u.key === 'cavalry';
+  const isCav = u.key === 'cavalry' || u.key === 'horsearcher';
   const body = isCav ? (blue ? '#7c2d12' : '#155e75') : (blue ? '#4a1d8a' : '#6b1a1a');
   const light = isCav ? (blue ? '#9a3412' : '#0e7490') : (blue ? '#5c2da0' : '#7f2222');
   const dark = isCav ? (blue ? '#5c1f0c' : '#0c4a5e') : (blue ? '#351666' : '#501010');

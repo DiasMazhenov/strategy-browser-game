@@ -10,6 +10,7 @@ node tests/hotkeys-test.mjs    # горячие клавиши без дубле
 node tests/weather-test.mjs    # погода степи: эффекты, сейв, честность (1.0.102)
 node tests/icons-scale.mjs     # масштаб иконок: порог 12px, inline-block, обводка (1.0.103)
 node tests/loyalty-sim.mjs     # лояльность границ: канат давлений, сейв (1.0.104)
+node tests/horsearcher-sim.mjs # атты-мерген: контры, кайт, подключение (1.0.105)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —

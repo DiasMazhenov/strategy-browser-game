@@ -225,13 +225,13 @@ interface Unit {
 function xpForLevel(level: number): number { return (level + 2) * 3; }
 // тип урона юнита для камень-ножницы-бумаги
 function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' {
-  if (k === 'spearman' || k === 'archer') return 'pierce';
+  if (k === 'spearman' || k === 'archer' || k === 'horsearcher') return 'pierce';
   if (k === 'catapult') return 'blunt';
   return 'blade';
 }
 // класс брони цели
 function armorClass(k: UnitKey): 'inf' | 'cav' | 'siege' | 'soft' {
-  if (k === 'knight' || k === 'cavalry') return 'cav';
+  if (k === 'knight' || k === 'cavalry' || k === 'horsearcher') return 'cav';
   if (k === 'catapult') return 'siege';
   if (k === 'swordsman' || k === 'spearman') return 'inf';
   return 'soft';
@@ -259,7 +259,7 @@ export const DEDICATIONS = [
 export type DedicationId = typeof DEDICATIONS[number]['id'];
 const ERA_THRESHOLD = [0, 45, 70, 100];           // порог золотого века по номеру новой эпохи
 // какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
-const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'catapult'];
+const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult'];
 export function counterText(k: UnitKey): string {
   if (k === 'villager' || k === 'monk' || k === 'trader') return '';
   const parts: string[] = [];
@@ -2953,8 +2953,8 @@ export class Game {
     switch (id) {
       case 'sharpBlades': for (const u of us()) if (u.owner === 'player') u.atk *= 1.25; break;
       case 'forgedArmor': for (const u of us()) if (u.owner === 'player') { u.maxHp *= 1.25; u.hp *= 1.25; } break;
-      case 'infantryDrill': for (const u of us()) if (u.owner === 'player' && u.key !== 'knight' && u.key !== 'cavalry') u.speed *= 1.15; break;
-      case 'horseBreeding': for (const u of us()) if (u.owner === 'player' && (u.key === 'knight' || u.key === 'cavalry')) { u.speed *= 1.15; u.maxHp *= 1.15; u.hp *= 1.15; } break;
+      case 'infantryDrill': for (const u of us()) if (u.owner === 'player' && u.key !== 'knight' && u.key !== 'cavalry' && u.key !== 'horsearcher') u.speed *= 1.15; break;
+      case 'horseBreeding': for (const u of us()) if (u.owner === 'player' && (u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher')) { u.speed *= 1.15; u.maxHp *= 1.15; u.hp *= 1.15; } break;
       case 'heavyShot': for (const u of us()) if (u.owner === 'player' && u.key === 'catapult') u.atk *= 1.35; break;
       default: break;
     }
@@ -2967,7 +2967,7 @@ export class Game {
   // множитель дальности стрелков/башен
   rangeMult(key: string, owner: string): number {
     if (owner !== 'player' || !this.hasTech('eagleEye')) return 1;
-    if (key === 'archer' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
+    if (key === 'archer' || key === 'horsearcher' || key === 'tower' || key === 'towncenter' || key === 'catapult') return 1.2;
     return 1;
   }
   gatherMult(): number {
@@ -5464,6 +5464,9 @@ export class Game {
           if (Math.abs(this.tdx(tu.x - u.x)) > 4) u.face = this.tdx(tu.x - u.x) > 0 ? 1 : -1;
           if (u.key === 'archer') u.aiming = true;
           if (u.cd <= 0) this.strike(u, tu, undefined);
+          // жалған шегініс (п.24): конный лучник после залпа отскакивает от ближнего боя.
+          // Пассив включён всегда, кроме стойки «стоять»; пока перезаряжается — держит дистанцию.
+          if (u.key === 'horsearcher' && u.stance !== 'stand' && this.kiteFrom(u, tu, uRange, dt)) return;
         } else {
           this.moveTowardPath(u, tu.x, tu.y, dt, uRange * 0.7);
         }
@@ -6095,8 +6098,22 @@ export class Game {
     u.x += Math.sign(u.tx - u.x) * u.speed * dt; u.y += Math.sign(u.ty - u.y) * u.speed * dt;
   }
 
+  // Отход конного лучника от ближнего противника: назад по линии цель→юнит на
+  // ~0.75 дальности, пока идёт перезарядка. Возвращает true, если отходил.
+  kiteFrom(u: Unit, tu: Unit, uRange: number, dt: number): boolean {
+    if (tu.range > 60) return false;                 // от стрелков не бегаем — перестрелка
+    const dx = this.tdx(u.x - tu.x), dy = this.tdy(u.y - tu.y);
+    const d = Math.hypot(dx, dy) || 1;
+    if (d > uRange * 0.72) return false;             // дистанция уже безопасная
+    const back = uRange * 0.85;
+    const tx = u.x + (dx / d) * (back - d), ty = u.y + (dy / d) * (back - d);
+    if (this.terrainBlocked(tx, ty)) return false;   // упёрлись — стоим и стреляем
+    this.moveToward(u, tx, ty, dt, 4);
+    u.face = dx > 0 ? -1 : 1;                        // лицом к цели — парфянский выстрел
+    return true;
+  }
   strike(att: Unit, tu?: Unit, tb?: Bld) {
-    const isRanged = att.key === 'archer' || att.key === 'catapult';
+    const isRanged = att.key === 'archer' || att.key === 'catapult' || att.key === 'horsearcher';
     const isCata = att.key === 'catapult';
     // удар по ИИ в мирное время = игрок сам начинает войну (волки не в счёт)
     if (att.owner === 'player' && !this.atWar) {
@@ -6106,7 +6123,7 @@ export class Game {
     // боевой клич (редко, чтобы не трещало) / вой волка
     if (att.key === 'wolf') { if (Math.random() < 0.08) this.sound.wolf(); }
     else if (att.owner === 'player' && (tu || tb) && Math.random() < 0.12) this.sound.voice(att.key, 'attack');
-    att.cd = isCata ? 3.2 : att.key === 'archer' ? 1.35 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
+    att.cd = isCata ? 3.2 : att.key === 'archer' ? 1.35 : att.key === 'horsearcher' ? 1.5 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
     att.atkAnim = 1;
     const variance = rand(0.85, 1.15);
     let dmg = att.atk * variance;
@@ -6119,7 +6136,7 @@ export class Game {
       const tx = tu ? tu.x : tb ? tb.x : att.tx, ty = tu ? tu.y : tb ? tb.y : att.ty;
       const dx = this.tdx(tx - att.x), dy = this.tdy(ty - att.y), d = Math.max(1, Math.hypot(dx, dy));
       const sp = isCata ? 300 : 420;
-      this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind: isCata ? 'rock' : 'arrow', srcU: att.id });
+      this.projs.push({ x: att.x, y: att.y - (isCata ? 30 : att.key === 'horsearcher' ? 26 : 14), vx: (dx / d) * sp, vy: (dy / d) * sp, tx, ty, targetU: tu ? tu.id : -1, targetB: tb ? tb.id : -1, dmg, owner: att.owner, life: 2.0, kind: isCata ? 'rock' : 'arrow', srcU: att.id });
       if (isCata) { this.sound.boom(); this.trauma = Math.min(1, this.trauma + 0.12); this.burst(att.x, att.y - 26, 8, ['#a8a29e', '#78716c'], 120, 0.5); }
       else { this.sound.arrow(att); this.spark(att.x, att.y - 14, '#fef3c7'); }
     } else {
@@ -6485,6 +6502,7 @@ export class Game {
     if (this.wave >= 2) for (let i = 0; i < Math.ceil(n * 0.5); i++) comp.push('spearman');
     if ((this.eage >= 1 && this.wave >= 3) || this.wave >= 5) for (let i = 0; i < Math.ceil(n * 0.4); i++) comp.push('knight');
     if ((this.eage >= 1 && this.wave >= 5) || this.wave >= 8) for (let i = 0; i < Math.ceil(n * 0.35); i++) comp.push('cavalry');
+    if (this.eage >= 2 && this.wave >= 7) for (let i = 0; i < Math.ceil(n * 0.2); i++) comp.push('horsearcher');
     // босс-отряд с катапультами каждую 6-ю волну
     if (this.wave >= 6 && this.wave % 6 === 0) { for (let i = 0; i < 2 + Math.floor(this.wave / 6); i++) comp.push('catapult'); }
     return comp;
@@ -6492,7 +6510,7 @@ export class Game {
   waveSummary(comp: UnitKey[]): string {
     const cnt: Record<string, number> = {};
     for (const k of comp) cnt[k] = (cnt[k] || 0) + 1;
-    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'catapult'];
+    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult'];
     // имена с учётом ступени врага — игрок сразу видит, что идёт тяжёлая пехота
     return order.filter(k => cnt[k]).map(k => `${cnt[k]}×${this.unitName(k, 'enemy')}`).join(', ');
   }
@@ -6966,7 +6984,7 @@ export class Game {
       weather: this.weather !== 'clear' && this.settings.weather ? { kind: this.weather, t: Math.ceil(this.weatherT), ...WEATHER_DEFS[this.weather] } : null,
       alertHud: this.alert ? { sub: this.alert.sub, t: Math.ceil(this.alert.t) } : null,
       unitNames: { swordsman: this.unitName('swordsman', 'player'), spearman: this.unitName('spearman', 'player'),
-        archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player') },
+        archer: this.unitName('archer', 'player'), cavalry: this.unitName('cavalry', 'player'), horsearcher: this.unitName('horsearcher', 'player') },
       mode: this.mode,
       terrCount: this.terrCount, terrLand: this.terrLand, rebelCount: this.rebelCount,
       cityTier: this.cityTier, cityName: ['Аул', 'Қала', 'Астана'][this.cityTier],
