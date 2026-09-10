@@ -415,6 +415,8 @@ export interface HudSnapshot {
   playerPow: number; enemyPow: number; wonderT: number; wonderHold: number;
   // победа «Объединение степи»: сколько народов под сюзеренитетом и сколько удержано
   unite: { have: number; need: number; t: number; hold: number };
+  // религиозная победа (п.31): сколько народов приняли ислам (вера ≥100)
+  islam: { have: number; need: number; anyMosque: boolean };
   // великие люди: мудрость и карточки призыва
   wisdom: number; wisdomRate: number;
   // яса (п.32): карточки политик — активность, слоты, цена включения
@@ -460,6 +462,7 @@ export interface NationHud {
   envoyNext: number;     // сколько посланников до следующего уровня (0 = максимум)
   envoyCost: number;     // цена следующего посланника
   suzerain: 'player' | 'rival' | null;
+  faith: number;         // −100 шаманизм .. +100 ислам (п.31)
   typeLabel: string;     // «Военный» / «Торговый» …
   typeIcon: string;
   perks: string[];       // описания бонусов трёх уровней
@@ -557,6 +560,9 @@ export class Game {
   loyal = new Map<string, number>();
   // ── ЛАГЕРЯ БАНДИТОВ (п.25) ──
   // ── ЯСА (п.32) и ЭВРИКИ (п.39) ──
+  // ── ВЕРА СТЕПИ (п.31): ислам против шаманизма за души народов ──
+  faith: Record<string, number> = {};  // народ → −100 (шаманизм джунгар) .. +100 (ислам)
+  faithT = 0;                          // тик распространения веры
   yasa: Record<string, boolean> = {};       // активные карточки политик (≤3)
   eurekaDone: Record<string, boolean> = {}; // выполненные условия-ускорения техов
   eurekaT = 0;                              // тик проверки эврик
@@ -1579,6 +1585,53 @@ export class Game {
         this.res.gold += (this.hasGreat('kazybek') ? 6 : 3) * (1 + 0.15 * this.ded('daulet'));
         if (Math.random() < 0.35) this.sound.coin();
       }
+    }
+  }
+
+  // ── ВЕРА СТЕПИ (п.31): распространение ислама и религиозная победа ──
+  // Мечеть в 520 px проповедует слабо (+0.4/с), имам-миссионер у лагеря — сильно
+  // (+1.1/с); шаман джунгар откатывает (−0.9/с). Отрицательная вера — народ
+  // ушёл в шаманизм. 50 — враждебное племя успокаивается, 100 — союз и шаг к победе:
+  // обратить все 7 народов.
+  private updateFaith(dt: number) {
+    if (this.over) return;
+    this.faithT += dt;
+    if (this.faithT < 1) return;
+    const step = Math.min(this.faithT, 3); this.faithT = 0;   // лаг не даёт гигантских скачков
+    for (const b of this.blds) {
+      if (!b.tribe || !b.nationId || b.done < 0.5) continue;
+      const nid = b.nationId;
+      let delta = 0;
+      for (const m of this.blds) {
+        if (m.owner === 'player' && m.key === 'mosque' && m.done >= 1 && dist2(m.x, m.y, b.x, b.y) < 520 * 520) { delta += 0.4; break; }
+      }
+      for (const u of this.units) {
+        if (u.hp <= 0 || u.key !== 'monk' || u.hidden != null) continue;
+        if (dist2(u.x, u.y, b.x, b.y) < 240 * 240) delta += u.owner === 'player' ? 1.1 : -0.9;
+      }
+      if (delta === 0) continue;
+      const was = this.faith[nid] ?? 0;
+      const cur = clamp(was + delta * step, -100, 100);
+      if (cur === was) continue;
+      this.faith[nid] = cur;
+      const def = NATION_BY_ID[nid];
+      if (cur >= 50 && this.tribeRel[nid] === 'hostile') {
+        this.tribeRel[nid] = 'neutral';
+        this.pushBanner('{i:crescent} Слово пророка', `«${def?.name ?? nid}» услышали проповедь — набеги прекратятся`, 3.5);
+      }
+      if (cur >= 100 && this.tribeRel[nid] !== 'friend') {
+        this.tribeRel[nid] = 'friend';
+        this.pushBanner('{i:crescent} «' + (def?.name ?? nid) + '» приняли ислам', 'Племя — союзник ханства. Религиозная победа ближе', 4);
+        this.score += 400;
+        this.burst(b.x, b.y - 30, 24, ['#7dd3fc', '#fef3c7', '#fff'], 120, 0.9);
+      }
+      // ИИ конкурирует: обращённые джунгарами народы уводятся из ислама (уже в минусе)
+    }
+    // победа: все 7 народов с верой ≥100
+    if (!this.over && TRIBE_IDS.every(nid => (this.faith[nid] ?? 0) >= 100)) {
+      this.pushBanner('{i:crescent} СТЕПЬ В ИСЛАМЕ!', 'Все народы приняли истинную веру — религиозная победа!', 6);
+      this.score += 2000;
+      this.finish('victory');
     }
   }
 
@@ -2884,7 +2937,7 @@ export class Game {
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT,
         uniteT: this.uniteT, uniteAnn: this.uniteAnn },
       era: { s: this.eraState, d: this.eraDedication, h: this.eraHeroic, c: this.eraHeroicCharge },
-      yasa: this.yasa, eureka: this.eurekaDone,
+      yasa: this.yasa, eureka: this.eurekaDone, faith: this.faith,
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT, weather: this.weather, weatherT: this.weatherT },
@@ -3018,6 +3071,7 @@ export class Game {
         this.eraHeroic = !!d.era.h; this.eraHeroicCharge = d.era.c ?? 0; }
       // яса и эврики (1.0.111): старые сейвы без полей — пусто
       this.yasa = d.yasa && typeof d.yasa === 'object' ? d.yasa : {};
+      this.faith = d.faith && typeof d.faith === 'object' ? d.faith : {};   // п.31
       this.eurekaDone = d.eureka && typeof d.eureka === 'object' ? d.eureka : {};
       this.soldiersTrained = d.soldiersTrained || 0; this.barracksBuilt = d.barracksBuilt || 0; this.wolvesSlain = d.wolvesSlain || 0;
       this.relicsHeld = d.relicsHeld || 0;
@@ -4613,6 +4667,7 @@ export class Game {
     this.updateWeather(dt);        // погода: дождь, туман, буран
     this.updateBandits(dt);        // набеги и респавн стоянок разбойников
     this.updateNatWonders(dt);     // чудеса природы: открытие даёт очки и мудрость
+    this.updateFaith(dt);          // вера степи: мечети/миссионеры против шаманов
     this.updateEurekas(dt);        // эврики: условия-ускорения техов
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
@@ -6254,6 +6309,16 @@ export class Game {
         this.floaters.push({ x: best.x, y: best.y - 34, life: 0.7, max: 0.7, text: `+${heal}`, color: '#86efac', size: 12 });
       } else {
         u.cd = 0.25;
+        // ── МИССИОНЕР (п.31): имаму нечего лечить — идёт проповедовать к необращённому лагерю
+        if (u.owner === 'player' && u.state === 'idle') {
+          let target: Bld | null = null; let bd = 1100 * 1100;
+          for (const b of this.blds) {
+            if (!b.tribe || !b.nationId || (this.faith[b.nationId] ?? 0) >= 100) continue;
+            const d = dist2(u.x, u.y, b.x, b.y);
+            if (d < bd) { bd = d; target = b; }
+          }
+          if (target) { u.state = 'move'; u.tx = target.x + rand(-60, 60); u.ty = target.y + rand(-50, 50); }
+        }
       }
     }
   }
@@ -7441,6 +7506,7 @@ export class Game {
       woodDiscount: this.woodDiscount(),
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
+      islam: { have: TRIBE_IDS.filter(nid => (this.faith[nid] ?? 0) >= 100).length, need: TRIBE_IDS.length, anyMosque: this.blds.some(b => b.owner === 'player' && b.key === 'mosque' && b.done >= 1) },
       unite: { have: this.uniteCount(), need: this.UNITE_NEED,
         t: Math.floor(this.uniteT), hold: this.UNITE_HOLD },
       wisdom: Math.floor(this.wisdom), wisdomRate: Math.round(this.wisdomRate() * 10) / 10,
@@ -7519,6 +7585,7 @@ export class Game {
         envoyNext: d.kind === 'tribe' ? this.envoysToNext(d.id) : 0,
         envoyCost: envoyCost(this.envoys[d.id] ?? 0),
         suzerain: d.kind === 'tribe' ? this.suzerain(d.id) : null,
+        faith: d.kind === 'tribe' ? Math.round(this.faith[d.id] ?? 0) : 0,
         typeLabel: tkind ? TRIBE_TYPES[tkind].label : '',
         typeIcon: tkind ? TRIBE_TYPES[tkind].icon : '',
         perks: tkind ? [...TRIBE_TYPES[tkind].levels] : [],

@@ -351,6 +351,13 @@ export default function App() {
                 <Ico name="sparkle" /> {hud!.wisdom}
               </div>
             )}
+            {/* Религиозная победа (п.31): видна, как только есть мечеть */}
+            {(hud?.islam?.anyMosque ?? false) && (
+              <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${(hud!.islam.have) >= hud!.islam.need ? 'animate-pulse bg-teal-400/30 text-teal-100' : 'bg-sky-500/15 text-sky-200'}`}
+                title="Религиозная победа: обратите все 7 народов (мечеть + имамы-миссионеры у лагерей)">
+                <Ico name="crescent" /> Ислам: {hud!.islam.have}/{hud!.islam.need}
+              </div>
+            )}
             {/* Объединение степи: показываем, когда союз уже собирается */}
             {(hud?.unite?.have ?? 0) >= 3 && (
               <div className={`pointer-events-auto flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-black ${
@@ -1840,6 +1847,16 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
                     <span className="flex items-center gap-1 text-[11px] font-black text-slate-200">{n.typeIcon ? <Ico name={n.typeIcon} /> : null}{n.typeLabel} народ</span>
                     {n.suzerain === 'player' && <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-black text-amber-200"><Ico name="crown" /> вы сюзерен</span>}
                     {n.suzerain === 'rival' && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-300"><Ico name="warn" /> под джунгарами</span>}
+                  </div>
+                  {/* вера народа (п.31): −100 шаманизм .. +100 ислам */}
+                  <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold">
+                    <span className="text-sky-300"><Ico name="crescent" /> вера:</span>
+                    <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-black/40">
+                      <div className="absolute inset-y-0 left-1/2 w-1/2 bg-sky-400/70" style={{ width: `${Math.max(0, n.faith) / 2}%` }} />
+                      <div className="absolute inset-y-0 right-1/2 w-1/2 bg-red-400/60" style={{ width: `${Math.max(0, -n.faith) / 2}%` }} />
+                      <div className="absolute inset-y-0 left-1/2 w-px bg-white/40" />
+                    </div>
+                    <span className={n.faith >= 100 ? 'text-lime-300' : 'text-slate-400'}>{n.faith >= 100 ? 'ислам' : n.faith <= -100 ? 'шаманизм' : `${n.faith > 0 ? '+' : ''}${n.faith}`}</span>
                   </div>
                   {/* шкала влияния: посланники игрока против джунгарских */}
                   <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold">
