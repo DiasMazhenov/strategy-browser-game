@@ -72,6 +72,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [dockTab, setDockTab] = useState<'units' | 'build'>('units');
+  const [showToy, setShowToy] = useState(false);   // той (п.20)
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [koshOpen, setKoshOpen] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -906,6 +907,21 @@ export default function App() {
       </div>
 
       {/* ===== КОШ (кочевой режим) ===== */}
+      {/* Той (п.20): золотая кнопка праздника + модалка мини-игр */}
+      {hud?.toy?.due && !showToy && !over && (
+        <button onClick={() => setShowToy(true)}
+          className="absolute bottom-24 right-3 z-30 rounded-2xl border border-amber-300/60 bg-amber-400/25 px-3 py-2 text-xs font-black text-amber-100 shadow-lg backdrop-blur-sm animate-pulse"
+          title="Той (п.20): байга, көкпар и асык. Награды, +5% к добыче на время и авторитет биев. Пропустишь — бии обидятся!">
+          <Ico name="spark" className="mr-1 inline h-4 w-4" />ТОЙ!
+        </button>
+      )}
+      {showToy && hud && (
+        <ToyModal onClose={() => setShowToy(false)} act={(kind, amount) => {
+          const gm = g(); if (!gm) return false;
+          if (kind === 'bet') return gm.toyBet(amount ?? 0);
+          gm.toyReward(kind, amount ?? 0); return true;
+        }} />
+      )}
       {koshOpen && hud?.mode === 'nomad' && !over && (
         <Overlay>
           <div className="font-display mb-2 flex items-center justify-center gap-2 text-lg font-black text-amber-100"><Ico name="camel" className="h-5 w-5" />Көш: новый жайляу</div>
@@ -2110,6 +2126,117 @@ function genDastan(over: GameStats, heroName: string): string {
   for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
   const picked = pool.slice(0, Math.min(7, pool.length));
   return [st[0], ...picked, `Дастан сложен жырау великой степи.\nСлава ${n} — от Иртыша до Каспия!`].join('\n\n');
+}
+
+// ── ТОЙ (п.20): байга, көкпар и асык ──
+function ToyModal({ onClose, act }: { onClose: () => void; act: (kind: 'baiga' | 'kokpar' | 'asyq' | 'bet', amount?: number) => boolean | void }) {
+  const [tab, setTab] = useState<'pick' | 'baiga' | 'kokpar' | 'asyq'>('pick');
+  const [msg, setMsg] = useState('');
+  // байга
+  const horses = useMemo(() => [0, 1, 2].map(i => ({ name: ['Сырттанды', 'Кулагер', 'Тарлан'][i], sp: 0.9 + Math.random() * 0.35 })), []);
+  const [betOn, setBetOn] = useState(-1);
+  const [race, setRace] = useState<number[]>([0, 0, 0]);
+  const [racing, setRacing] = useState(false);
+  // көкпар
+  const [marker, setMarker] = useState(50);
+  const [zone, setZone] = useState(() => 25 + Math.random() * 50);
+  const [hits, setHits] = useState(0);
+  const [round, setRound] = useState(0);
+  // асык
+  const [rolls, setRolls] = useState<{ me: number; biy: number } | null>(null);
+  useEffect(() => {
+    if (!racing) return;
+    const id = setInterval(() => {
+      setRace(prev => {
+        const nxt = prev.map((v, i) => v + horses[i].sp * (3 + Math.random() * 3));
+        if (nxt.every(v => v >= 100)) {
+          clearInterval(id);
+          setRacing(false);
+          const winner = nxt.indexOf(Math.max(...nxt));
+          setTimeout(() => {
+            if (winner === betOn) { act('baiga', 120); setMsg('Твоя лошадь первой! Выигрыш 120 золота!'); }
+            else setMsg(`Победил «${horses[winner].name}». Ставка ушла к байге...`);
+          }, 250);
+        }
+        return nxt;
+      });
+    }, 120);
+    return () => clearInterval(id);
+  }, [racing, betOn, horses]);
+  useEffect(() => {
+    if (tab !== 'kokpar') return;
+    const id = setInterval(() => setMarker(m => 10 + (m + 7) % 90), 70);
+    return () => clearInterval(id);
+  }, [tab]);
+  const kokparGrab = () => {
+    const inZone = marker > zone && marker < zone + 20;
+    const nh = hits + (inZone ? 1 : 0);
+    setHits(nh); setZone(10 + Math.random() * 70);
+    if (round >= 2) {
+      const total = 40 + nh * 60;
+      act('kokpar', total);
+      setMsg(`Туша у пиршественной чаши! ${nh}/3 точных рывков — +${total} еды`);
+    } else setRound(round + 1);
+  };
+  const asyqPlay = () => {
+    if (!act('bet', 30)) { setMsg('Нет 30 золота на асыки...'); return; }
+    const me = 2 + Math.floor(Math.random() * 11), biy = 2 + Math.floor(Math.random() * 11);
+    setRolls({ me, biy });
+    if (me > biy) { setTimeout(() => act('asyq', 70), 400); setMsg(`${me} против ${biy} — асыки твои! +70 золота`); }
+    else setMsg(`${me} против ${biy} — бий забрал кон (ставка проиграна)`);
+  };
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4" onClick={onClose}>
+      <div className="kz-corners panel-iron w-full max-w-md rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+        <div className="mb-3 text-center font-display text-xl font-black tracking-wide text-amber-200">ТОЙ! <span className="text-[11px] text-slate-400">праздник между волнами</span></div>
+        {tab === 'pick' && (
+          <div className="grid gap-2">
+            {[['baiga', 'Байга', 'Ставка 50 золота на скакуна — забег на тулпаров'], ['kokpar', 'Көкпар', 'Три рывка за тушей: поймай момент в зелёной зоне'], ['asyq', 'Асык', 'Кости против бия: ставка 30, выигрыш 70']].map(([k, t, d]) => (
+              <button key={k} onClick={() => setTab(k as typeof tab)} className="rounded-2xl border border-white/10 bg-white/5 p-2.5 text-left transition hover:border-amber-300/40 hover:bg-amber-400/10">
+                <div className="text-[13px] font-black text-slate-100">{t}</div>
+                <div className="text-[11px] text-slate-400">{d}</div>
+              </button>
+            ))}
+            <button onClick={onClose} className="mt-1 text-[11px] font-bold text-slate-500 hover:text-slate-300">Не сегодня (Esc)</button>
+          </div>
+        )}
+        {tab === 'baiga' && (
+          <div className="space-y-2">
+            {horses.map((h, i) => (
+              <div key={i} className="rounded-xl bg-black/30 p-2">
+                <div className="flex items-center justify-between text-[12px] font-black text-slate-100"><span>{h.name}</span>
+                  <button disabled={racing} onClick={() => { if (act('bet', 50)) setBetOn(i); }} className={`rounded px-2 py-0.5 text-[10px] font-black ${betOn === i ? 'bg-amber-400/30 text-amber-200' : 'btn-iron text-slate-200'}`}>{betOn === i ? 'твоя ставка' : 'ставка 50'}</button>
+                </div>
+                <div className="mt-1 h-2 rounded bg-white/10"><div className="h-2 rounded bg-lime-400" style={{ width: `${Math.min(100, race[i])}%` }} /></div>
+              </div>
+            ))}
+            <button disabled={racing || betOn < 0} onClick={() => setRacing(true)} className="btn-gold w-full rounded-xl py-2 text-sm font-black">{racing ? 'Скачка!' : 'Пускай коней!'}</button>
+            <button onClick={() => setTab('pick')} className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-300">назад</button>
+          </div>
+        )}
+        {tab === 'kokpar' && (
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold text-slate-300">Рывок {Math.min(round + 1, 3)}/3 · точных: {hits}</div>
+            <div className="relative h-10 overflow-hidden rounded-xl bg-black/40">
+              <div className="absolute inset-y-0 bg-lime-500/30" style={{ left: `${zone}%`, width: '20%' }} />
+              <div className="absolute inset-y-1 w-1.5 rounded bg-amber-300" style={{ left: `${marker}%` }} />
+            </div>
+            <button onClick={kokparGrab} className="btn-gold w-full rounded-xl py-2 text-sm font-black">Хватай тушу!</button>
+            <button onClick={() => setTab('pick')} className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-300">назад</button>
+          </div>
+        )}
+        {tab === 'asyq' && (
+          <div className="space-y-2 text-center">
+            <div className="text-[12px] font-bold text-slate-300">Твои кости против костей бия</div>
+            <div className="flex justify-center gap-3 text-3xl font-black text-amber-200">{rolls ? <><span>{rolls.me}</span><span className="text-slate-500">:</span><span>{rolls.biy}</span></> : <span className="text-slate-500">— : —</span>}</div>
+            <button onClick={asyqPlay} className="btn-gold w-full rounded-xl py-2 text-sm font-black">Бросить асыки (30 золота)</button>
+            <button onClick={() => setTab('pick')} className="w-full text-[11px] font-bold text-slate-500 hover:text-slate-300">назад</button>
+          </div>
+        )}
+        {msg && <div className="mt-3 rounded-xl bg-amber-400/15 p-2 text-center text-[12px] font-black text-amber-200">{msg}</div>}
+      </div>
+    </div>
+  );
 }
 
 function GameOverScreen({ over, scores, name, setName, saved, onSave, onRestart, onMenu }: {

@@ -29,6 +29,7 @@ node tests/kerven-sim.mjs       # керуен: караваны, цены, за
 node tests/barlau-sim.mjs       # барлаушы: дозоры и саботаж (1.0.121)
 node tests/amanat-sim.mjs       # аманат, свадьбы, двор ханства (1.0.122)
 node tests/zhirau-sim.mjs       # жырау: дастан о партии (1.0.123)
+node tests/toy-sim.mjs          # той: байга, көкпар, асык (1.0.124)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —

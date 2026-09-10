@@ -397,6 +397,7 @@ export interface HudSnapshot {
   season: { name: string; winter: boolean; t: number; feltYurts: boolean };   // қыс (п.15)
   scoutNet: { posts: number; raidSeen: boolean; raidIn: number; army: number; cd: number };   // барлаушы (п.17)
   court: { name: string; role: string; traits: string[] }[];   // двор ханства (п.18)
+  toy: { due: boolean; joy: number };   // той (п.20)
   mode: 'settled' | 'nomad';                      // режим партии
   terrCount: number; terrLand: number;            // гексы границы / земля долины
   rebelCount: number;                             // спорные гексы (лояльность < 0.5), не идут в счёт победы
@@ -575,6 +576,8 @@ export class Game {
   // ── Аманат и брачные союзы (п.18): двор ханства ──
   persons: { id: number; name: string; role: 'biy' | 'amanat' | 'spouse' | 'child' | 'batyr'; nation?: string; traits: string[]; t: number; childT?: number }[] = [];
   personN = 1;
+  // ── Той (п.20): праздник между волнами ──
+  lastCombatT = 0; toyDue = false; toyJoy = 0;
   kurultaiOpts: string[] = []; kurultaiPending = false; kurultaiDays = new Set<number>();
   chronicle: string[] = [];   // лента деяний для жырау (п.19)
   camp: { id: string; part: string; title: string; objs: { t: string; type: string; n?: number; key?: string; done: boolean }[] } | null = null;   // активная глава (п.34)
@@ -1643,6 +1646,7 @@ export class Game {
     if (this.law === 'nalog') this.res.gold += 0.5;            // ясачный сбор (п.13)
     this.authority = Math.min(100, this.authority + 0.15 * (this.law === 'erk' ? 0.5 : 1) * (this.hasTrait('Правое слово') ? 1.5 : 1));   // авторитет хана (п.13), Төле би (п.18)
     this.discontent = Math.max(0, this.discontent - (this.hasTrait('Острый закон') ? 0.024 : 0.02));   // недовольство тает, Айтеке би ускоряет (п.18)
+    this.toyJoy = Math.max(0, this.toyJoy - 0.01);   // веселье тоя стихает (п.20)
     // п.18: наследник
     const sp = this.persons.find(p => p.role === 'spouse');
     if (sp && !sp.childT && this.time - sp.t > 120) {
@@ -3504,6 +3508,7 @@ export class Game {
       if (this.tdx(u.x - w.x) ** 2 + this.tdy(u.y - w.y) ** 2 < WONDER_AURA * WONDER_AURA) { m *= 1.25; break; }
     }
     if (this.hasTrait('Хозяйственная')) m *= 1.05;   // супруга-хозяйка (п.18)
+    if (this.toyJoy > 0) m *= 1 + 0.05 * this.toyJoy;   // радость тоя (п.20)
     // законы курултая (п.13)
     if (this.law === 'nalog' || this.law === 'mobil') m *= 0.95;
     if (this.discontent >= 70) m *= 0.9;   // озлобленный аул работает спустя рукава
@@ -4083,6 +4088,20 @@ export class Game {
       this.terrCount = tc; this.rebelCount = rc;
     }
   }
+  // ── ТОЙ (п.20): байга, көкпар и асык между волнами ──
+  toyBet(n: number): boolean {
+    if (this.res.gold < n) { this.floater(HOME.x, HOME.y - 80, `Нужно ${n} {i:gold} на ставку`, '#f87171'); this.sound.error(); return false; }
+    this.res.gold -= n; this.pushHud(); return true;
+  }
+  toyReward(kind: 'baiga' | 'kokpar' | 'asyq', amount: number) {
+    if (kind === 'kokpar') this.res.food += amount; else this.res.gold += amount;
+    this.toyJoy = 1; this.toyDue = false;
+    this.score += 150; this.authority = Math.min(100, this.authority + 5);
+    this.chronicle.push(`Той: ${kind === 'baiga' ? 'байга выиграна' : kind === 'kokpar' ? 'көкпар удался' : 'асык покорился'} — аул гуляет`);
+    this.pushBanner('{i:spark} Той удался!', 'Аул веселится: работа спорится (+5% к добыче), бии довольны (+5 авторитета)', 4);
+    this.sound.win(); this.pushHud();
+  }
+
   // ── АМАНАТ И БРАЧНЫЕ СОЮЗЫ (п.18) ──
   initCourt() {
     this.persons = [
@@ -5065,6 +5084,13 @@ export class Game {
       this.dayT -= this.DAY_LEN; this.dayNum++;
       this.azanDone = [];          // новые сутки — намазы звучат заново
       this.pushBanner(`{i:sunrise} День ${this.dayNum}`, 'Новый день над степью', 2.4);
+      if (this.toyDue) {   // п.20: той пропущен — бии в обиде
+        this.toyDue = false;
+        this.authority = Math.max(0, this.authority - 10);
+        this.chronicle.push('Той пропущен — бии в обиде (−10 авторитета)');
+        this.pushBanner('{i:warn} Той пропущен', 'Бии обижены: авторитет хана тает', 4);
+      }
+      if (this.dayNum % 3 === 0 && this.time - this.lastCombatT > 90) this.toyDue = true;   // каждые 3 суток мира (п.20)
       if (this.dayNum % 4 === 0 && !this.kurultaiDays.has(this.dayNum)) { this.kurultaiPending = true; this.kurultaiDays.add(this.dayNum); }   // раз в 4 суток (п.13)
       this.telBirth();   // төл (п.14): приплод по весне поголовья
       // керуен (п.16): цены дышат — сезон, война
@@ -6795,6 +6821,7 @@ export class Game {
     // не спамим: одна тревога не чаще, чем раз в 12 секунд
     if (this.time - this.lastAlertT < 12) return;
     this.lastAlertT = this.time;
+    this.lastCombatT = this.time;   // той (п.20) назначают только в мирное время
     this.alert = { x, y, t: 0, sub };
     this.pushBanner('{i:warn} Нас атакуют!', sub, 4);
     this.sound.alarm();
@@ -7995,6 +8022,7 @@ export class Game {
       tel: { wool: Math.floor(this.wool), feltYurts: this.feltYurts, feltArmor: this.feltArmor, hasPen: this.blds.some(b => b.owner === 'player' && b.key === 'pen' && b.done >= 1) },
       season: { name: this.seasonName(), winter: this.isWinter(), t: Math.max(0, Math.ceil(this.DAY_LEN - this.dayT)), feltYurts: this.feltYurts },
       court: this.persons.map(p => ({ name: p.name, role: p.role, traits: p.traits })),
+      toy: { due: this.toyDue, joy: Math.round(this.toyJoy * 100) },
       scoutNet: (() => {
         const tc = this.blds.find(b => b.owner === 'enemy' && b.key === 'towncenter');
         const near = tc ? this.watchPosts.some(w => dist2(w.x, w.y, tc.x, tc.y) < 420 * 420) : false;
