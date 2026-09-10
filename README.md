@@ -37,7 +37,7 @@
 - Локальная таблица рекордов (localStorage, топ-8)
 
 ### Управление
-**Десктоп:** Drag для бокса, double-click по типу, Right-click приказ, Wheel зум, WASD + edge-pan, 1-4 тренировка, Q/E/R/F стройка, G attack-move, T age-up, H домой, Space пауза, M mute
+**Десктоп:** Drag для бокса, double-click по типу, Right-click приказ, Wheel зум, WASD + edge-pan, 1-4 тренировка, Q/E/R/F стройка, G attack-move, T age-up, H загон, Home камера к ставке, Space пауза, N mute
 
 **Мобилка:** Tap выбор, tap по земле приказ, Box/Pan переключатель, pinch-zoom, minimap tap-to-jump, жирный док внизу
 

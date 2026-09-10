@@ -1590,7 +1590,10 @@ export class Game {
     else if (k === 'g') { if (this.selUnits().length) { this.attackArmed = !this.attackArmed; this.rallyArmed = false; this.patrolArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === 'y') { if (this.selUnits().some(u => u.key !== 'villager')) { this.patrolArmed = !this.patrolArmed; this.attackArmed = false; this.sound.select(); this.pushHud(); } }
     else if (k === '.' || k === 'ю') this.jumpToIdleVillager();
-    else if (k === 'm') this.toggleMute();
+    // Home — камера к Ханской ставке (не зависит от раскладки). Раньше «домой» не было вовсе.
+    else if (k === 'home') { this.centerTC(); e.preventDefault(); }
+    // N (рус. Т) — звук. Раньше висело на M, но M перехватывала мечеть — ветка была мёртвой.
+    else if (k === 'n' || k === 'т') this.toggleMute();
     else if (k === '+' || k === '=') this.zoomBy(0.15);
     else if (k === '-' || k === '_') this.zoomBy(-0.15);
     else if (k === 'a' && e.ctrlKey === false && e.metaKey === false) { /* camera handled in update via keys */ }

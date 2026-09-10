@@ -752,7 +752,7 @@ export default function App() {
             {!isMobile && (
               <div className="mt-1 hidden items-center justify-center gap-3 text-[10px] font-semibold text-slate-400 sm:flex">
                 <span className="flex items-center gap-1"><MousePointer2 className="h-3 w-3" />Рамка — выбор • ПКМ — приказ • Колесо — зум • камера к краю</span>
-                <span className="flex items-center gap-1"><Keyboard className="h-3 w-3" />WASD камера • B/V стена (тянуть) • Ctrl+1..5 группа • G атака • «.» шаруа • Space пауза</span>
+                <span className="flex items-center gap-1"><Keyboard className="h-3 w-3" />WASD камера • B/V стена (тянуть) • Ctrl+1..5 группа • G атака • «.» шаруа • Home ставка • N звук • Space пауза</span>
               </div>
             )}
           </div>
@@ -801,7 +801,7 @@ export default function App() {
               }}><Home className="h-4 w-4" />Меню</MidBtn>
             </div>
             <MidBtn onClick={() => setShowSettings(true)}><SettingsIcon className="h-4 w-4" />Настройки</MidBtn>
-            <MidBtn onClick={() => g()?.toggleMute()}>{hud?.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}{hud?.muted ? 'Включить звук' : 'Выключить звук'} (M)</MidBtn>
+            <MidBtn onClick={() => g()?.toggleMute()}>{hud?.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}{hud?.muted ? 'Включить звук' : 'Выключить звук'} (N)</MidBtn>
           </div>
           <ControlsRecap />
         </Overlay>
@@ -1580,7 +1580,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume }: { sc
                     <HowRow n="6" t="Дипломатия: шлите {i:envelope} посланников племенам — на 1/3/6 посланниках открываются бонусы (воины в дар, золото, скидки, урожай). Джунгары шлют своих: у кого больше — тот сюзерен. Победа — сжечь ставку хунтайджи!" />
                   </div>
                   <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-                    <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • 0-9 / QERFKMZXC / G / H / Space</div>
+                    <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • Home — к ставке • 0-9 / QERFKMZXC / G / H / N звук / Space</div>
                     <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>Касание — выбор • касание земли — приказ • Рамка/Камера • щипковый зум • прыжок по мини-карте</div>
                   </div>
                 </>
