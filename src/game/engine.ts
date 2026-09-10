@@ -230,15 +230,15 @@ function xpForLevel(level: number): number { return (level + 2) * 3; }
 // тип урона юнита для камень-ножницы-бумаги
 function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' | 'gun' {
   if (k === 'musketeer' || k === 'falconet') return 'gun';   // порох: броня не спасает
-  if (k === 'spearman' || k === 'archer' || k === 'horsearcher') return 'pierce';
+  if (k === 'spearman' || k === 'archer' || k === 'horsearcher' || k === 'camelry') return 'pierce';
   if (k === 'catapult' || k === 'ram') return 'blunt';
   return 'blade';
 }
 // класс брони цели
 function armorClass(k: UnitKey): 'inf' | 'cav' | 'siege' | 'soft' {
-  if (k === 'knight' || k === 'cavalry' || k === 'horsearcher') return 'cav';
+  if (k === 'knight' || k === 'cavalry' || k === 'horsearcher' || k === 'camelry') return 'cav';
   if (k === 'catapult' || k === 'ram' || k === 'falconet') return 'siege';
-  if (k === 'swordsman' || k === 'spearman') return 'inf';
+  if (k === 'swordsman' || k === 'spearman' || k === 'oghuzguard' || k === 'druzhinnik') return 'inf';
   return 'soft';
 }
 // множитель контры: копья бьют конницу, конница топчет лучников/пехоту, клинки рубят пехоту/осаду
@@ -278,7 +278,7 @@ export const YASA_POLICIES = [
 ] as const;
 export type YasaId = typeof YASA_POLICIES[number]['id'];
 // какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
-const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram', 'musketeer', 'falconet'];
+const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram', 'musketeer', 'falconet', 'camelry', 'oghuzguard', 'druzhinnik'];
 export function counterText(k: UnitKey): string {
   if (k === 'villager' || k === 'monk' || k === 'trader') return '';
   const parts: string[] = [];
@@ -2808,6 +2808,15 @@ export class Game {
       this.sound.error(); return;
     }
     if (this.popUsed('player') + d.pop > this.popCap('player')) { this.floater(b.x, b.y - 60, 'Постройте дома! (+8 к населению)', '#f87171', 17); this.sound.error(); return; }
+    // ── ПЛЕМЕННЫЕ ЮНИТЫ (п.38): найм открыт только при сюзеренитете народа ──
+    const tribeOf = (d as unknown as { tribeOf?: string }).tribeOf;
+    if (tribeOf) {
+      if (this.suzerain(tribeOf) !== 'player') {
+        const ndef = NATION_BY_ID[tribeOf];
+        this.floater(b.x, b.y - 60, `Нужен сюзеренитет у «${ndef?.name ?? tribeOf}» (6 посланников)`, '#f87171', 15);
+        this.sound.error(); return;
+      }
+    }
     // ── СТРАТЕГИЧЕСКИЕ РЕСУРСЫ (п.30): конница и порох требуют коней/железа под контролем ──
     const needRes: Partial<Record<UnitKey, ('horse' | 'iron')[]>> = {
       cavalry: ['horse'], horsearcher: ['horse'], knight: ['horse', 'iron'], musketeer: ['iron'], falconet: ['iron'],
@@ -6820,6 +6829,14 @@ export class Game {
           if (u.buildId === b.id && dist2(u.x, u.y, b.x, b.y) < 110 * 110) {
             helpers++;
             if (Math.random() < dt * 8) this.spark(b.x + rand(-24, 24), b.y - rand(0, 30), '#f6d47c');
+          }
+        }
+        // Бухарский мирза (п.38): учёный строитель работает за двоих
+        for (const u of this.units) {
+          if (u.owner !== b.owner || u.key !== 'mirza') continue;
+          if (u.buildId === b.id && dist2(u.x, u.y, b.x, b.y) < 110 * 110) {
+            helpers += 2;
+            if (Math.random() < dt * 8) this.spark(b.x + rand(-24, 24), b.y - rand(0, 30), '#34d399');
           }
         }
         rate *= 1 + Math.min(3, helpers) * 1.1;

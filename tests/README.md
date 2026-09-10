@@ -19,6 +19,7 @@ node tests/caravan-bell-sim.mjs # колокол ставки + грабёж к�
 node tests/yasa-eureka-sim.mjs  # яса: карточки политик + эврики техов (1.0.111)
 node tests/dynamic-ai-sim.mjs   # динамический ИИ: решимость, коалиции (1.0.112)
 node tests/faith-sim.mjs        # религиозная победа: вера, миссионеры (1.0.113)
+node tests/tribal-units-sim.mjs # уникальные юниты племён за сюзеренитет (1.0.114)
 ```
 
 Раньше эти файлы лежали в `/tmp` и были потеряны при очистке каталога —

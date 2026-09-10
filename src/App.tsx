@@ -6,7 +6,7 @@ import {
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
 import { DEDICATIONS, Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
-import { PLAYER_NATION } from './game/nations';
+import { PLAYER_NATION, NATION_BY_ID } from './game/nations';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
 import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
@@ -759,6 +759,13 @@ export default function App() {
                   <TrainBtn label="Имам" icon="mosque" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
                   <TrainBtn label="Барлаушы" icon="compass" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
                   <TrainBtn label="Көпес" icon="camel" key_="0" cost={UNIT_DEFS.trader.cost} ok={canAfford(UNIT_DEFS.trader.cost)} tip={unitStats('trader') + ' · нужен Базар и друзья-соседи'} onClick={() => g()?.train('trader')} />
+                  {(['camelry', 'oghuzguard', 'druzhinnik', 'mirza'] as const).map(k => {
+                    const nid = (UNIT_DEFS[k] as unknown as { tribeOf?: string }).tribeOf!;
+                    const ndef = NATION_BY_ID[nid];
+                    const suz = hud?.nations?.find(n => n.id === nid)?.suzerain === 'player';
+                    if (!suz) return null;   // племенной юнит появляется в доке только за сюзеренитет (п.38)
+                    return <TrainBtn key={k} label={UNIT_DEFS[k].name.replace(/^(Хорезмский |Огузский |Славянский |Бухарский )/, '')} icon={k === 'camelry' ? 'camel' : k === 'mirza' ? 'scroll' : k === 'oghuzguard' ? 'spear' : 'saber'} key_="" cost={UNIT_DEFS[k].cost} ok={canAfford(UNIT_DEFS[k].cost) && (hud?.age ?? 0) >= UNIT_DEFS[k].ageReq} lock={(hud?.age ?? 0) < UNIT_DEFS[k].ageReq} tip={unitStats(k) + ` · уникальный юнит «${ndef?.name ?? nid}»`} onClick={() => g()?.train(k)} />;
+                  })}
                 </>
               ) : (
                 <>

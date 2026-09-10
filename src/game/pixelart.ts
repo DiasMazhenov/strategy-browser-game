@@ -500,7 +500,10 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   // атты-мерген (п.24) рисуется кадрами жасауыла с оливковой перекраской и луком — своего арта нет
   const isHA = u.key === 'horsearcher';
   const isMusk = u.key === 'musketeer';
-  const sk = (isHA ? 'cavalry' : isMusk ? 'archer' : u.key) as UnitKey;
+  // племенные юниты (п.38): кадры базовых родов с цветом народа — своего арта нет
+  const TRIBE_SPRITE: Partial<Record<string, UnitKey>> = { camelry: 'cavalry', oghuzguard: 'spearman', druzhinnik: 'swordsman', mirza: 'villager' };
+  const tsk = TRIBE_SPRITE[u.key as string];
+  const sk = (tsk ?? (isHA ? 'cavalry' : isMusk ? 'archer' : u.key)) as UnitKey;
   const isKz = u.owner === 'player' && !!KZ_BASE[sk];
   const kzKey = 'kz_' + sk;
   const base = isKz ? KZ_BASE[sk] : UNIT_IMAGES[sk];
@@ -519,7 +522,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isArch = u.key === 'archer' || u.key === 'musketeer';
   const isSpear = u.key === 'spearman';
   const isKnight = u.key === 'knight';
-  const isCavalry = u.key === 'cavalry' || u.key === 'horsearcher';
+  const isCavalry = u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'camelry';
   const isMonk = u.key === 'monk';
   const isWolf = u.key === 'wolf';
   const isCowUnit = u.key === 'cow';
@@ -773,6 +776,11 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   let drawIm: CanvasImageSource = tier > 0
     ? tintedFrame(im, anKey, tier >= 2 ? '#fbbf24' : '#e2e8f0', tier >= 2 ? 0.30 : 0.20)
     : im;
+  // племенные цвета (п.38): охра Хорезма, бордо огузов, сталь Руси, изумруд Бухары
+  if (u.key === 'camelry') drawIm = tintedFrame(im, anKey + '|cm', '#b45309', 0.30);
+  if (u.key === 'oghuzguard') drawIm = tintedFrame(im, anKey + '|og', '#7f1d1d', 0.28);
+  if (u.key === 'druzhinnik') drawIm = tintedFrame(im, anKey + '|dr', '#0e7490', 0.28);
+  if (u.key === 'mirza') drawIm = tintedFrame(im, anKey + '|mz', '#047857', 0.28);
   if (isHA) drawIm = tintedFrame(im, anKey + '|ha', '#65a30d', 0.28);   // оливковый чапан — отличим от жасауыла
   if (isMusk) drawIm = tintedFrame(im, anKey + '|mk', '#1e293b', 0.34);  // тёмный кафтан стрелка
   // Высота отрисовки — an.h * scale, а НЕ H: при поправке на надголовный вынос
@@ -1246,7 +1254,7 @@ const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.sta
 
 export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
   const herder = u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder;
-  const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'trader' || herder;
+  const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'camelry' || u.key === 'trader' || herder;
   const shadowR = u.key === 'catapult' || u.key === 'ram' ? 21 : u.key === 'falconet' ? 17 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
   diamondShadow(ctx, ix + 2, iy + 8, shadowR, shadowR / 2.2, 'rgba(0,0,0,0.28)');
@@ -1312,7 +1320,7 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
   const hp = (u as unknown as { hp?: number; maxHp?: number }).hp;
   const maxHp = (u as unknown as { maxHp?: number }).maxHp;
   if (hp != null && maxHp != null && (hp < maxHp || selected)) {
-    const hk = (u.key === 'horsearcher' ? 'cavalry' : u.key) as UnitKey;
+    const hk = (u.key === 'horsearcher' || u.key === 'camelry' ? 'cavalry' : u.key === 'oghuzguard' ? 'spearman' : u.key === 'druzhinnik' ? 'swordsman' : u.key === 'mirza' ? 'villager' : u.key) as UnitKey;
     const sprReady = !!(UNIT_IMAGES[hk] && (UNIT_IMAGES[hk] as HTMLImageElement).complete && UNIT_ANCHORS[hk]);
     const unitH = sprReady ? (UNIT_TARGET_H[hk] ?? 46) : (mounted ? 52 : u.key === 'catapult' || u.key === 'ram' ? 44 : 46);
     const bw = mounted || u.key === 'catapult' || u.key === 'ram' ? 40 : 32;
@@ -1329,7 +1337,7 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
   const lvl = (u as unknown as { level?: number }).level;
   if (u.owner === 'player' && lvl && lvl >= 2) {
     const stars = lvl - 1; // ур.2 → 1 звезда … ур.5 → 4
-    const hk = (u.key === 'horsearcher' ? 'cavalry' : u.key) as UnitKey;
+    const hk = (u.key === 'horsearcher' || u.key === 'camelry' ? 'cavalry' : u.key === 'oghuzguard' ? 'spearman' : u.key === 'druzhinnik' ? 'swordsman' : u.key === 'mirza' ? 'villager' : u.key) as UnitKey;
     const sprReady = !!(UNIT_IMAGES[hk] && (UNIT_IMAGES[hk] as HTMLImageElement).complete && UNIT_ANCHORS[hk]);
     const unitH = sprReady ? (UNIT_TARGET_H[hk] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
     const sy = iy + 8 - unitH - 14;
