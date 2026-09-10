@@ -39,17 +39,21 @@ export const UNIT_DEFS = {
 export type UnitKey = keyof typeof UNIT_DEFS;
 
 // ── Технологии (исследуются в зданиях) ──
-export interface TechDef { id: string; name: string; desc: string; bld: BuildingKey; ageReq: number; cost: { wood: number; food: number; gold: number }; time: number; icon: string }
+export interface TechDef {
+  id: string; name: string; desc: string; bld: BuildingKey; ageReq: number;
+  cost: { wood: number; food: number; gold: number }; time: number; icon: string;
+  eureka?: string;  // условие-ускорение (Civ VI Boosts, п.39): выполнил — цена −40% (арба — бесплатно)
+}
 export const TECHS: Record<string, TechDef> = {
-  sharpBlades: { id: 'sharpBlades', name: 'Дамасские сабли', desc: '+25% к атаке всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 0, food: 120, gold: 150 }, time: 20, icon: 'swords' },
-  forgedArmor:  { id: 'forgedArmor', name: 'Кольчуга батыра', desc: '+25% к здоровью всей армии', bld: 'blacksmith', ageReq: 1, cost: { wood: 150, food: 0, gold: 150 }, time: 20, icon: 'shield' },
-  infantryDrill:{ id: 'infantryDrill', name: 'Выучка сарбазов', desc: '+15% к скорости пехоты', bld: 'barracks', ageReq: 0, cost: { wood: 0, food: 150, gold: 60 }, time: 18, icon: 'medal' },
-  eagleEye:     { id: 'eagleEye', name: 'Глаз беркута', desc: '+20% к дальности стрелков и башен', bld: 'barracks', ageReq: 1, cost: { wood: 100, food: 0, gold: 120 }, time: 18, icon: 'eagle' },
-  horseBreeding:{ id: 'horseBreeding', name: 'Аргамаки', desc: '+15% к скорости и HP конницы', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 180, gold: 140 }, time: 22, icon: 'horse' },
-  heavyShot:    { id: 'heavyShot', name: 'Тяжёлые снаряды', desc: '+35% к урону катапульт', bld: 'blacksmith', ageReq: 2, cost: { wood: 200, food: 0, gold: 200 }, time: 24, icon: 'stone' },
-  ironTools:    { id: 'ironTools', name: 'Железные орудия', desc: '+30% к скорости добычи', bld: 'towncenter', ageReq: 0, cost: { wood: 120, food: 0, gold: 80 }, time: 16, icon: 'pick' },
-  wheelbarrow:  { id: 'wheelbarrow', name: 'Арба', desc: 'Шаруа переносят больше груза', bld: 'towncenter', ageReq: 0, cost: { wood: 100, food: 60, gold: 0 }, time: 16, icon: 'wheel' },
-  coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: 'gold' },
+  sharpBlades: { id: 'sharpBlades', name: 'Дамасские сабли', desc: '+25% к атаке всей армии', eureka: 'убить 25 врагов — сабли −40% золота', bld: 'blacksmith', ageReq: 1, cost: { wood: 0, food: 120, gold: 150 }, time: 20, icon: 'swords' },
+  forgedArmor:  { id: 'forgedArmor', name: 'Кольчуга батыра', desc: '+25% к здоровью всей армии', eureka: 'дожить до 3-й волны — кольчуга −40%', bld: 'blacksmith', ageReq: 1, cost: { wood: 150, food: 0, gold: 150 }, time: 20, icon: 'shield' },
+  infantryDrill:{ id: 'infantryDrill', name: 'Выучка сарбазов', desc: '+15% к скорости пехоты', eureka: 'обучить 15 воинов — выучка −40%', bld: 'barracks', ageReq: 0, cost: { wood: 0, food: 150, gold: 60 }, time: 18, icon: 'medal' },
+  eagleEye:     { id: 'eagleEye', name: 'Глаз беркута', desc: '+20% к дальности стрелков и башен', eureka: 'поставить 2 башни — глаз беркута −40%', bld: 'barracks', ageReq: 1, cost: { wood: 100, food: 0, gold: 120 }, time: 18, icon: 'eagle' },
+  horseBreeding:{ id: 'horseBreeding', name: 'Аргамаки', desc: '+15% к скорости и HP конницы', eureka: 'собрать 8 конных — аргамаки −40%', bld: 'stable', ageReq: 1, cost: { wood: 0, food: 180, gold: 140 }, time: 22, icon: 'horse' },
+  heavyShot:    { id: 'heavyShot', name: 'Тяжёлые снаряды', desc: '+35% к урону катапульт', eureka: 'снести 3 постройки джунгар — снаряды −40%', bld: 'blacksmith', ageReq: 2, cost: { wood: 200, food: 0, gold: 200 }, time: 24, icon: 'stone' },
+  ironTools:    { id: 'ironTools', name: 'Железные орудия', desc: '+30% к скорости добычи', eureka: 'собрать 800 дерева — орудия −40%', bld: 'towncenter', ageReq: 0, cost: { wood: 120, food: 0, gold: 80 }, time: 16, icon: 'pick' },
+  wheelbarrow:  { id: 'wheelbarrow', name: 'Арба', desc: 'Шаруа переносят больше груза', eureka: 'вспахать 3 пашни — арба бесплатно', bld: 'towncenter', ageReq: 0, cost: { wood: 100, food: 60, gold: 0 }, time: 16, icon: 'wheel' },
+  coinage:      { id: 'coinage', name: 'Чеканка монеты', desc: 'Базар даёт больше золота и выгодный обмен', eureka: 'заработать 400 золота за партию — чеканка −40%', bld: 'market', ageReq: 0, cost: { wood: 0, food: 100, gold: 100 }, time: 16, icon: 'gold' },
 };
 
 // ── ЛИНИИ АПГРЕЙДА ЮНИТОВ (AoE) ────────────────────────────────────────────

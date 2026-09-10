@@ -265,6 +265,18 @@ export const DEDICATIONS = [
 ] as const;
 export type DedicationId = typeof DEDICATIONS[number]['id'];
 const ERA_THRESHOLD = [0, 45, 70, 100];           // порог золотого века по номеру новой эпохи
+// ── ЯСА (п.32): карточки политик в духе Civ ──
+// Активны максимум 3 карточки; включение стоит мудрости, снятие бесплатно.
+// Эффекты зашиты в точки применения (бой/добыча/торговля/дипломатия) — см. yasaActive().
+export const YASA_POLICIES = [
+  { id: 'sonzhar',  name: 'Сын жау',      icon: 'swords',  cat: 'Военные',   desc: 'атака всей армии +12%' },
+  { id: 'teznayza', name: 'Тез найза',    icon: 'medal',   cat: 'Военные',   desc: 'войска готовятся на 20% быстрее' },
+  { id: 'zhorkor',  name: 'Жер қор',      icon: 'tree',    cat: 'Экономика', desc: 'добыча дерева и еды +15%' },
+  { id: 'sauda',    name: 'Сауда жолы',   icon: 'gold',    cat: 'Экономика', desc: 'караваны и базар +30% золота' },
+  { id: 'damel',    name: 'Дәмел',        icon: 'mosque',  cat: 'Вера',      desc: 'мудрость +20%, береке на четверть сильнее' },
+  { id: 'aralas',   name: 'Аралас ұлыс',  icon: 'dove',    cat: 'Дипломатия', desc: 'посланники и дары племенам вдвое дешевле' },
+] as const;
+export type YasaId = typeof YASA_POLICIES[number]['id'];
 // какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
 const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram', 'musketeer', 'falconet'];
 export function counterText(k: UnitKey): string {
@@ -354,6 +366,8 @@ export interface TechTreeRow {
   bld: string; bldName: string; ageReq: number; cost: string; time: number;
   state: 'done' | 'researching' | 'ready' | 'nobuild' | 'age';
   canStart: boolean;
+  eureka?: string;      // условие-ускорение (Civ VI Boosts, п.39)
+  eurekaDone?: boolean; // условие выполнено — цена снижена
 }
 // Экран итогов эпохи: сводка за прожитую эпоху (пункт 10 плана).
 export interface AgeReport {
@@ -402,6 +416,9 @@ export interface HudSnapshot {
   unite: { have: number; need: number; t: number; hold: number };
   // великие люди: мудрость и карточки призыва
   wisdom: number; wisdomRate: number;
+  // яса (п.32): карточки политик — активность, слоты, цена включения
+  yasa: { id: string; name: string; icon: string; cat: string; desc: string; active: boolean }[];
+  yasaSlots: number; yasaCost: number;
   era: { state: 'normal' | 'golden' | 'dark'; heroic: boolean; dedication: string | null;
          dedName: string; dedIcon: string; dedDesc: string };
   // азан по реальному времени: расписание на сегодня и ближайший намаз
@@ -538,6 +555,10 @@ export class Game {
   // конце концов меняет владельца. Только лояльные гексы идут в счёт победы.
   loyal = new Map<string, number>();
   // ── ЛАГЕРЯ БАНДИТОВ (п.25) ──
+  // ── ЯСА (п.32) и ЭВРИКИ (п.39) ──
+  yasa: Record<string, boolean> = {};       // активные карточки политик (≤3)
+  eurekaDone: Record<string, boolean> = {}; // выполненные условия-ускорения техов
+  eurekaT = 0;                              // тик проверки эврик
   // ── КОЛОКОЛ СТАВКИ (п.36, AoE Town Bell) ──
   bellOn = false;                 // колокол звенит: шаруа спрятаны по гарнизонам
   bellIds: number[] = [];         // кто ушёл в укрытие по звонку (возвращаем отбоем)
@@ -1329,6 +1350,7 @@ export class Game {
     r += this.relicsHeld * 0.8;
     // призванный Айтеке би ускоряет и саму «культурную» линию
     if (this.hasGreat('aiteke')) r *= 1.15;
+    if (this.yasaActive('damel')) r *= 1.2; // Яса «Дәмел» (п.32)
     return r * this.eraWisdomMult();        // Иман/тёмный век (п.22)
   }
 
@@ -1338,6 +1360,26 @@ export class Game {
   private ded(id: DedicationId): number {
     if (this.eraState !== 'golden' || this.eraDedication !== id) return 0;
     return this.eraHeroic ? 1.5 : 1;               // героический век усиливает посвящение в полтора раза
+  }
+  // ── ЯСА (п.32): карточки политик ──
+  yasaActive(id: string): boolean { return !!this.yasa[id]; }
+  yasaCount(): number { return Object.keys(this.yasa).length; }
+  readonly YASA_SLOTS = 3;
+  readonly YASA_COST = 30;   // мудрости за включение карточки (снятие бесплатно)
+  yasaToggle(id: string): boolean {
+    const p = YASA_POLICIES.find(x => x.id === id);
+    if (!p || this.over) return false;
+    if (this.yasa[id]) {
+      delete this.yasa[id];
+      this.floater(this.cam.x, this.cam.y - 90, `Яса снята: ${p.name}`, '#94a3b8', 15);
+      this.sound.select(); this.pushHud(); return true;
+    }
+    if (this.yasaCount() >= this.YASA_SLOTS) { this.floater(this.cam.x, this.cam.y - 100, `Все ${this.YASA_SLOTS} слота Ясы заняты — сначала снимите одну`, '#f87171', 15); this.sound.error(); return false; }
+    if (this.wisdom < this.YASA_COST) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${this.YASA_COST} мудрости на новую ясу`, '#f87171', 15); this.sound.error(); return false; }
+    this.wisdom -= this.YASA_COST;
+    this.yasa[id] = true;
+    this.pushBanner(`{i:scroll} Яса: ${p.name}`, p.desc, 3);
+    this.sound.research(); this.pushHud(); return true;
   }
   eraGatherMult(): number { return this.eraState === 'dark' ? 0.9 : 1 + 0.15 * this.ded('daulet'); }
   eraKoshMult(): number { return this.eraState === 'dark' ? 1.25 : 1 - 0.3 * this.ded('kosh'); }
@@ -1444,7 +1486,8 @@ export class Game {
     if (!this.metNation(nid)) { this.floater(this.cam.x, this.cam.y - 100, 'Вы ещё не знакомы с этим народом', '#94a3b8', 15); return false; }
     if (this.tribeRel[nid] === 'hostile') { this.floater(this.cam.x, this.cam.y - 100, 'Племя враждебно — сначала помиритесь', '#f87171', 15); this.sound.error(); return false; }
     const have = this.envoys[nid] ?? 0;
-    const cost = envoyCost(have);
+    // Яса «Аралас ұлыс» (п.32): посланники вдвое дешевле
+    const cost = Math.round(envoyCost(have) * (this.yasaActive('aralas') ? 0.5 : 1));
     if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 15); this.sound.error(); return false; }
     const wasSuz = this.suzerain(nid);
     const wasLv = this.envoyLevel(nid);
@@ -1803,7 +1846,8 @@ export class Game {
     if (act === 'threat') act = 'attack';
     if (act === 'greet') { this.greetShown.delete(nid); this.greeting = { nationId: nid }; return true; }
     if (act === 'gift') {
-      const cost = def.choices.find(c => c.act === 'gift')?.gold ?? 40;
+      // Яса «Аралас ұлыс» (п.32): дары племенам вдвое дешевле
+      const cost = Math.round((def.choices.find(c => c.act === 'gift')?.gold ?? 40) * (this.yasaActive('aralas') ? 0.5 : 1));
       if (rel === 'friend') { this.floater(this.cam.x, this.cam.y - 100, 'Уже дружны', '#94a3b8', 14); return false; }
       if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 15); return false; }
       this.res.gold -= cost; this.tribeRel[nid] = 'friend';
@@ -2719,7 +2763,8 @@ export class Game {
     }
     if (!this.afford(d.cost)) { this.floater(b.x, b.y - 60, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
     this.pay(d.cost);
-    b.queue.push({ key, t: 0, total: d.trainTime });
+    // Яса «Тез найза» (п.32): войска готовятся на 20% быстрее
+    b.queue.push({ key, t: 0, total: this.yasaActive('teznayza') ? d.trainTime / 1.2 : d.trainTime });
     this.sound.train();
     this.burst(b.x, b.y - 20, 8, ['#f6d47c', '#fff7cc'], 60);
     this.pushHud();
@@ -2835,6 +2880,7 @@ export class Game {
         tradeRoute: this.tradeRoute, napT: this.napT, condemned: this.condemned, tributeT: this.tributeT,
         uniteT: this.uniteT, uniteAnn: this.uniteAnn },
       era: { s: this.eraState, d: this.eraDedication, h: this.eraHeroic, c: this.eraHeroicCharge },
+      yasa: this.yasa, eureka: this.eurekaDone,
       nations: { rivalMet: this.rivalMet, tribeMet: this.tribeMet, tribeRel: this.tribeRel,
         envoys: this.envoys, rivalEnvoys: this.rivalEnvoys },
       events: { eventT: this.eventT, seen: this.eventSeen, drought: this.droughtT, plague: this.plagueT, weather: this.weather, weatherT: this.weatherT },
@@ -2966,6 +3012,9 @@ export class Game {
       if (d.ageMark) this.ageMark = d.ageMark;
       if (d.era) { this.eraState = d.era.s ?? 'normal'; this.eraDedication = d.era.d ?? null;
         this.eraHeroic = !!d.era.h; this.eraHeroicCharge = d.era.c ?? 0; }
+      // яса и эврики (1.0.111): старые сейвы без полей — пусто
+      this.yasa = d.yasa && typeof d.yasa === 'object' ? d.yasa : {};
+      this.eurekaDone = d.eureka && typeof d.eureka === 'object' ? d.eureka : {};
       this.soldiersTrained = d.soldiersTrained || 0; this.barracksBuilt = d.barracksBuilt || 0; this.wolvesSlain = d.wolvesSlain || 0;
       this.relicsHeld = d.relicsHeld || 0;
       this.wisdom = d.wisdom || 0;
@@ -3141,11 +3190,49 @@ export class Game {
       return {
         id: t.id, name: t.name, desc: t.desc, icon: t.icon,
         bld: t.bld, bldName: BUILDING_DEFS[t.bld].name, ageReq: t.ageReq,
-        cost: costTxt(t.cost), time: t.time, state,
-        canStart: state === 'ready' && this.afford(t.cost) && !this.blds.some(b => b.owner === 'player' && b.research),
+        cost: costTxt(this.techCost(t)), time: t.time, state,
+        canStart: state === 'ready' && this.afford(this.techCost(t)) && !this.blds.some(b => b.owner === 'player' && b.research),
+        eureka: t.eureka, eurekaDone: !!this.eurekaDone[t.id],
       };
     }).sort((a, b) => a.ageReq - b.ageReq || a.id.localeCompare(b.id));
   }
+  // ── ЭВРИКИ (п.39, Civ VI Boosts): цена теха с учётом выполненного условия ──
+  techCost(t: { id: string; cost: { wood: number; food: number; gold: number }; eureka?: string }): { wood: number; food: number; gold: number } {
+    if (!t.eureka || !this.eurekaDone[t.id]) return t.cost;
+    // арба — бесплатно, остальные −40%
+    if (t.id === 'wheelbarrow') return { wood: 0, food: 0, gold: 0 };
+    return { wood: Math.round(t.cost.wood * 0.6), food: Math.round(t.cost.food * 0.6), gold: Math.round(t.cost.gold * 0.6) };
+  }
+  // Условия эврик на уже считающихся счётчиках; проверка раз в секунду.
+  private updateEurekas(dt: number) {
+    this.eurekaT += dt;
+    if (this.eurekaT < 1) return;
+    this.eurekaT = 0;
+    const farms = this.blds.filter(b => b.owner === 'player' && b.key === 'farm' && b.done >= 1).length;
+    const towers = this.blds.filter(b => b.owner === 'player' && b.key === 'tower' && b.done >= 1).length;
+    const horses = this.units.filter(u => u.owner === 'player' && (u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher')).length;
+    const cond: Record<string, boolean> = {
+      sharpBlades: this.kills >= 25,
+      forgedArmor: this.wave >= 3,
+      infantryDrill: this.soldiersTrained >= 15,
+      eagleEye: towers >= 2,
+      horseBreeding: horses >= 8,
+      heavyShot: this.razed >= 3,
+      ironTools: this.woodGathered >= 800,
+      wheelbarrow: farms >= 3,
+      coinage: this.gotGold >= 400,
+    };
+    for (const id of Object.keys(cond)) {
+      if (!cond[id] || this.eurekaDone[id] || this.tech[id]) continue;
+      const t = TECHS[id];
+      if (!t?.eureka) continue;
+      this.eurekaDone[id] = true;
+      this.pushBanner('{i:bulb} Эврика!', `${t.name}: ${t.eureka}`, 3.4);
+      this.sound.research();
+      this.score += 80;
+    }
+  }
+
   research(id: string) {
     const t = TECHS[id] ?? UPGRADES[id];   // линии апгрейда идут тем же путём, что и техи
     if (!t || this.paused || this.over) return;
@@ -3162,8 +3249,10 @@ export class Game {
     if (this.age < t.ageReq) { this.floater(this.cam.x, this.cam.y - 110, `Нужен: ${AGES[t.ageReq].name}!`, '#f87171', 17); this.sound.error(); return; }
     const b = this.blds.find(bl => bl.owner === 'player' && bl.key === t.bld && bl.done >= 1 && !bl.research);
     if (!b) { this.floater(this.cam.x, this.cam.y - 110, `Нужна свободная: ${BUILDING_DEFS[t.bld].name}`, '#f87171', 16); this.sound.error(); return; }
-    if (!this.afford(t.cost)) { this.floater(this.cam.x, this.cam.y - 110, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
-    this.pay(t.cost);
+    const cost = this.techCost(t);
+    if (!this.afford(cost)) { this.floater(this.cam.x, this.cam.y - 110, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
+    this.pay(cost);
+    if (this.eurekaDone[id]) this.floater(b.x, b.y - 70, '{i:bulb} Эврика: скидка применена!', '#fde047', 15);
     // Айтеке би («право»): своды законов ускоряют учёные споры — исследования на 20% быстрее
     b.research = { id, t: 0, total: t.time * (this.hasGreat('aiteke') ? 0.8 : 1) };
     this.sound.select();
@@ -3211,6 +3300,8 @@ export class Game {
     if ((u.freshT ?? 0) > 0) m *= this.FRESH_BONUS;              // вернулся с отдыха — бодр
     else if ((u.fatigue ?? 0) > 0.7) m *= 1 - ((u.fatigue ?? 0) - 0.7) * 0.8; // вымотан — вяло
     m *= this.berekeMult();                                      // благодать после намаза
+    // Яса «Жер қор» (п.32): дерево и еда +15%
+    if (this.yasaActive('zhorkor') && (u.carry.type === 'wood' || u.carry.type === 'food')) m *= 1.15;
     // чудо природы (п.29): аура места — работа рядом с ним на 25% быстрее
     for (const w of this.natWonders) {
       if (this.tdx(u.x - w.x) ** 2 + this.tdy(u.y - w.y) ** 2 < WONDER_AURA * WONDER_AURA) { m *= 1.25; break; }
@@ -3586,7 +3677,7 @@ export class Game {
     this.pushHud();
   }
   // множитель благодати для добычи (1.0 — нет благодати)
-  berekeMult(): number { return this.berekeT > 0 ? 1 + 0.15 * this.berekePower : 1; }
+  berekeMult(): number { return this.berekeT > 0 ? 1 + 0.15 * (this.yasaActive('damel') ? 1.25 : 1) * this.berekePower : 1; }
 
   // тик молящегося: дойти до мечети, отстоять намаз
   updatePraying(u: Unit, dt: number): boolean {
@@ -4515,6 +4606,7 @@ export class Game {
     this.updateWeather(dt);        // погода: дождь, туман, буран
     this.updateBandits(dt);        // набеги и респавн стоянок разбойников
     this.updateNatWonders(dt);     // чудеса природы: открытие даёт очки и мудрость
+    this.updateEurekas(dt);        // эврики: условия-ускорения техов
     this.updateEnvoyAI(dt);        // джунгары конкурируют за племена
     this.updateTribeBonuses(dt);   // дары военных союзников, доход торговых
     this.updateFog(dt);
@@ -6297,6 +6389,7 @@ export class Game {
         const leg = Math.hypot(dest.x - home.x, dest.y - home.y);
         let bonus = this.hasTech('coinage') ? 1.35 : 1;
         if (this.bonusTier('trade', 3)) bonus *= 1.5; // союз торговых народов: караваны богаче
+        if (this.yasaActive('sauda')) bonus *= 1.3;   // Яса «Сауда жолы» (п.32)
         u.trGold = Math.round(Math.min(90, 14 + leg / 22) * bonus);
         u.trPhase = 'back'; u.trWaitT = 1.2;
         this.burst(u.x, u.y - 18, 6, ['#fde047', '#facc15', '#fff7cc'], 60, 0.6);
@@ -6444,6 +6537,8 @@ export class Game {
     att.atkAnim = 1;
     const variance = rand(0.85, 1.15);
     let dmg = att.atk * variance;
+    // Яса «Сын жау» (п.32): армия бьёт на 12% больнее
+    if (att.owner === 'player' && this.yasaActive('sonzhar')) dmg *= 1.12;
     // боевой дух армии ИИ (штраф за несправедливую войну)
     if (att.owner === 'enemy' && att.key !== 'villager') dmg *= this.morale;
     // типы урона: камень-ножницы-бумага против юнитов
@@ -6705,7 +6800,7 @@ export class Game {
       }
       // market passive gold trickle
       if (b.key === 'market' && b.owner === 'player' && b.done >= 1) {
-        b.smokeT += dt * (this.hasTech('coinage') ? 2.0 : 1.2);
+        b.smokeT += dt * (this.hasTech('coinage') ? 2.0 : 1.2) * (this.yasaActive('sauda') ? 1.3 : 1);
         if (b.smokeT >= 1) { b.smokeT -= 1; this.res.gold += 1; }
       }
       // research progress
@@ -7332,6 +7427,8 @@ export class Game {
           next: PRAYER_NAMES[nx.key].kz, nextAt: fmtHM(nx.at), inMin: Math.round(nx.inMin),
           times: this.realPrayerSchedule() };
       })(),
+      yasa: YASA_POLICIES.map(p => ({ id: p.id, name: p.name, icon: p.icon, cat: p.cat, desc: p.desc, active: this.yasaActive(p.id) })),
+      yasaSlots: this.YASA_SLOTS, yasaCost: this.YASA_COST,
       greats: GREATS.map(g => ({ id: g.id, name: g.name, title: g.title, portrait: g.portrait,
         cost: g.cost, effect: g.effect, called: this.hasGreat(g.id),
         afford: this.wisdom >= g.cost && !this.hasGreat(g.id) })),

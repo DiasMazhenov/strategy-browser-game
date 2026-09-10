@@ -84,6 +84,7 @@ export default function App() {
     typeof window === 'undefined' || !matchMedia('(pointer: coarse)').matches);
   const [showTech, setShowTech] = useState(false);
   const [showGreats, setShowGreats] = useState(false);
+  const [showYasa, setShowYasa] = useState(false);
   const [showDip, setShowDip] = useState(false);
   const [gameId, setGameId] = useState(0);
   const [loadSave, setLoadSave] = useState(false);
@@ -103,6 +104,8 @@ export default function App() {
       if ((k === 'l' || k === 'д') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowTech(s => !s);
       // J (рус. О) — совет великих людей
       if ((k === 'j' || k === 'о') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowGreats(s => !s);
+      // O (рус. Щ) — Яса: карточки политик
+      if ((k === 'o' || k === 'щ') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowYasa(s => !s);
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -379,6 +382,10 @@ export default function App() {
             <IconBtn onClick={() => setShowGreats(true)} label="Великие люди степи (J)">
               <span className="relative text-sm leading-none"><Ico name="sparkle" className="h-4 w-4" />{(hud?.greats?.some(x => x.afford) ?? false) &&
                 <span className="absolute -right-1.5 -top-1 h-2 w-2 rounded-full bg-amber-400" />}</span>
+            </IconBtn>
+            <IconBtn onClick={() => setShowYasa(true)} label="Яса — политики ханства (O)">
+              <span className="relative text-sm leading-none"><Ico name="scroll" className="h-4 w-4" />{(hud?.yasa?.filter(y => y.active).length ?? 0) > 0 &&
+                <span className="absolute -right-1.5 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-amber-400 text-[8px] font-black text-black">{hud?.yasa.filter(y => y.active).length}</span>}</span>
             </IconBtn>
             <IconBtn onClick={() => setShowSettings(true)} label="Настройки">
               <SettingsIcon className="h-4 w-4" />
@@ -894,6 +901,39 @@ export default function App() {
         </div>
       )}
 
+      {/* ===== ЯСА: карточки политик ===== */}
+      {showYasa && hud && (
+        <div className="absolute inset-0 z-[61] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setShowYasa(false)}>
+          <div className="kz-corners panel-iron w-full max-w-xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between">
+              <div className="font-display text-lg font-black tracking-wide text-amber-200"><Ico name="scroll" /> ЯСА ХАНСТВА</div>
+              <button onClick={() => setShowYasa(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10"><Ico name="cross" /></button>
+            </div>
+            <p className="mb-3 text-[12px] leading-relaxed text-slate-400">
+              Карточки политик: активно до <b className="text-amber-200">{hud.yasaSlots}</b> одновременно. Включение —
+              <b className="text-teal-200"> {hud.yasaCost} мудрости</b>, снятие бесплатно. Сейчас мудрости: <b className="text-teal-200">{hud.wisdom}</b>.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {hud.yasa.map(ya => (
+                <button key={ya.id} onClick={() => gameRef.current?.yasaToggle(ya.id)}
+                  className={`rounded-2xl border p-2.5 text-left transition ${
+                    ya.active ? 'border-lime-400/50 bg-lime-500/10' : 'border-white/10 bg-white/5 hover:border-amber-300/40 hover:bg-amber-400/10'}`}>
+                  <div className="flex items-center gap-2 text-[13px] font-black text-slate-100">
+                    <Ico name={ya.icon} className="h-4 w-4 text-amber-200" />{ya.name}
+                    <span className="ml-auto rounded-full bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-slate-400">{ya.cat}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] leading-snug text-slate-300">{ya.desc}</div>
+                  <div className={`mt-1.5 text-[10px] font-black ${ya.active ? 'text-lime-300' : 'text-amber-200/80'}`}>
+                    {ya.active ? 'ДЕЙСТВУЕТ — нажмите, чтобы снять' : `Включить • ${hud.yasaCost} мудрости`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ===== ИТОГИ ЭПОХИ ===== */}
       {hud?.ageReport && (
         <div className="absolute inset-0 z-[62] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
@@ -1356,6 +1396,11 @@ function TechTreeModal({ hud, onClose, onResearch }: { hud: HudSnapshot; onClose
                           <span><Ico name="clock" />{t.time}с</span>
                           <span className="text-amber-200/90"><RT t={t.cost} /></span>
                         </div>
+                        {t.eureka && (
+                          <div className={`mt-1 rounded-lg px-1.5 py-1 text-[10px] leading-snug ${t.eurekaDone ? 'bg-lime-500/15 text-lime-200' : 'bg-black/25 text-slate-400'}`}>
+                            <Ico name="bulb" /> Эврика: {t.eureka}{t.eurekaDone && ' — выполнено!'}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="mt-2">
