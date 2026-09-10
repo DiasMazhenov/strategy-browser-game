@@ -731,7 +731,7 @@ function drawUnitSprite(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: num
   const isHerder = !!(u as U & { herder?: boolean }).herder && u.key === 'villager' && u.owner === 'player';
   const mounted = isMounted || isHerder || u.key === 'trader';
   const beast = u.key === 'wolf';
-  const siege = u.key === 'catapult';
+  const siege = u.key === 'catapult' || u.key === 'ram';
   const step = Math.sin(u.anim), stepAbs = Math.abs(step);
   const gait = mounted || beast ? Math.sin(u.anim * 1.0) : step; // у галопа фаза та же, но выше амплитуда
   let bob: number, rock: number, lean: number, sway: number;
@@ -1234,7 +1234,7 @@ const moving = (u: U) => u.state === 'move' || u.state === 'attackmove' || u.sta
 export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: number, time: number, selected: boolean, water = 0) {
   const herder = u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder;
   const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'trader' || herder;
-  const shadowR = u.key === 'catapult' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
+  const shadowR = u.key === 'catapult' || u.key === 'ram' ? 21 : mounted ? 18 : u.key === 'monk' ? 11 : u.key === 'wolf' ? 13 : 13;
   // тень
   diamondShadow(ctx, ix + 2, iy + 8, shadowR, shadowR / 2.2, 'rgba(0,0,0,0.28)');
   // кольцо выделения
@@ -1271,6 +1271,7 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
     if (u.key === 'wolf') drawWolf(ctx, u, x, y, sw, time);
     else if (u.key === 'sheep' || u.key === 'cow' || u.key === 'deer') drawLivestock(ctx, u, x, y, sw, bob);
     else if (u.key === 'catapult') drawCatapult(ctx, u, x, y, sw, time);
+    else if (u.key === 'ram') drawRam(ctx, u, x, y, sw, time);
     // торговец «верхом», но не на коне: пока спрайт верблюда не загрузился — рисуем
     // купца пешим (drawHumanoid), а НЕ рыцарским конём из drawHorse
     else if (mounted && u.key !== 'trader') { drawHorse(ctx, u, x, y, sw, time); drawRider(ctx, u, x, y, sw, atk, time, t); }
@@ -1299,8 +1300,8 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
   if (hp != null && maxHp != null && (hp < maxHp || selected)) {
     const hk = (u.key === 'horsearcher' ? 'cavalry' : u.key) as UnitKey;
     const sprReady = !!(UNIT_IMAGES[hk] && (UNIT_IMAGES[hk] as HTMLImageElement).complete && UNIT_ANCHORS[hk]);
-    const unitH = sprReady ? (UNIT_TARGET_H[hk] ?? 46) : (mounted ? 52 : u.key === 'catapult' ? 44 : 46);
-    const bw = mounted || u.key === 'catapult' ? 40 : 32;
+    const unitH = sprReady ? (UNIT_TARGET_H[hk] ?? 46) : (mounted ? 52 : u.key === 'catapult' || u.key === 'ram' ? 44 : 46);
+    const bw = mounted || u.key === 'catapult' || u.key === 'ram' ? 40 : 32;
     const bh = 5;
     const by = iy + 8 - unitH - 6;
     const s = Math.max(0, Math.min(1, hp / maxHp));
@@ -1724,6 +1725,38 @@ function drawCatapult(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   }
   // противовес на заднем конце
   cx(ctx, ax - f * Math.cos(ang) * 8, ay - Math.sin(ang) * 8, 5, '#57534e');
+}
+
+// ── ТАРАН: бревно с окованным наконечником под навесом из кож на четырёх колёсах ──
+function drawRam(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw: number, _time: number) {
+  const f = u.face;
+  const move = moving(u);
+  const wob = move ? Math.sin(u.anim) * 1.2 : 0;
+  const blue = u.owner === 'player';
+  for (const wx of [-14, 14]) {
+    const cy0 = y + 6;
+    cx(ctx, x + wx + wob, cy0, 6, '#2e1a06'); cx(ctx, x + wx + wob, cy0, 4.5, '#4a2c10'); cx(ctx, x + wx + wob, cy0, 2, '#a8824a');
+  }
+  // рама и навес (двускатная крыша из кож)
+  px(ctx, x - 18 + wob, y - 1, 36, 6, '#5c3f1c');
+  ctx.fillStyle = blue ? '#7c5a3a' : '#6b4a3a';
+  ctx.beginPath(); ctx.moveTo(x - 20 + wob, y - 2); ctx.lineTo(x + wob, y - 22); ctx.lineTo(x + 20 + wob, y - 2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = blue ? '#9a7450' : '#8a6350';
+  ctx.beginPath(); ctx.moveTo(x - 20 + wob, y - 2); ctx.lineTo(x + wob, y - 22); ctx.lineTo(x + wob, y - 2); ctx.closePath(); ctx.fill();
+  // вышитый бордюр по коньку (казахский орнамент — полоска)
+  ln(ctx, x - 20 + wob, y - 2, x + wob, y - 22, 1.5, blue ? '#f6d47c' : '#fca5a5');
+  ln(ctx, x + wob, y - 22, x + 20 + wob, y - 2, 1.5, blue ? '#f6d47c' : '#fca5a5');
+  // бревно: качается вперёд при ударе
+  const swing = u.atkAnim > 0 ? Math.sin(u.atkAnim * Math.PI) * 9 : 0;
+  const bx0 = x + wob - f * 16 + f * swing, by0 = y - 9;
+  ln(ctx, bx0, by0, bx0 + f * 40, by0, 5, '#7a5628');
+  ln(ctx, bx0, by0 - 1, bx0 + f * 40, by0 - 1, 1.2, '#a07a45');
+  // окованный наконечник
+  px(ctx, bx0 + f * 36 - (f < 0 ? 7 : 0), by0 - 4, 7, 8, '#57534e');
+  px(ctx, bx0 + f * 39 - (f < 0 ? 3 : 0), by0 - 3, 3, 6, '#9ca3af');
+  // цепи подвеса
+  ln(ctx, x + wob - 8, y - 18, bx0 + f * 8, by0, 1, '#3f3f46');
+  ln(ctx, x + wob + 8, y - 18, bx0 + f * 28, by0, 1, '#3f3f46');
 }
 
 // ── НОЧНОЙ ФАКЕЛ У ЗДАНИЯ ────────────────────────────────────────────────────

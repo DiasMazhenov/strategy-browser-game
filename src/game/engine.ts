@@ -228,13 +228,13 @@ function xpForLevel(level: number): number { return (level + 2) * 3; }
 // тип урона юнита для камень-ножницы-бумаги
 function dmgType(k: UnitKey): 'pierce' | 'blade' | 'blunt' {
   if (k === 'spearman' || k === 'archer' || k === 'horsearcher') return 'pierce';
-  if (k === 'catapult') return 'blunt';
+  if (k === 'catapult' || k === 'ram') return 'blunt';
   return 'blade';
 }
 // класс брони цели
 function armorClass(k: UnitKey): 'inf' | 'cav' | 'siege' | 'soft' {
   if (k === 'knight' || k === 'cavalry' || k === 'horsearcher') return 'cav';
-  if (k === 'catapult') return 'siege';
+  if (k === 'catapult' || k === 'ram') return 'siege';
   if (k === 'swordsman' || k === 'spearman') return 'inf';
   return 'soft';
 }
@@ -249,6 +249,7 @@ function dmgMult(att: UnitKey, target: UnitKey): number {
   if (att === 'cavalry' && t === 'inf') return 1.3; // жасауыл сметает пехоту
   if ((att === 'swordsman' || att === 'villager') && t === 'cav') return 0.8; // пешим конницу не удержать
   if (a === 'blunt' && t === 'siege') return 1.5;   // осадный по осаде
+  if (att === 'ram' && t !== 'siege') return 0.25;  // таран по живому — почти ничто
   if (a === 'blunt' && t !== 'siege') return 0.7;   // катапульта по живому неэффективна
   return 1;
 }
@@ -261,7 +262,7 @@ export const DEDICATIONS = [
 export type DedicationId = typeof DEDICATIONS[number]['id'];
 const ERA_THRESHOLD = [0, 45, 70, 100];           // порог золотого века по номеру новой эпохи
 // какие цели юнит контрит — для подсказок в UI (пункт 21 плана)
-const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult'];
+const COUNTER_SHOW: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult', 'ram'];
 export function counterText(k: UnitKey): string {
   if (k === 'villager' || k === 'monk' || k === 'trader') return '';
   const parts: string[] = [];
@@ -271,6 +272,7 @@ export function counterText(k: UnitKey): string {
     if (m >= 1.15) parts.push(`×${(Math.round(m * 10) / 10).toString().replace(/^1\.0$/, '1')} ${UNIT_DEFS[t].name.toLowerCase()}`);
   }
   if (k === 'catapult') parts.push('×1.7 постройки');
+  if (k === 'ram') parts.push('×3 стены и ворота', '×1.5 постройки');
   // кто опасен для нас: контра в обратную сторону
   const threats: string[] = [];
   for (const t of COUNTER_SHOW) {
@@ -5514,6 +5516,7 @@ export class Game {
       if (u.owner === 'player' && u.key === 'villager') continue;
       let d = dist2(u.x, u.y, b.x, b.y) - b.size * b.size * 0.25;
       if (b.key === 'wonder') d *= 0.15;   // Чудо — приоритетная цель для атаки
+      if (u.key === 'ram' && (b.key === 'wall' || b.key === 'gate')) d *= 0.3;   // таран ищет стены
       if (d < bbd) { bbd = d; bb = b.id; }
     }
     return { tu: -1, tb: bb };
@@ -5541,7 +5544,7 @@ export class Game {
       if (dist2(u.x, u.y, u.homeX, u.homeY) > 120 * 120) this.moveTowardPath(u, u.homeX + rand(-20, 20), u.homeY + rand(-20, 20), dt, 16);
       return;
     }
-    const isCata = u.key === 'catapult';
+    const isCata = u.key === 'catapult' || u.key === 'ram';   // осадные: ищут постройки сами
     // auto-acquire
     if (u.retarget <= 0 && !tu && !tb) {
       u.retarget = 0.4;
@@ -6224,7 +6227,7 @@ export class Game {
     // боевой клич (редко, чтобы не трещало) / вой волка
     if (att.key === 'wolf') { if (Math.random() < 0.08) this.sound.wolf(); }
     else if (att.owner === 'player' && (tu || tb) && Math.random() < 0.12) this.sound.voice(att.key, 'attack');
-    att.cd = isCata ? 3.2 : att.key === 'archer' ? 1.35 : att.key === 'horsearcher' ? 1.5 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
+    att.cd = isCata ? 3.2 : att.key === 'ram' ? 2.2 : att.key === 'archer' ? 1.35 : att.key === 'horsearcher' ? 1.5 : att.key === 'knight' || att.key === 'cavalry' ? 1.0 : att.key === 'wolf' ? 1.15 : 1.1;
     att.atkAnim = 1;
     const variance = rand(0.85, 1.15);
     let dmg = att.atk * variance;
@@ -6232,7 +6235,9 @@ export class Game {
     if (att.owner === 'enemy' && att.key !== 'villager') dmg *= this.morale;
     // типы урона: камень-ножницы-бумага против юнитов
     if (tu) dmg *= dmgMult(att.key, tu.key);
+    if (tu?.key === 'ram' && dmgType(att.key) === 'pierce') dmg *= 0.4; // обитый кожей навес — стрелы вязнут
     if (isCata && tb) dmg *= 1.7; // катапульта особенно разрушительна для зданий
+    if (att.key === 'ram' && tb) dmg *= (tb.key === 'wall' || tb.key === 'gate') ? 3 : 1.5; // таран: стены и ворота
     if (isRanged) {
       const tx = tu ? tu.x : tb ? tb.x : att.tx, ty = tu ? tu.y : tb ? tb.y : att.ty;
       const dx = this.tdx(tx - att.x), dy = this.tdy(ty - att.y), d = Math.max(1, Math.hypot(dx, dy));
@@ -6617,6 +6622,9 @@ export class Game {
     if ((this.eage >= 1 && this.wave >= 3) || this.wave >= 5) for (let i = 0; i < Math.ceil(n * 0.4); i++) comp.push('knight');
     if ((this.eage >= 1 && this.wave >= 5) || this.wave >= 8) for (let i = 0; i < Math.ceil(n * 0.35); i++) comp.push('cavalry');
     if (this.eage >= 2 && this.wave >= 7) for (let i = 0; i < Math.ceil(n * 0.2); i++) comp.push('horsearcher');
+    // штурм (п.26): если у игрока есть стены — с 4-й волны идут тараны, чтобы не упираться
+    const walls = this.blds.filter(b => b.owner === 'player' && (b.key === 'wall' || b.key === 'gate') && b.done >= 1).length;
+    if (walls >= 6 && this.wave >= 4) for (let i = 0; i < 1 + Math.floor(walls / 14); i++) comp.push('ram');
     // босс-отряд с катапультами каждую 6-ю волну
     if (this.wave >= 6 && this.wave % 6 === 0) { for (let i = 0; i < 2 + Math.floor(this.wave / 6); i++) comp.push('catapult'); }
     return comp;
@@ -6624,7 +6632,7 @@ export class Game {
   waveSummary(comp: UnitKey[]): string {
     const cnt: Record<string, number> = {};
     for (const k of comp) cnt[k] = (cnt[k] || 0) + 1;
-    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'catapult'];
+    const order: UnitKey[] = ['swordsman', 'spearman', 'archer', 'knight', 'cavalry', 'horsearcher', 'ram', 'catapult'];
     // имена с учётом ступени врага — игрок сразу видит, что идёт тяжёлая пехота
     return order.filter(k => cnt[k]).map(k => `${cnt[k]}×${this.unitName(k, 'enemy')}`).join(', ');
   }

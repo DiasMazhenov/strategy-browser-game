@@ -732,6 +732,7 @@ export default function App() {
                   <TrainBtn label={hud?.unitNames?.spearman ?? 'Найзагер'} icon="spear" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
                   <TrainBtn label={hud?.unitNames?.cavalry ?? 'Жасауыл'} icon="rider" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
                   <TrainBtn label="Атты-мерген" icon="bow" key_="" cost={UNIT_DEFS.horsearcher.cost} ok={canAfford(UNIT_DEFS.horsearcher.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('horsearcher')} onClick={() => g()?.train('horsearcher')} />
+                  <TrainBtn label="Таран" icon="hammer" key_="" cost={UNIT_DEFS.ram.cost} ok={canAfford(UNIT_DEFS.ram.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('ram')} onClick={() => g()?.train('ram')} />
                   <TrainBtn label="Катапульта" icon="stone" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
                   <TrainBtn label="Имам" icon="mosque" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
                   <TrainBtn label="Барлаушы" icon="compass" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
@@ -1397,6 +1398,7 @@ function unitIcon(k: string) {
   if (k === 'spearman') return 'spear';
   if (k === 'cavalry') return 'rider';
   if (k === 'horsearcher') return 'bow';
+  if (k === 'ram') return 'hammer';
   if (k === 'catapult') return 'stone';
   if (k === 'monk') return 'mosque';
   if (k === 'trader') return 'camel';
