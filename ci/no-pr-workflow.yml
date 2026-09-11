@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# ЗАПРЕТ PR (правило с 1.0.126) — требуется установка вручную (один раз).
+#
+# Токен агента не имеет права `workflows`, поэтому GitHub отклоняет пуш файлов
+# в .github/workflows/. Скопируйте этот файл на место и запушьте сами:
+#
+#   git pull
+#   mkdir -p .github/workflows && cp ci/no-pr-workflow.yml .github/workflows/no-pr.yml
+#   git add .github/workflows/no-pr.yml && git commit -m "ci: запрет PR" && git push
+#
+# Что делает: любой входящий PR получает комментарий с объяснением, закрывается
+# и помечается красной проверкой. main обновляется только прямым пушем.
+# Код из PR этот workflow НЕ checkout'ит и НЕ выполняет — наружу не убежит ничего.
+# ---------------------------------------------------------------------------
+name: PR запрещены
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  reject:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Закрыть PR и объяснить почему
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          cat > /tmp/msg.md <<'EOF'
+          ## PR закрыт автоматически 🚫
+
+          В этом репозитории **PR не используются**: `main` обновляется прямым
+          пушем (`git push origin main`) — так историю ведёт владелец вместе с
+          агентом Arena, и промежуточные review-ветки только мешают (каждая
+          сессия агента уже живёт в собственной ветке `arena/…`).
+
+          Что делать с вашим изменением:
+          - форк/ветка не нужны — опишите правку в issue, либо
+          - пришлите патч (`git format-patch` / diff) — перенесём коммитом в `main`,
+            сохранив авторство.
+
+          Правило зафиксировано в `CONTRIBUTING.md` и `context.md` (раздел 1.0.126).
+          EOF
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/msg.md
+          gh pr close  "$PR" --repo "$REPO"
+          echo "::error title=PR запрещён::@$AUTHOR, PR #$PR закрыт: main обновляется прямым пушем, см. CONTRIBUTING.md"
+          exit 1

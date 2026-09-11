@@ -110,12 +110,17 @@ git push -u origin main
 3. В Settings → Pages выбери Source: **GitHub Actions**
 4. Каждый push в `main` автоматически соберет и зальет `dist/` на Pages.
 
-Если деплоишь в подпапку (например `username.github.io/empires-of-the-dawn/`), добавь в `vite.config.ts`:
-```ts
-base: '/empires-of-the-dawn/'
-```
+Подпапка (например `username.github.io/empires-of-the-dawn/`) поддерживается из коробки:
+в `vite.config.ts` стоит `base: './'` — все чанки и спрайты ссылаются относительно `index.html`.
 
-Локально single-file билд уже настроен через `vite-plugin-singlefile` — `dist/index.html` полностью автономный.
+**Сборка (1.0.126) — чанками, а не одним файлом:** `npm run build` даёт лёгкий
+`dist/index.html` (~2.5 КБ) + `dist/assets/*.js` (5 чанков, ~0.74 МБ, gzip ~0.24 МБ) +
+спрайты отдельными файлами + `dist/voices/`. Первый рендер не ждёт 14 МБ монолита.
+
+Автономный вариант «всё в одном HTML» (для раздачи одним файлом) остался:
+```bash
+npm run build:singlefile   # dist/index.html ~14 МБ, без внешних файлов
+```
 
 ---
 
@@ -132,7 +137,7 @@ base: '/empires-of-the-dawn/'
 ## 🛠️ Технологии
 
 - **React 19 + TypeScript** — UI и стейт
-- **Vite 7 + vite-plugin-singlefile** — сборка в один HTML
+- **Vite 7** — чанковая сборка (singlefile — опционально, `npm run build:singlefile`)
 - **Tailwind CSS 4** — стили
 - **Canvas 2D (без WebGL)** — рендер, 60 FPS, DPR capped ×2
 - **WebAudio API** — все звуки синтезируются кодом

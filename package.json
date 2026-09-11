@@ -2,11 +2,12 @@
   "name": "react-vite-tailwind",
   "private": true,
   "version": "1.0.0",
-  "_gameVersion": "1.0.125",
+  "_gameVersion": "1.0.126",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:singlefile": "SINGLE_FILE=1 vite build",
     "preview": "vite preview"
   },
   "dependencies": {
