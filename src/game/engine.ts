@@ -1433,6 +1433,7 @@ export class Game {
     // призванный Айтеке би ускоряет и саму «культурную» линию
     if (this.hasGreat('aiteke')) r *= 1.15;
     if (this.yasaActive('damel')) r *= 1.2; // Яса «Дәмел» (п.32)
+    r *= clanMods(this.settings.clan).wisdom;   // род Керей (1.0.130)
     return r * this.eraWisdomMult();        // Иман/тёмный век (п.22)
   }
 
@@ -1562,14 +1563,20 @@ export class Game {
     return false;
   }
   // отправить посланника: тратит золото, растит влияние, может отобрать сюзеренитет у джунгар
+  /** Реальная цена следующего посланника: скидка рода Керей + Яса «Аралас ұлыс». */
+  envoyPrice(nid: string): number {
+    const have = this.envoys[nid] ?? 0;
+    return Math.round(envoyCost(have) * clanMods(this.settings.clan).envoy * (this.yasaActive('aralas') ? 0.5 : 1));
+  }
+
   sendEnvoy(nid: string): boolean {
     const def = NATION_BY_ID[nid];
     if (!def || def.kind !== 'tribe' || this.over) return false;
     if (!this.metNation(nid)) { this.floater(this.cam.x, this.cam.y - 100, 'Вы ещё не знакомы с этим народом', '#94a3b8', 15); return false; }
     if (this.tribeRel[nid] === 'hostile') { this.floater(this.cam.x, this.cam.y - 100, 'Племя враждебно — сначала помиритесь', '#f87171', 15); this.sound.error(); return false; }
     const have = this.envoys[nid] ?? 0;
-    // Яса «Аралас ұлыс» (п.32): посланники вдвое дешевле
-    const cost = Math.round(envoyCost(have) * (this.yasaActive('aralas') ? 0.5 : 1));
+    // Яса «Аралас ұлыс» (п.32): посланники вдвое дешевле; род Керей: −15% (1.0.130)
+    const cost = this.envoyPrice(nid);
     if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 15); this.sound.error(); return false; }
     const wasSuz = this.suzerain(nid);
     const wasLv = this.envoyLevel(nid);
@@ -8104,7 +8111,7 @@ export class Game {
         rivalEnvoys: this.rivalEnvoys[d.id] ?? 0,
         envoyLevel: d.kind === 'tribe' ? this.envoyLevel(d.id) : 0,
         envoyNext: d.kind === 'tribe' ? this.envoysToNext(d.id) : 0,
-        envoyCost: envoyCost(this.envoys[d.id] ?? 0),
+        envoyCost: this.envoyPrice(d.id),
         suzerain: d.kind === 'tribe' ? this.suzerain(d.id) : null,
         faith: d.kind === 'tribe' ? Math.round(this.faith[d.id] ?? 0) : 0,
         typeLabel: tkind ? TRIBE_TYPES[tkind].label : '',

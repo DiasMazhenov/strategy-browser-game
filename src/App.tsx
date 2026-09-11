@@ -1767,7 +1767,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlay
         {/* род-таңба (п.12): пассивки рода, видно до старта */}
         <div className="mt-4">
           <div className="mb-2 text-center text-[11px] font-black tracking-[0.25em] text-slate-400">ВЫБЕРИ СВОЙ РОД</div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {CLANS.map(c => (
               <button
                 key={c.id}

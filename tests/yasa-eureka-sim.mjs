@@ -23,7 +23,7 @@ ok(/1\.2\) \* \(this\.yasaActive\('sauda'\) \? 1\.3 : 1\);/.test(eng), 'Сауд
 ok(/if \(this\.yasaActive\('sauda'\)\) bonus \*= 1\.3;/.test(eng), 'Сауда: караваны +30%');
 ok(/if \(this\.yasaActive\('damel'\)\) r \*= 1\.2;/.test(eng), 'Дәмел: мудрость +20%');
 ok(/1 \+ 0\.15 \* \(this\.yasaActive\('damel'\) \? 1\.25 : 1\) \* this\.berekePower/.test(eng), 'Дәмел: береке ×1.25');
-ok(/envoyCost\(have\) \* \(this\.yasaActive\('aralas'\) \? 0\.5 : 1\)/.test(eng), 'Аралас: посланники −50%');
+ok(/envoyCost\(have\) \* clanMods\(this\.settings\.clan\)\.envoy \* \(this\.yasaActive\('aralas'\) \? 0\.5 : 1\)/.test(eng), 'Аралас: посланники −50% (и скидка рода Керей)');
 ok(/\?\? 40\) \* \(this\.yasaActive\('aralas'\) \? 0\.5 : 1\)/.test(eng), 'Аралас: дары племенам −50%');
 
 console.log('\n=== 3. Эврики (п.39) ===');

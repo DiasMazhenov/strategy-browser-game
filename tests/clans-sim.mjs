@@ -1,4 +1,4 @@
-// Роды-таңба (п.12, 1.0.129): четыре рода, у каждого две пассивки в ±10–15%.
+// Роды-таңба (п.12, 1.0.129 + Керей 1.0.130): пять родов, у каждого две пассивки в ±10–15%.
 // Проверяем таблицу множителей исполнением (собираем config+clans esbuild'ом) и
 // смотрим, что движок реально применяет их в нужных местах.
 import * as esbuild from 'esbuild';
@@ -12,20 +12,22 @@ const out = await esbuild.build({
     contents: `
       export { CLANS, CLAN_BY_ID, clanMods, DEFAULT_CLAN } from './src/game/clans';
       export { clanBldCost, clanUnitCost, BUILDING_DEFS, UNIT_DEFS } from './src/game/config';
+      export { envoyCost } from './src/game/nations';
     `,
     resolveDir: process.cwd(), loader: 'ts', sourcefile: 'clans-entry.ts',
   },
   bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+  loader: { '.png': 'empty' },   // nations.ts тянет портреты правителей — они тут не нужны
 });
 const mod = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
-const { CLANS, clanMods, clanBldCost, clanUnitCost, BUILDING_DEFS, UNIT_DEFS } = mod;
+const { CLANS, clanMods, clanBldCost, clanUnitCost, BUILDING_DEFS, UNIT_DEFS, envoyCost } = mod;
 
-ok(CLANS.length === 4, `родов: ${CLANS.length} (${CLANS.map(c => c.name).join(', ')})`);
-ok(new Set(CLANS.map(c => c.id)).size === 4, 'id уникальны');
-ok(new Set(CLANS.map(c => c.tamga)).size === 4, 'у каждого рода своя таңба');
+ok(CLANS.length === 5, `родов: ${CLANS.length} (${CLANS.map(c => c.name).join(', ')})`);
+ok(new Set(CLANS.map(c => c.id)).size === 5, 'id уникальны');
+ok(new Set(CLANS.map(c => c.tamga)).size === 5, 'у каждого рода своя таңба');
 
 console.log('\n=== 2. Пассивки: ровно две на род, в ±15% ===');
-const NEUTRAL_KEYS = ['tel', 'penCost', 'caravan', 'scout', 'cavHp', 'knightCost', 'build', 'towerHp'];
+const NEUTRAL_KEYS = ['tel', 'penCost', 'caravan', 'scout', 'cavHp', 'knightCost', 'build', 'towerHp', 'wisdom', 'envoy'];
 for (const c of CLANS) {
   const active = NEUTRAL_KEYS.filter(k => c.mods[k] !== 1);
   ok(active.length === 2, `${c.name}: пассивок ${active.length} (${active.join(', ')}) — «${c.perk}»`);
@@ -43,6 +45,10 @@ const nai = clanMods('naiman');
 ok(nai.cavHp === 1.1 && nai.knightCost === 0.85, `Найман: HP конницы ×${nai.cavHp}, батыр ×${nai.knightCost}`);
 const uis = clanMods('uisyn');
 ok(uis.build === 1.12 && uis.towerHp === 1.15, `Ұйсын: стройка ×${uis.build}, башни ×${uis.towerHp}`);
+const ker = clanMods('kerey');
+ok(ker.wisdom === 1.15 && ker.envoy === 0.85, `Керей: мудрость ×${ker.wisdom}, посланники ×${ker.envoy}`);
+ok(CLANS.every(c => c.id === 'kerey' || (c.mods.wisdom === 1 && c.mods.envoy === 1)),
+  'мудрость и послы — только у Керея');
 
 console.log('\n=== 4. Неизвестный род (старый сейв) — нейтрально ===');
 const unk = clanMods('нет такого');
@@ -61,13 +67,16 @@ ok(clanUnitCost('naiman', 'knight').gold === Math.round(knBase.gold * 0.85),
   `батыр: ${knBase.gold} → ${clanUnitCost('naiman', 'knight').gold} золота для Найман`);
 ok(clanUnitCost('argyn', 'knight').gold === knBase.gold, 'для Арғын батыр стоит базово');
 ok(clanUnitCost('naiman', 'archer').gold === UNIT_DEFS.archer.cost.gold, 'мерген не дешевеет');
+const env0 = envoyCost(0);
+ok(Math.round(env0 * ker.envoy) < env0, `посланник: ${env0} → ${Math.round(env0 * ker.envoy)} золота для Керея`);
+ok(envoyCost(0) === 35 && envoyCost(2) === 65, 'цена посланника растёт с каждым отправленным');
 
 console.log('\n=== 6. Движок реально применяет бонусы ===');
 const eng = readFileSync(new URL('../src/game/engine.ts', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const ico = readFileSync(new URL('../src/game/iconset.ts', import.meta.url), 'utf8');
 const cfg = readFileSync(new URL('../src/game/config.ts', import.meta.url), 'utf8');
-ok((eng.match(/clanMods\(this\.settings\.clan\)/g) || []).length >= 4,
+ok((eng.match(/clanMods\(this\.settings\.clan\)/g) || []).length >= 5,
   `движок читает множители рода: ${(eng.match(/clanMods\(this\.settings\.clan\)/g) || []).length} мест`);
 ok(/u\.speed \*= cm\.scout/.test(eng), 'барлаушы быстрее (скорость в addUnit)');
 ok(/u\.maxHp = Math\.round\(u\.maxHp \* cm\.cavHp\)/.test(eng), 'конница живучее (HP в addUnit)');
@@ -77,6 +86,11 @@ ok(/bonus \*= clanMods\(this\.settings\.clan\)\.caravan/.test(eng), 'керуе�
 ok(/cm\.tel > 1 && rand\(0, 1\) < cm\.tel - 1 \? 2 : 1/.test(eng), 'приплод: шанс двойни');
 ok(/clanBldCost\(this\.settings\.clan, key\)/.test(eng) && /bldCost\(key: BuildingKey\)/.test(eng), 'цены построек через единую bldCost');
 ok(/clanUnitCost\(this\.settings\.clan, item\.key\)/.test(eng), 'цена найма учитывает род');
+ok(/r \*= clanMods\(this\.settings\.clan\)\.wisdom/.test(eng), 'мудрость копится быстрее (wisdomRate)');
+ok(/envoyPrice\(nid: string\): number \{[\s\S]{0,200}?clanMods\(this\.settings\.clan\)\.envoy/.test(eng),
+  'посланник дешевле (envoyPrice)');
+ok(/const cost = this\.envoyPrice\(nid\)/.test(eng) && /envoyCost: this\.envoyPrice\(d\.id\)/.test(eng),
+  'списание и панель дипломатии считают цену посланника одинаково');
 ok(/clan: \(\(\) => \{ const c = CLAN_BY_ID/.test(eng), 'HUD отдаёт род игрока');
 ok(/drawIcon\(ctx, tg, ix, iy/.test(eng), 'таңба рисуется над ставкой');
 
@@ -85,7 +99,7 @@ ok(/ВЫБЕРИ СВОЙ РОД/.test(app) && /updateSettings\(\{ clan: c\.id \
 ok(/clanUnitCost\(clan, k\)/.test(app) && /ucost\(k\)/.test(app), 'док показывает цену с учётом рода');
 ok(/hud\?\.clan\?\.tamga/.test(app), 'в HUD бейдж рода');
 ok(/clan: ClanId/.test(cfg) && /clan: DEFAULT_CLAN/.test(cfg), 'род — часть настроек (сохраняется)');
-ok(['tamga-argyn', 'tamga-qypshaq', 'tamga-naiman', 'tamga-uisyn'].every(k => ico.includes(`'${k}'`)), '4 таңбы в наборе иконок');
+ok(['tamga-argyn', 'tamga-qypshaq', 'tamga-naiman', 'tamga-uisyn', 'tamga-kerey'].every(k => ico.includes(`'${k}'`)), '5 таңб в наборе иконок');
 
 console.log(`\nИтог: ${n - f} ok, ${f} fail`);
 process.exit(f ? 1 : 0);

@@ -1,13 +1,13 @@
 // Роды-таңба (п.12 плана, 1.0.129).
 //
-// До похода игрок выбирает один из четырёх родов: каждый даёт две пассивки в
+// До похода игрок выбирает один из пяти родов: каждый даёт две пассивки в
 // ±10–15% и свою таңбу (родовой знак) над ставкой. Смысл — реиграбельность без
 // нового контента карт: «ещё одна партия» играется иначе уже со старта.
 //
 // Бонусы применяются ТОЛЬКО к игроку: у ИИ упрощённая экономика, и сравнивать
 // силу сторон сложнее, чем кажется (см. context.md, п.30).
 
-export type ClanId = 'argyn' | 'qypshaq' | 'naiman' | 'uisyn';
+export type ClanId = 'argyn' | 'qypshaq' | 'naiman' | 'uisyn' | 'kerey';
 
 /** Ключи множителей: 1 = бонуса нет. */
 export interface ClanMods {
@@ -27,9 +27,13 @@ export interface ClanMods {
   build: number;
   /** HP башен */
   towerHp: number;
+  /** накопление мудрости */
+  wisdom: number;
+  /** стоимость посланника к племени */
+  envoy: number;
 }
 
-const NEUTRAL: ClanMods = { tel: 1, penCost: 1, caravan: 1, scout: 1, cavHp: 1, knightCost: 1, build: 1, towerHp: 1 };
+const NEUTRAL: ClanMods = { tel: 1, penCost: 1, caravan: 1, scout: 1, cavHp: 1, knightCost: 1, build: 1, towerHp: 1, wisdom: 1, envoy: 1 };
 
 export interface Clan {
   id: ClanId;
@@ -67,6 +71,12 @@ export const CLANS: Clan[] = [
     perk: 'стройка и оборона',
     desc: 'Стройка идёт на 12% быстрее, башни крепче на 15%',
     mods: { ...NEUTRAL, build: 1.12, towerHp: 1.15 },
+  },
+  {
+    id: 'kerey', name: 'Керей', tamga: 'tamga-kerey',
+    perk: 'мудрость и послы',
+    desc: 'Мудрость копится на 15% быстрее, посланники к племенам дешевле на 15%',
+    mods: { ...NEUTRAL, wisdom: 1.15, envoy: 0.85 },
   },
 ];
 
