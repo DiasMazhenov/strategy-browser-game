@@ -8,7 +8,12 @@
     <title>Казахское Ханство — стратегия великой степи</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <!-- Шрифты — асинхронно (1.0.125): обычный rel=stylesheet блокирует ПЕРВЫЙ РЕНДЕР,
+         и если fonts.googleapis.com висит — страница пустая с вечным спиннером.
+         media=print убирает блокировку, onload включает стили по факту загрузки. -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
   </head>
   <body>
     <div id="root"></div>
