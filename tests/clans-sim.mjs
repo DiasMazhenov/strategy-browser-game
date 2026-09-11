@@ -80,7 +80,7 @@ ok((eng.match(/clanMods\(this\.settings\.clan\)/g) || []).length >= 5,
   `движок читает множители рода: ${(eng.match(/clanMods\(this\.settings\.clan\)/g) || []).length} мест`);
 ok(/u\.speed \*= cm\.scout/.test(eng), 'барлаушы быстрее (скорость в addUnit)');
 ok(/u\.maxHp = Math\.round\(u\.maxHp \* cm\.cavHp\)/.test(eng), 'конница живучее (HP в addUnit)');
-ok(/key === 'tower'\) \{\n[\s\S]{0,200}?cm|towerHp/.test(eng) && /clanMods\(this\.settings\.clan\)\.towerHp/.test(eng), 'башни крепче (addBld)');
+ok(/key === 'tower'\) \{\n[\s\S]{0,200}?cm|towerHp/.test(eng) && /clanMods\(owner === 'enemy' \? this\.rivalClan : this\.settings\.clan\)\.towerHp/.test(eng), 'башни крепче (addBld) — у игрока и у джунгар');
 ok(/b\.owner === 'player'\) rate \*= clanMods/.test(eng), 'стройка быстрее (updateBuildings)');
 ok(/bonus \*= clanMods\(this\.settings\.clan\)\.caravan/.test(eng), 'керуен богаче');
 ok(/cm\.tel > 1 && rand\(0, 1\) < cm\.tel - 1 \? 2 : 1/.test(eng), 'приплод: шанс двойни');

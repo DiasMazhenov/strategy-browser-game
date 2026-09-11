@@ -83,6 +83,31 @@ export const CLANS: Clan[] = [
 export const CLAN_BY_ID: Record<string, Clan> = Object.fromEntries(CLANS.map(c => [c.id, c]));
 export const DEFAULT_CLAN: ClanId = 'argyn';
 
+/**
+ * Что род ДЖУНГАР реально меняет на поле боя (1.0.131).
+ *
+ * Враг получает род из той же таблицы, но не все множители ему применимы:
+ * экономика ИИ упрощённая (золото капает по формуле, очередей найма и
+ * караванов у него нет). Поэтому врагу идут только боевые и дипломатические
+ * множители: конница, башни, темп стройки, скорость конных и частота послов.
+ * У рода Арғын боевого множителя нет — партия против него объективно легче,
+ * и это честная часть асимметрии, а не недоделка.
+ */
+export const RIVAL_NOTE: Record<ClanId, string> = {
+  argyn: 'скот и загоны — в бою нейтрально',
+  qypshaq: 'конница джунгар ходит быстрее',
+  naiman: 'конница джунгар живучее (+10% HP)',
+  uisyn: 'строит быстрее, башни крепче (+15% HP)',
+  kerey: 'чаще шлёт послов к племенам',
+};
+
+/** Случайный род — для жеребьёвки джунгар в начале партии. */
+export function randomClan(r: () => number = Math.random): ClanId {
+  const i = Math.floor(r() * CLANS.length);
+  return CLANS[Math.max(0, Math.min(CLANS.length - 1, i))].id;
+}
+
+
 /** Множители рода; неизвестный/отсутствующий род (старый сейв) — нейтральные. */
 export function clanMods(clan?: string): ClanMods {
   return CLAN_BY_ID[clan ?? '']?.mods ?? NEUTRAL;

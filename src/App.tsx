@@ -2099,6 +2099,14 @@ function DiplomacyModal({ hud, onClose, onAudience, onEnvoy }: {
                     <Ico name={relIcon(n)} /> {n.met ? n.rel : '???'}
                     {n.met && <span className="ml-2 font-medium text-slate-400"><Ico name="scales" /> сила {n.power}{n.kind === 'tribe' ? ` · лагерей ${n.camps}` : ''}</span>}
                   </div>
+                  {/* РОД ВРАГА (1.0.131): джунгары тоже выходят под своей таңбой */}
+                  {n.met && n.kind === 'rival' && hud?.rivalClan && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] font-black text-rose-200"
+                      title={`Род джунгар «${hud.rivalClan.name}»: ${hud.rivalClan.perk}. ${hud.rivalClan.note}`}>
+                      <Ico name={hud.rivalClan.tamga} className="h-4 w-4" /> род врага: {hud.rivalClan.name}
+                      <span className="font-medium text-slate-400">· {hud.rivalClan.note}</span>
+                    </div>
+                  )}
                 </div>
               </div>
               {n.met && n.kind === 'tribe' && (

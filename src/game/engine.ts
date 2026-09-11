@@ -11,7 +11,7 @@ import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTo
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
 import { hasSave, clearSave, wasInGame, setInGame } from './session';
-import { clanMods, CLAN_BY_ID } from './clans';
+import { clanMods, CLAN_BY_ID, randomClan, RIVAL_NOTE, type ClanId } from './clans';
 import { GREATS, GREAT_BY_ID, type GreatId } from './greats';
 import { CITY_BY_ID, currentPrayer, nextPrayer, prayerTimes, PRAYER_NAMES, PRAYER_ORDER,
   fmtHM, type PrayerKey } from './prayer-times';
@@ -407,6 +407,7 @@ export interface AgeReport {
 
 export interface HudSnapshot {
   clan?: { id: string; name: string; tamga: string; perk: string };   // род-таңба игрока (п.12)
+  rivalClan?: { id: string; name: string; tamga: string; perk: string; note: string };   // род джунгар (1.0.131)
   camp?: { part: string; title: string; objs: { t: string; done: boolean }[] };   // глава кампании (п.34)
   authority: number; lawName: string | null; discontent: number;   // құрылтай (п.13)
   tel: { wool: number; feltYurts: boolean; feltArmor: boolean; hasPen: boolean };   // төл (п.14)
@@ -669,6 +670,8 @@ export class Game {
   // ── ПЛЕМЕНА КАК ГОРОДА-ГОСУДАРСТВА: влияние посланниками (Civ VI) ──
   envoys: Record<string, number> = {};      // посланники ИГРОКА у племени (nationId → шт.)
   rivalEnvoys: Record<string, number> = {}; // посланники ДЖУНГАР — конкуренция за сюзеренитет
+  /** Род джунгар (1.0.131): жеребьёвка в начале партии, восстанавливается из сейва. */
+  rivalClan: ClanId = randomClan();
   envoyAiT = 0;                             // таймер вложений джунгар в племена
   giftT: Record<string, number> = {};       // таймеры даров военных племён (nationId → сек)
   tribeGoldT = 0;                           // таймер пассивного дохода от торговых союзников
@@ -849,8 +852,9 @@ export class Game {
     }
     // рабочие игрока (казахи) спавнятся по очереди: мужчина-крестьянин / женщина-работница
     // РОД (п.12): пассивки накладываются при рождении юнита
-    const cm = clanMods(this.settings.clan);
-    if (owner === 'player') {
+    // РОД (п.12): у игрока свой род, у джунгар свой (1.0.131) — множитель по владельцу
+    const cm = clanMods(owner === 'enemy' ? this.rivalClan : this.settings.clan);
+    if (owner === 'player' || owner === 'enemy') {
       if (key === 'scout' && cm.scout !== 1) u.speed *= cm.scout;                       // Қыпшақ
       if ((key === 'knight' || key === 'cavalry' || key === 'horsearcher' || key === 'camelry') && cm.cavHp !== 1) {
         u.maxHp = Math.round(u.maxHp * cm.cavHp); u.hp = u.maxHp;                       // Найман
@@ -871,9 +875,9 @@ export class Game {
       done, buildT: 0, queue: [], cd: 0, rallyX: x + (owner === 'player' ? 110 : -110), rallyY: y + 90, rallyNode: -1, flash: 0, smokeT: 0,
       research: null, garrison: [], upg: key === 'tower' ? { range: 0, dmg: 0, archers: 0 } : undefined, gate: false,
     };
-    // РОД (п.12): Ұйсын — башни крепче
-    if (owner === 'player' && key === 'tower') {
-      const k = clanMods(this.settings.clan).towerHp;
+    // РОД (п.12): Ұйсын — башни крепче; у джунгар то же по их роду (1.0.131)
+    if ((owner === 'player' || owner === 'enemy') && key === 'tower') {
+      const k = clanMods(owner === 'enemy' ? this.rivalClan : this.settings.clan).towerHp;
       if (k !== 1) { b.maxHp = Math.round(b.maxHp * k); b.hp = done >= 1 ? b.maxHp : Math.round(b.hp * k); }
     }
     this.blds.push(b);
@@ -1616,7 +1620,8 @@ export class Game {
     if (!this.rivalMet && Math.random() < 0.5) return;
     const diff = DIFF[this.difficulty];
     // соперник охотнее вкладывается на высокой сложности и когда богат
-    if (Math.random() > 0.35 + diff.aiAggression * 0.2) return;
+    // РОД ВРАГА (1.0.131): Керей шлёт послов чаще (envoy 0.85 → порог выше)
+    if (Math.random() > (0.35 + diff.aiAggression * 0.2) / clanMods(this.rivalClan).envoy) return;
     // цель: племя, где игрок близок к сюзеренитету (перебить) либо просто знакомое
     const cands = TRIBE_IDS.filter(nid => this.tribeRel[nid] !== 'hostile' && !this.envoyFreeze[nid]);   // перехваченные посланники (п.17) джунгарам недоступны
     if (!cands.length) return;
@@ -3082,6 +3087,7 @@ export class Game {
     const data = {
       v: 1, difficulty: this.difficulty, time: this.time, age: this.age, eage: this.eage,
       mode: this.mode, siteI: this.siteI, siteDep: this.sites.map(s => s.dep), camp: this.camp || undefined, koshN: this.koshN,
+      rivalClan: this.rivalClan,   // род джунгар (1.0.131)
       authority: this.authority, law: this.law, discontent: this.discontent, chronicle: this.chronicle,
       loyal: [...this.loyal.entries()].filter(([, v]) => Math.abs(v) < 1), lostHexes: this.lostHexes, wonHexes: this.wonHexes,
       wave: this.wave, waveT: this.waveT, res: this.res, eres: this.eres, score: this.score,
@@ -3169,6 +3175,10 @@ export class Game {
       // загруженная армия выходит слабее сохранённой.
       this.age = d.age || 0; this.eage = d.eage || 0;
       this.tech = d.tech || {};
+      // род джунгар (1.0.131): восстанавливаем ДО создания юнитов — addUnit
+      // накладывает бонусы рода в момент рождения, иначе загруженная вражеская
+      // конница выйдет без своего «+HP». В старых сейвах поля нет — жеребьёвка.
+      this.rivalClan = CLAN_BY_ID[d.rivalClan] ? d.rivalClan : randomClan();
       // карта соответствия старых id → новые
       const uMap = new Map<number, number>(); const bMap = new Map<number, number>();
       this.units = []; this.blds = []; this.nodes = [];
@@ -7333,6 +7343,7 @@ export class Game {
         }
         rate *= 1 + Math.min(3, helpers) * 1.1;
         if (b.owner === 'player') rate *= clanMods(this.settings.clan).build;   // РОД (п.12): Ұйсын строит быстрее
+        else if (b.owner === 'enemy') rate *= clanMods(this.rivalClan).build;   // род джунгар (1.0.131)
         b.done = Math.min(1, b.done + rate * dt);
         b.hp = b.maxHp * b.done;
         if (b.done >= 1) {
@@ -8020,6 +8031,8 @@ export class Game {
       woodDiscount: this.woodDiscount(),
       clan: (() => { const c = CLAN_BY_ID[this.settings.clan ?? ''];
         return { id: this.settings.clan ?? '', name: c?.name ?? '', tamga: c?.tamga ?? '', perk: c?.perk ?? '' }; })(),
+      rivalClan: (() => { const c = CLAN_BY_ID[this.rivalClan ?? ''];
+        return c ? { id: c.id, name: c.name, tamga: c.tamga, perk: c.perk, note: RIVAL_NOTE[c.id] } : undefined; })(),
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
       islam: { have: TRIBE_IDS.filter(nid => (this.faith[nid] ?? 0) >= 100).length, need: TRIBE_IDS.length, anyMosque: this.blds.some(b => b.owner === 'player' && b.key === 'mosque' && b.done >= 1) },
@@ -9396,6 +9409,11 @@ export class Game {
     if (b.owner === 'player' && b.key === 'towncenter') {
       const tg = CLAN_BY_ID[this.settings.clan ?? '']?.tamga;
       if (tg) drawIcon(ctx, tg, ix, iy - (ready ? sp.img.naturalHeight * scale : S * 2.0) - 14, 18, '#f6d47c');
+    }
+    // таңба рода джунгар — над их ставкой, багровым (1.0.131)
+    if (b.owner === 'enemy' && b.key === 'towncenter') {
+      const tg = CLAN_BY_ID[this.rivalClan ?? '']?.tamga;
+      if (tg) drawIcon(ctx, tg, ix, iy - (ready ? sp.img.naturalHeight * scale : S * 2.0) - 14, 16, '#f8a0a0');
     }
 
     // контактная тень-ромб на земле (точно по фундаменту)
