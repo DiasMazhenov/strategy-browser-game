@@ -97,7 +97,10 @@ console.log('\n=== 5. Фон меню — орнамент, а не офисна
 {
   const grid = /linear-gradient\(rgba\(253,230,138,\.4\) 1px, transparent 1px\), linear-gradient\(90deg/.test(app);
   ok(!grid, 'прямоугольная сетка убрана');
-  ok(/backgroundImage: "url\(\\"data:image\/svg\+xml/.test(app), 'фон меню — SVG-орнамент');
+  // орнамент — отдельным svg-ассетом (кешируется браузером и не раздувает JS),
+  // а не inline data-URI, как было в первой версии меню
+  ok(/backgroundImage:\s*`url\("\$\{menuPattern\}"\)`/.test(app), 'фон меню — SVG-орнамент');
+  ok(/import menuPattern from '\.\/assets\/pattern\.svg'/.test(app), 'орнамент подключён файлом ассета');
 }
 
 console.log('\n=== 5b. Устав и Зал легенд — в попапе, не на экране меню ===');
@@ -118,8 +121,8 @@ console.log('\n=== 5b. Устав и Зал легенд — в попапе, н
   ok(!/HowRow n=/.test(menuOnly), 'пункты устава убраны с экрана меню');
   ok(/onClick={\(\) => setInfoTab\(null\)}/.test(modal), 'клик по фону закрывает');
   ok(/e\.key === 'Escape'/.test(app), 'Esc закрывает попап');
-  ok(/!showSettings && !infoTab && \(e\.key === 'Enter'/.test(app),
-    'Enter не стартует игру, пока читаешь устав');
+  ok(/!showSettings && !infoTab && !showCamp && \(e\.key === 'Enter'/.test(app),
+    'Enter не стартует игру, пока читаешь устав или главы кампании');
   ok(/kz-corners panel-iron anim-banner/.test(modal),
     'попап оформлен в общем стиле (орнаментальные углы)');
   ok(/overflow-y-auto overscroll-contain/.test(modal),
