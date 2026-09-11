@@ -53,11 +53,15 @@ export default defineConfig({
                 if (/\/(lucide-react|clsx|tailwind-merge)\//.test(p)) return "vendor-ui";
                 return "vendor";
               }
-              // Движок (8.5 тыс. строк) отдельно от остальной игры: самый крупный
-              // и самый редко меняющийся кусок — кешируется лучше всего.
-              if (p.endsWith("/src/game/engine.ts")) return "game-engine";
-              if (p.includes("/src/game/")) return "game";
-              return undefined; // App.tsx и точка входа — в главном чанке
+              // 1.0.128: код игры НЕ раскладываем руками — границу проводит сам Rollup
+              // по динамическому import('./game/engine') из App.tsx. Всё, что нужно
+              // только движку (engine, pixelart, iso, audio, terrain), уезжает в
+              // отдельный чанк и грузится по клику «В поход»; общие модули
+              // (config, nations, prayer-times, iconset, session) остаются в главном.
+              // Ручное правило вида «всё из src/game → один чанк» здесь вредно: в один
+              // чанк попадают и statически нужные меню модули, и тогда чанк движка
+              // становится частью статического графа и скачивается на первом рендере.
+              return undefined;
             },
           },
         },

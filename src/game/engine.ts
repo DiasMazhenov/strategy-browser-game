@@ -10,6 +10,7 @@ import { Terrain, mulberry32 as mulberry32Like, wrapW, wrapH } from './terrain';
 import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp, warmSprites as warmPixelSprites, pendingSprites as pendingPixelSprites } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
+import { hasSave, clearSave, wasInGame, setInGame } from './session';
 import { GREATS, GREAT_BY_ID, type GreatId } from './greats';
 import { CITY_BY_ID, currentPrayer, nextPrayer, prayerTimes, PRAYER_NAMES, PRAYER_ORDER,
   fmtHM, type PrayerKey } from './prayer-times';
@@ -3091,31 +3092,18 @@ export class Game {
     return JSON.stringify(data);
   }
 
-  static hasSave(): boolean {
-    try { return !!localStorage.getItem('empires-dawn-savegame-v1'); } catch { return false; }
-  }
-  static clearSave() {
-    try {
-      localStorage.removeItem('empires-dawn-savegame-v1');
-      localStorage.removeItem('empires-dawn-ingame-v1');
-    } catch { /* noop */ }
-  }
+  // 1.0.128: тела переехали в game/session.ts — меню пользуется ими напрямую,
+  // не загружая чанк движка. Статики оставлены, чтобы не менять вызовы в игре и тестах.
+  static hasSave(): boolean { return hasSave(); }
+  static clearSave() { clearSave(); }
 
   /**
    * Была ли страница закрыта ПРЯМО во время партии. По этой метке App
    * возвращает игрока в бой после F5, не спрашивая. Метку ставим при входе
    * в игру и снимаем при выходе в меню и при поражении/победе.
    */
-  static wasInGame(): boolean {
-    try { return localStorage.getItem('empires-dawn-ingame-v1') === '1' && Game.hasSave(); }
-    catch { return false; }
-  }
-  static setInGame(on: boolean) {
-    try {
-      if (on) localStorage.setItem('empires-dawn-ingame-v1', '1');
-      else localStorage.removeItem('empires-dawn-ingame-v1');
-    } catch { /* noop */ }
-  }
+  static wasInGame(): boolean { return wasInGame(); }
+  static setInGame(on: boolean) { setInGame(on); }
   saveGame() {
     if (this.saveTo()) this.floater(this.cam.x, this.cam.y - 80, '{i:save} Партия сохранена', '#a3e635', 16);
   }

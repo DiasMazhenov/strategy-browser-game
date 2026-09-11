@@ -5,7 +5,13 @@ import {
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
-import { DEDICATIONS, Game, counterText, warmGameSprites, type GameStats, type HudSnapshot } from './game/engine';
+// 1.0.128 — движок уезжает в отдельный чанк: меню его не ждёт, грузим на старте
+// партии (и подгребаем в простое заранее). Типы можно импортировать всегда —
+// `import type` стирается при сборке и в рантайм не попадает.
+import type { Game as GameEngine, GameStats, HudSnapshot } from './game/engine';
+// Флаги сессии (есть ли сохранение) живут отдельно от движка — иначе меню
+//ради трёх строчек localStorage тащило бы весь чанк движка.
+import { wasInGame, setInGame, hasSave as gameHasSave } from './game/session';
 import { PLAYER_NATION, NATION_BY_ID } from './game/nations';
 import { CAMPAIGNS } from './game/config';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
@@ -15,6 +21,11 @@ import heroKhanate from './assets/hero-khanate.jpg';
 import menuPattern from './assets/pattern.svg';
 import { Ico, RT } from './game/Ico';
 import { plainRich } from './game/iconset';
+
+type EngineModule = typeof import('./game/engine');
+// Ссылка на подгруженный модуль движка. Нужна не только эффектам, но и рендеру
+// (подсказки дока, выбор посвящения) — заполняется сразу после import().
+let ENGINE: EngineModule | null = null;
 
 type Screen = 'menu' | 'game';
 interface ScoreEntry { name: string; score: number; result: string; difficulty: string; kills: number; time: number; date: string }
@@ -91,7 +102,7 @@ export default function App() {
   const [gameId, setGameId] = useState(0);
   const [loadSave, setLoadSave] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameRef = useRef<Game | null>(null);
+  const gameRef = useRef<GameEngine | null>(null);
   const overRef = useRef<GameStats | null>(null);
   overRef.current = over;
 
@@ -130,25 +141,29 @@ export default function App() {
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
-    if (!Game.wasInGame()) return;
+    if (!wasInGame()) return;
     setLoadSave(true);
     setScreen('game');
     setGameId(g => g + 1);
   }, []);
 
-  // 1.0.127 — ленивые спрайты: графика (~10 МБ) не нужна, чтобы показать меню,
-  // поэтому при старте страницы мы её не запрашиваем вовсе. Но как только меню
-  // отрисовалось и браузер свободен — подгребаем спрайты в фоне: к моменту
-  // нажатия «В поход!» они уже в кеше, и партия стартует с полной графикой.
+  // 1.0.128 — чанк движка (270 КБ) не нужен, чтобы показать меню: подгружаем его
+  // уже ПОСЛЕ первого рендера, когда браузер свободен. Тогда клик «В поход»
+  // срабатывает мгновенно. Спрайты (~10 МБ) тут не трогаем вообще — они едут
+  // только со стартом партии (warmGameSprites в конструкторе Game, см. 1.0.127).
   useEffect(() => {
-    const warm = () => { try { warmGameSprites(); } catch { /* спрайты — не критично */ } };
+    let cancelled = false;
+    const load = async () => {
+      try { const m = await import('./game/engine'); if (!cancelled) ENGINE = m; }
+      catch { /* не подгрузился в простое — догрузится на старте партии */ }
+    };
     const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
     if (typeof w.requestIdleCallback === 'function') {
-      const id = w.requestIdleCallback(warm, { timeout: 3000 });
-      return () => { if (w.cancelIdleCallback) w.cancelIdleCallback(id); };
+      const id = w.requestIdleCallback(load, { timeout: 3000 });
+      return () => { cancelled = true; if (w.cancelIdleCallback) w.cancelIdleCallback(id); };
     }
-    const t = window.setTimeout(warm, 1200);
-    return () => window.clearTimeout(t);
+    const t = window.setTimeout(load, 1200);
+    return () => { cancelled = true; window.clearTimeout(t); };
   }, []);
 
   const campRef = useRef<string | null>(null);
@@ -159,37 +174,45 @@ export default function App() {
     setDockTab('units');
     setScreen('game');
     setGameId(g => g + 1);
-    Game.setInGame(true);      // метка: страница закрыта во время партии → вернём в бой
+    setInGame(true);           // метка: страница закрыта во время партии → вернём в бой
   }, []);
 
   // create / destroy engine
   useEffect(() => {
     if (screen !== 'game') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const game = new Game(canvas, {
-      settings, loadSave,
-      campaign: campRef.current ?? undefined,   // глава кампании (п.34)
-      onHud: (h) => setHud(h),
-      onGameOver: (s) => {
-        if (s.campId && s.result === 'victory') {
-          try { localStorage.setItem('khanate-camp-' + s.campId, '1'); } catch { /* noop */ }
-        }
-        setOver(s);
-        setScores(loadScores());
-      },
-      onPauseRequest: () => {
-        if (overRef.current) return;
-        setPaused(p => {
-          const np = !p;
-          gameRef.current?.setPaused(np);
-          return np;
+    // движок подгружен в простое; если нет (кликнули сразу) — грузим сейчас
+    let cancelled = false;
+    let created: GameEngine | null = null;
+    void (async () => {
+      const eng = ENGINE ?? await import('./game/engine');
+      ENGINE = eng;
+      const canvas = canvasRef.current;
+      if (cancelled || !canvas) return;
+      const game = new eng.Game(canvas, {
+        settings, loadSave,
+        campaign: campRef.current ?? undefined,   // глава кампании (п.34)
+        onHud: (h) => setHud(h),
+        onGameOver: (s) => {
+          if (s.campId && s.result === 'victory') {
+            try { localStorage.setItem('khanate-camp-' + s.campId, '1'); } catch { /* noop */ }
+          }
+          setOver(s);
+          setScores(loadScores());
+        },
+        onPauseRequest: () => {
+          if (overRef.current) return;
+          setPaused(p => {
+            const np = !p;
+            gameRef.current?.setPaused(np);
+            return np;
+      });
+        },
         });
-      },
-    });
-    gameRef.current = game;
-    game.sound.ensure();
-    return () => { game.destroy(); gameRef.current = null; };
+      created = game;
+      gameRef.current = game;
+      game.sound.ensure();
+    })();
+    return () => { cancelled = true; created?.destroy(); gameRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, gameId]);
 
@@ -973,7 +996,7 @@ export default function App() {
                 // Уходя в меню, дописываем партию и снимаем метку: после F5
                 // игрок попадёт в меню (с кнопкой «Продолжить»), а не обратно в бой.
                 gameRef.current?.saveOnExit();
-                Game.setInGame(false);
+                setInGame(false);
                 gameRef.current?.destroy(); setScreen('menu'); setPaused(false);
               }}><Home className="h-4 w-4" />Меню</MidBtn>
             </div>
@@ -1169,7 +1192,7 @@ export default function App() {
                   </div>
                   <div className="mb-1.5 text-[10px] text-slate-300">Выберите посвящение — оно поведёт ханство до следующего перехода эпохи:</div>
                   <div className="grid grid-cols-3 gap-1.5">
-                    {DEDICATIONS.map(d => (
+                    {(ENGINE?.DEDICATIONS ?? []).map(d => (
                       <button key={d.id} onClick={() => gameRef.current?.chooseDedication(d.id)}
                         className="rounded-lg border border-amber-300/40 bg-black/30 px-1.5 py-1.5 text-left transition hover:bg-amber-400/15">
                         <div className="flex items-center gap-1 text-[11px] font-black text-amber-200"><Ico name={d.icon} className="h-3.5 w-3.5" />{d.name}</div>
@@ -1254,7 +1277,7 @@ export default function App() {
       )}
 
       {/* ===== GAME OVER ===== */}
-      {over && <GameOverScreen over={over} scores={scores} name={name} setName={setName} saved={saved} onSave={saveScore} onRestart={() => startGame(difficulty)} onMenu={() => { Game.setInGame(false); setOver(null); setScreen('menu'); }} />}
+      {over && <GameOverScreen over={over} scores={scores} name={name} setName={setName} saved={saved} onSave={saveScore} onRestart={() => startGame(difficulty)} onMenu={() => { setInGame(false); setOver(null); setScreen('menu'); }} />}
     </div>
   );
 }
@@ -1292,7 +1315,7 @@ function unitStats(k: string): string {
   if (!d) return '';
   const melee = d.range <= 60;
   const base = `${d.desc ? d.desc + '\n' : ''}HP ${d.hp} · ATK ${d.atk} · ${melee ? 'ближний бой' : `дальность ${d.range}`} · скорость ${d.speed}`;
-  const ct = counterText(k as Parameters<typeof counterText>[0]);   // контры из единой боевой таблицы (п.21)
+  const ct = ENGINE ? ENGINE.counterText(k as Parameters<EngineModule['counterText']>[0]) : '';   // контры из единой боевой таблицы (п.21)
   return ct ? `${base}\nКонтра: ${ct}` : base;
 }
 // цена постройки с учётом союзной скидки на дерево (ремесленные народы)
@@ -1643,7 +1666,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlay
   // Устав и Зал легенд живут в одной модалке с вкладками: null — закрыта.
   const [infoTab, setInfoTab] = useState<'how' | 'scores' | null>(null);
   const difficulty = settings.difficulty;
-  const hasSave = Game.hasSave();
+  const hasSave = gameHasSave();
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       // Esc закрывает попап; Enter/пробел стартуют игру, но не когда открыто
