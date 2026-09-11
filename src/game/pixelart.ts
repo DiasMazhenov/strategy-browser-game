@@ -217,7 +217,24 @@ import kzScoutBW2 from '../assets/sprites/units/kz/kz_scout_bw2.png';
 import kzScoutBW3 from '../assets/sprites/units/kz/kz_scout_bw3.png';
 import kzScoutBW4 from '../assets/sprites/units/kz/kz_scout_bw4.png';
 
-const mk = (src: string): HTMLImageElement => { const im = new Image(); im.src = src; return im; };
+// 1.0.127 — ЛЕНИВЫЕ СПРАЙТЫ.
+// `<img>` создаём сразу (пустой элемент — дёшево, DOM не трогаем), а `src`
+// назначаем только в warmSprites(). Пока src не назначен, браузер не делает
+// ни одного запроса: иначе все ~240 спрайтов (~10 МБ) качались бы ради меню,
+// где не нужен ни один. Все точки рисования уже проверяют `im.complete &&
+// im.naturalWidth` и рисуют процедурный фолбэк, поэтому «недогруженный»
+// спрайт — штатное состояние, а не ошибка.
+const PENDING_SPRITES: [HTMLImageElement, string][] = [];
+const mk = (src: string): HTMLImageElement => { const im = new Image(); PENDING_SPRITES.push([im, src]); return im; };
+/** Назначить src всем отложенным картинкам. Идемпотентно: список очищается. */
+export function warmSprites(): number {
+  const n = PENDING_SPRITES.length;
+  for (const [im, src] of PENDING_SPRITES) im.src = src;
+  PENDING_SPRITES.length = 0;
+  return n;
+}
+/** Сколько спрайтов ещё не запрошено (для тестов). */
+export function pendingSprites(): number { return PENDING_SPRITES.length; }
 // кадр покоя/атаки
 const UNIT_IMAGES: Partial<Record<UnitKey, HTMLImageElement>> = {
   villager: mk(uVillager), swordsman: mk(uSwordsman), archer: mk(uArcher), spearman: mk(uSpearman),

@@ -5,7 +5,7 @@ import {
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
   Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
 } from 'lucide-react';
-import { DEDICATIONS, Game, counterText, type GameStats, type HudSnapshot } from './game/engine';
+import { DEDICATIONS, Game, counterText, warmGameSprites, type GameStats, type HudSnapshot } from './game/engine';
 import { PLAYER_NATION, NATION_BY_ID } from './game/nations';
 import { CAMPAIGNS } from './game/config';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
@@ -134,6 +134,21 @@ export default function App() {
     setLoadSave(true);
     setScreen('game');
     setGameId(g => g + 1);
+  }, []);
+
+  // 1.0.127 — ленивые спрайты: графика (~10 МБ) не нужна, чтобы показать меню,
+  // поэтому при старте страницы мы её не запрашиваем вовсе. Но как только меню
+  // отрисовалось и браузер свободен — подгребаем спрайты в фоне: к моменту
+  // нажатия «В поход!» они уже в кеше, и партия стартует с полной графикой.
+  useEffect(() => {
+    const warm = () => { try { warmGameSprites(); } catch { /* спрайты — не критично */ } };
+    const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(warm, { timeout: 3000 });
+      return () => { if (w.cancelIdleCallback) w.cancelIdleCallback(id); };
+    }
+    const t = window.setTimeout(warm, 1200);
+    return () => window.clearTimeout(t);
   }, []);
 
   const campRef = useRef<string | null>(null);

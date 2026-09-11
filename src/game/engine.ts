@@ -7,7 +7,7 @@ import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, d
   type HexKind,
   TILE_STEP, HEX_CELL } from './iso';
 import { Terrain, mulberry32 as mulberry32Like, wrapW, wrapH } from './terrain';
-import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp } from './pixelart';
+import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTorch, drawCampProp, warmSprites as warmPixelSprites, pendingSprites as pendingPixelSprites } from './pixelart';
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
 import { GREATS, GREAT_BY_ID, type GreatId } from './greats';
@@ -61,9 +61,23 @@ const KZ_SPRITE_URLS: Partial<Record<BuildingKey, string>> = {
 interface BldSprite { img: HTMLImageElement; flash: HTMLCanvasElement | null; ax: number; ay: number; baseW: number }
 const BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
 const KZ_BLD_SPRITES: Partial<Record<BuildingKey, BldSprite>> = {};
+// 1.0.127 — ленивые спрайты: пустой <img> создаётся сразу, запрос в сеть —
+// только из warmGameSprites() (вызывается в конструкторе Game). До старта
+// партии движок не скачивает ни одного спрайта (~10 МБ на одном меню).
+const PENDING_SPRITES: [HTMLImageElement, string][] = [];
+function pendingImg(url: string): HTMLImageElement { const im = new Image(); PENDING_SPRITES.push([im, url]); return im; }
+/** Запросить все отложенные спрайты (свои + pixelart). Идемпотентно. */
+export function warmGameSprites(): number {
+  const n = PENDING_SPRITES.length;
+  for (const [im, url] of PENDING_SPRITES) im.src = url;
+  PENDING_SPRITES.length = 0;
+  return n + warmPixelSprites();
+}
+/** Сколько спрайтов ещё не запрошено (для тестов). */
+export function pendingGameSprites(): number { return PENDING_SPRITES.length + pendingPixelSprites(); }
+
 function loadBldSprite(anchorKey: string, url: string): BldSprite {
-  const im = new Image();
-  im.src = url;
+  const im = pendingImg(url);
   const a = SPR_ANCHORS[anchorKey];
   const sp: BldSprite = { img: im, flash: null, ax: a?.ax ?? 0, ay: a?.ay ?? 0, baseW: a?.baseW ?? 100 };
   im.onload = () => {
@@ -103,8 +117,7 @@ function placeBld(b: Bld, S: number) {
 
 // ── угловой сегмент стены (зубчатый бастион-столб на стыке двух осей) ──
 function makeExtraSprite(url: string): BldSprite {
-  const im = new Image();
-  im.src = url;
+  const im = pendingImg(url);
   const sp: BldSprite = { img: im, flash: null, ax: 0, ay: 0, baseW: 100 };
   im.onload = () => {
     sp.baseW = im.naturalWidth;
@@ -127,10 +140,10 @@ const KZ_CORNER_SPRITE = makeExtraSprite(kzImgWallCorner);
 
 // ── AI-арт рельефа: крупные вершины/холмы (редкие декор-объекты поверх террас) ──
 const TERRAIN_FEATURES: { img: HTMLImageElement; scale: number }[] = [
-  { img: (() => { const i = new Image(); i.src = imgPeakSnow; return i; })(), scale: 1.7 },
-  { img: (() => { const i = new Image(); i.src = imgPeakRock; return i; })(), scale: 1.45 },
-  { img: (() => { const i = new Image(); i.src = imgHillGrass; return i; })(), scale: 0.85 },
-  { img: (() => { const i = new Image(); i.src = imgHillRock; return i; })(), scale: 0.95 },
+  { img: pendingImg(imgPeakSnow), scale: 1.7 },
+  { img: pendingImg(imgPeakRock), scale: 1.45 },
+  { img: pendingImg(imgHillGrass), scale: 0.85 },
+  { img: pendingImg(imgHillRock), scale: 0.95 },
 ];
 const F_PEAK_SNOW = 0, F_PEAK_ROCK = 1, F_HILL_GRASS = 2, F_HILL_ROCK = 3;
 
@@ -752,6 +765,9 @@ export class Game {
   destroyed = false;
 
   constructor(canvas: HTMLCanvasElement, opts: { difficulty?: Difficulty; settings?: Settings; loadSave?: boolean; campaign?: string; onHud: (h: HudSnapshot) => void; onGameOver: (s: GameStats) => void; onPauseRequest: () => void }) {
+    // 1.0.127: только здесь sprites уходят в сеть — до старта партии меню
+    // не качает ~10 МБ графики (см. warmGameSprites).
+    warmGameSprites();
     this.canvas = canvas;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no ctx');
