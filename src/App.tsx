@@ -13,10 +13,11 @@ import type { Game as GameEngine, GameStats, HudSnapshot } from './game/engine';
 //ради трёх строчек localStorage тащило бы весь чанк движка.
 import { wasInGame, setInGame, hasSave as gameHasSave } from './game/session';
 import { PLAYER_NATION, NATION_BY_ID } from './game/nations';
-import { CAMPAIGNS } from './game/config';
+import { CAMPAIGNS, clanBldCost, clanUnitCost } from './game/config';
+import { CLANS, DEFAULT_CLAN, type ClanId } from './game/clans';
 import { CITIES as AZAN_CITIES, CITY_BY_ID as AZAN_CITY_BY_ID, prayerTimes as azanTimes,
   PRAYER_NAMES as AZAN_NAMES, PRAYER_ORDER as AZAN_ORDER, fmtHM as azanFmt } from './game/prayer-times';
-import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings } from './game/config';
+import { AGES, BIOMES, BUILDING_DEFS, DEFAULT_SETTINGS, DIFF, SPEED_OPTIONS, UNIT_DEFS, type BuildingKey, type Difficulty, type Settings, type UnitKey } from './game/config';
 import heroKhanate from './assets/hero-khanate.jpg';
 import menuPattern from './assets/pattern.svg';
 import { Ico, RT } from './game/Ico';
@@ -235,6 +236,9 @@ export default function App() {
     hud ? hud.wood >= c.wood && hud.food >= c.food && hud.gold >= c.gold : false;
   // союзная скидка на дерево (ремесленные народы): цены в доке показываем уже с ней
   const wdisc = hud?.woodDiscount ?? 1;
+  // род-таңба (п.12): пассивки рода и скидки цен
+  const clan = settings.clan ?? DEFAULT_CLAN;
+  const ucost = (k: UnitKey) => clanUnitCost(clan, k);
 
   if (screen === 'menu') return (
     <MenuScreen
@@ -262,6 +266,11 @@ export default function App() {
             <div className="ml-1 hidden items-center gap-1 rounded-lg bg-black/30 px-2 py-1 text-xs font-bold sm:flex">
               <Users className="h-3.5 w-3.5 text-sky-300" />
               <span className={(hud && hud.pop >= hud.popCap) ? 'text-red-400' : 'text-white'}>{hud?.pop ?? 0}/{hud?.popCap ?? 10}</span>
+            </div>
+            {/* род-таңба (п.12): знак рода, по наведению — его пассивка */}
+            <div className="ml-1 flex items-center gap-1 rounded-lg bg-black/30 px-2 py-1" title={`Род ${hud?.clan?.name ?? ''}: ${hud?.clan?.perk ?? ''}`}>
+              <Ico name={hud?.clan?.tamga || CLANS[0].tamga} className="h-4 w-4 text-amber-300" />
+              <span className="hidden text-[11px] font-black text-amber-200 sm:inline">{hud?.clan?.name ?? CLANS[0].name}</span>
             </div>
             <div className="ml-1 flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-xs font-bold sm:hidden">
               <Users className="h-3.5 w-3.5 text-sky-300" />{hud?.pop ?? 0}/{hud?.popCap ?? 10}
@@ -892,45 +901,45 @@ export default function App() {
             <div className="scroll-thin flex items-stretch gap-1.5 overflow-x-auto">
               {dockTab === 'units' ? (
                 <>
-                  <TrainBtn label="Шаруа" icon="farmer" key_="1" cost={UNIT_DEFS.villager.cost} ok={canAfford(UNIT_DEFS.villager.cost)} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
-                  <TrainBtn label={hud?.unitNames?.swordsman ?? 'Сарбаз'} icon="saber" key_="2" cost={UNIT_DEFS.swordsman.cost} ok={canAfford(UNIT_DEFS.swordsman.cost)} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
-                  <TrainBtn label={hud?.unitNames?.archer ?? 'Мерген'} icon="bow" key_="3" cost={UNIT_DEFS.archer.cost} ok={canAfford(UNIT_DEFS.archer.cost)} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
-                  <TrainBtn label="Мылтықшы" icon="fire" key_="" cost={UNIT_DEFS.musketeer.cost} ok={canAfford(UNIT_DEFS.musketeer.cost) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} tip={unitStats('musketeer')} onClick={() => g()?.train('musketeer')} />
-                  <TrainBtn label="Батыр" icon="horse" key_="4" cost={UNIT_DEFS.knight.cost} ok={canAfford(UNIT_DEFS.knight.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
-                  <TrainBtn label={hud?.unitNames?.spearman ?? 'Найзагер'} icon="spear" key_="5" cost={UNIT_DEFS.spearman.cost} ok={canAfford(UNIT_DEFS.spearman.cost)} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
-                  <TrainBtn label={hud?.unitNames?.cavalry ?? 'Жасауыл'} icon="rider" key_="6" cost={UNIT_DEFS.cavalry.cost} ok={canAfford(UNIT_DEFS.cavalry.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
-                  <TrainBtn label="Атты-мерген" icon="bow" key_="" cost={UNIT_DEFS.horsearcher.cost} ok={canAfford(UNIT_DEFS.horsearcher.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('horsearcher')} onClick={() => g()?.train('horsearcher')} />
-                  <TrainBtn label="Таран" icon="hammer" key_="" cost={UNIT_DEFS.ram.cost} ok={canAfford(UNIT_DEFS.ram.cost) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('ram')} onClick={() => g()?.train('ram')} />
-                  <TrainBtn label="Фальконет" icon="explosion" key_="" cost={UNIT_DEFS.falconet.cost} ok={canAfford(UNIT_DEFS.falconet.cost) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} tip={unitStats('falconet')} onClick={() => g()?.train('falconet')} />
-                  <TrainBtn label="Катапульта" icon="stone" key_="7" cost={UNIT_DEFS.catapult.cost} ok={canAfford(UNIT_DEFS.catapult.cost) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
-                  <TrainBtn label="Имам" icon="mosque" key_="8" cost={UNIT_DEFS.monk.cost} ok={canAfford(UNIT_DEFS.monk.cost)} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
-                  <TrainBtn label="Барлаушы" icon="compass" key_="9" cost={UNIT_DEFS.scout.cost} ok={canAfford(UNIT_DEFS.scout.cost)} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
-                  <TrainBtn label="Көпес" icon="camel" key_="0" cost={UNIT_DEFS.trader.cost} ok={canAfford(UNIT_DEFS.trader.cost)} tip={unitStats('trader') + ' · нужен Базар и друзья-соседи'} onClick={() => g()?.train('trader')} />
+                  <TrainBtn label="Шаруа" icon="farmer" key_="1" cost={ucost('villager')} ok={canAfford(ucost('villager'))} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
+                  <TrainBtn label={hud?.unitNames?.swordsman ?? 'Сарбаз'} icon="saber" key_="2" cost={ucost('swordsman')} ok={canAfford(ucost('swordsman'))} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
+                  <TrainBtn label={hud?.unitNames?.archer ?? 'Мерген'} icon="bow" key_="3" cost={ucost('archer')} ok={canAfford(ucost('archer'))} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
+                  <TrainBtn label="Мылтықшы" icon="fire" key_="" cost={ucost('musketeer')} ok={canAfford(ucost('musketeer')) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} tip={unitStats('musketeer')} onClick={() => g()?.train('musketeer')} />
+                  <TrainBtn label="Батыр" icon="horse" key_="4" cost={ucost('knight')} ok={canAfford(ucost('knight')) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('knight')} onClick={() => g()?.train('knight')} />
+                  <TrainBtn label={hud?.unitNames?.spearman ?? 'Найзагер'} icon="spear" key_="5" cost={ucost('spearman')} ok={canAfford(ucost('spearman'))} tip={unitStats('spearman')} onClick={() => g()?.train('spearman')} />
+                  <TrainBtn label={hud?.unitNames?.cavalry ?? 'Жасауыл'} icon="rider" key_="6" cost={ucost('cavalry')} ok={canAfford(ucost('cavalry')) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('cavalry')} onClick={() => g()?.train('cavalry')} />
+                  <TrainBtn label="Атты-мерген" icon="bow" key_="" cost={ucost('horsearcher')} ok={canAfford(ucost('horsearcher')) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('horsearcher')} onClick={() => g()?.train('horsearcher')} />
+                  <TrainBtn label="Таран" icon="hammer" key_="" cost={ucost('ram')} ok={canAfford(ucost('ram')) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} tip={unitStats('ram')} onClick={() => g()?.train('ram')} />
+                  <TrainBtn label="Фальконет" icon="explosion" key_="" cost={ucost('falconet')} ok={canAfford(ucost('falconet')) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} tip={unitStats('falconet')} onClick={() => g()?.train('falconet')} />
+                  <TrainBtn label="Катапульта" icon="stone" key_="7" cost={ucost('catapult')} ok={canAfford(ucost('catapult')) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} tip={unitStats('catapult')} onClick={() => g()?.train('catapult')} />
+                  <TrainBtn label="Имам" icon="mosque" key_="8" cost={ucost('monk')} ok={canAfford(ucost('monk'))} tip={unitStats('monk') + ' · нужна Мешіт-медресе'} onClick={() => g()?.train('monk')} />
+                  <TrainBtn label="Барлаушы" icon="compass" key_="9" cost={ucost('scout')} ok={canAfford(ucost('scout'))} tip={unitStats('scout')} onClick={() => g()?.train('scout')} />
+                  <TrainBtn label="Көпес" icon="camel" key_="0" cost={ucost('trader')} ok={canAfford(ucost('trader'))} tip={unitStats('trader') + ' · нужен Базар и друзья-соседи'} onClick={() => g()?.train('trader')} />
                   {(['camelry', 'oghuzguard', 'druzhinnik', 'mirza'] as const).map(k => {
                     const nid = (UNIT_DEFS[k] as unknown as { tribeOf?: string }).tribeOf!;
                     const ndef = NATION_BY_ID[nid];
                     const suz = hud?.nations?.find(n => n.id === nid)?.suzerain === 'player';
                     if (!suz) return null;   // племенной юнит появляется в доке только за сюзеренитет (п.38)
-                    return <TrainBtn key={k} label={UNIT_DEFS[k].name.replace(/^(Хорезмский |Огузский |Славянский |Бухарский )/, '')} icon={k === 'camelry' ? 'camel' : k === 'mirza' ? 'scroll' : k === 'oghuzguard' ? 'spear' : 'saber'} key_="" cost={UNIT_DEFS[k].cost} ok={canAfford(UNIT_DEFS[k].cost) && (hud?.age ?? 0) >= UNIT_DEFS[k].ageReq} lock={(hud?.age ?? 0) < UNIT_DEFS[k].ageReq} tip={unitStats(k) + ` · уникальный юнит «${ndef?.name ?? nid}»`} onClick={() => g()?.train(k)} />;
+                    return <TrainBtn key={k} label={UNIT_DEFS[k].name.replace(/^(Хорезмский |Огузский |Славянский |Бухарский )/, '')} icon={k === 'camelry' ? 'camel' : k === 'mirza' ? 'scroll' : k === 'oghuzguard' ? 'spear' : 'saber'} key_="" cost={ucost(k)} ok={canAfford(ucost(k)) && (hud?.age ?? 0) >= UNIT_DEFS[k].ageReq} lock={(hud?.age ?? 0) < UNIT_DEFS[k].ageReq} tip={unitStats(k) + ` · уникальный юнит «${ndef?.name ?? nid}»`} onClick={() => g()?.train(k)} />;
                   })}
                 </>
               ) : (
                 <>
-                  <TrainBtn label="Юрта" icon="yurt" key_="Q" cost={bldCostOf('house', wdisc)} ok={canAfford(bldCostOf('house', wdisc))} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
-                  <TrainBtn label="Казармы" icon="hammerpick" key_="E" cost={bldCostOf('barracks', wdisc)} ok={canAfford(bldCostOf('barracks', wdisc))} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
-                  <TrainBtn label="Башня" icon="tower" key_="R" cost={bldCostOf('tower', wdisc)} ok={canAfford(bldCostOf('tower', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
-                  <TrainBtn label="Пашня" icon="wheat" key_="F" cost={bldCostOf('farm', wdisc)} ok={canAfford(bldCostOf('farm', wdisc))} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
-                  <TrainBtn label="Склад" icon="box" key_="K" cost={bldCostOf('storehouse', wdisc)} ok={canAfford(bldCostOf('storehouse', wdisc))} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
-                  <TrainBtn label="Загон" icon="sheep" key_="H" cost={bldCostOf('pen', wdisc)} ok={canAfford(bldCostOf('pen', wdisc))} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
-                  <TrainBtn label="Конюшня" icon="horse" key_="Z" cost={bldCostOf('stable', wdisc)} ok={canAfford(bldCostOf('stable', wdisc)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
-                  <TrainBtn label="Кузница" icon="hammer" key_="X" cost={bldCostOf('blacksmith', wdisc)} ok={canAfford(bldCostOf('blacksmith', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
-                  <TrainBtn label="Базар" icon="market" key_="C" cost={bldCostOf('market', wdisc)} ok={canAfford(bldCostOf('market', wdisc))} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
-                  <TrainBtn label="Мешіт" icon="mosque" key_="M" cost={bldCostOf('mosque', wdisc)} ok={canAfford(bldCostOf('mosque', wdisc))} active={hud?.placement === 'mosque'} tip={bldStats('mosque')} onClick={() => g()?.enterPlacement('mosque')} />
+                  <TrainBtn label="Юрта" icon="yurt" key_="Q" cost={bldCostOf('house', wdisc, clan)} ok={canAfford(bldCostOf('house', wdisc, clan))} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
+                  <TrainBtn label="Казармы" icon="hammerpick" key_="E" cost={bldCostOf('barracks', wdisc, clan)} ok={canAfford(bldCostOf('barracks', wdisc, clan))} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
+                  <TrainBtn label="Башня" icon="tower" key_="R" cost={bldCostOf('tower', wdisc, clan)} ok={canAfford(bldCostOf('tower', wdisc, clan)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
+                  <TrainBtn label="Пашня" icon="wheat" key_="F" cost={bldCostOf('farm', wdisc, clan)} ok={canAfford(bldCostOf('farm', wdisc, clan))} active={hud?.placement === 'farm'} tip={bldStats('farm')} onClick={() => g()?.enterPlacement('farm')} />
+                  <TrainBtn label="Склад" icon="box" key_="K" cost={bldCostOf('storehouse', wdisc, clan)} ok={canAfford(bldCostOf('storehouse', wdisc, clan))} active={hud?.placement === 'storehouse'} tip={bldStats('storehouse')} onClick={() => g()?.enterPlacement('storehouse')} />
+                  <TrainBtn label="Загон" icon="sheep" key_="H" cost={bldCostOf('pen', wdisc, clan)} ok={canAfford(bldCostOf('pen', wdisc, clan))} active={hud?.placement === 'pen'} tip={bldStats('pen') + ' · кликни рабочим по загону → пастух'} onClick={() => g()?.enterPlacement('pen')} />
+                  <TrainBtn label="Конюшня" icon="horse" key_="Z" cost={bldCostOf('stable', wdisc, clan)} ok={canAfford(bldCostOf('stable', wdisc, clan)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'stable'} tip={bldStats('stable')} onClick={() => g()?.enterPlacement('stable')} />
+                  <TrainBtn label="Кузница" icon="hammer" key_="X" cost={bldCostOf('blacksmith', wdisc, clan)} ok={canAfford(bldCostOf('blacksmith', wdisc, clan)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'blacksmith'} tip={bldStats('blacksmith')} onClick={() => g()?.enterPlacement('blacksmith')} />
+                  <TrainBtn label="Базар" icon="market" key_="C" cost={bldCostOf('market', wdisc, clan)} ok={canAfford(bldCostOf('market', wdisc, clan))} active={hud?.placement === 'market'} tip={bldStats('market')} onClick={() => g()?.enterPlacement('market')} />
+                  <TrainBtn label="Мешіт" icon="mosque" key_="M" cost={bldCostOf('mosque', wdisc, clan)} ok={canAfford(bldCostOf('mosque', wdisc, clan))} active={hud?.placement === 'mosque'} tip={bldStats('mosque')} onClick={() => g()?.enterPlacement('mosque')} />
                   <div className="mx-0.5 w-px shrink-0 bg-white/10" />
-                  <TrainBtn label="Стена" icon="brick" key_="B" cost={bldCostOf('wall', wdisc)} ok={canAfford(bldCostOf('wall', wdisc))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
-                  <TrainBtn label="Ворота" icon="door" key_="V" cost={bldCostOf('gate', wdisc)} ok={canAfford(bldCostOf('gate', wdisc))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
-                  <TrainBtn label="Хан орда" icon="yurt" key_="" cost={bldCostOf('orda', wdisc)} ok={canAfford(bldCostOf('orda', wdisc)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'orda'} tip={bldStats('orda')} onClick={() => g()?.enterPlacement('orda')} />
-                  <TrainBtn label="Мавзолей" icon="star" key_="W" cost={bldCostOf('wonder', wdisc)} ok={canAfford(bldCostOf('wonder', wdisc)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
+                  <TrainBtn label="Стена" icon="brick" key_="B" cost={bldCostOf('wall', wdisc, clan)} ok={canAfford(bldCostOf('wall', wdisc, clan))} active={hud?.placement === 'wall'} tip={bldStats('wall')} onClick={() => g()?.enterPlacement('wall')} />
+                  <TrainBtn label="Ворота" icon="door" key_="V" cost={bldCostOf('gate', wdisc, clan)} ok={canAfford(bldCostOf('gate', wdisc, clan))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
+                  <TrainBtn label="Хан орда" icon="yurt" key_="" cost={bldCostOf('orda', wdisc, clan)} ok={canAfford(bldCostOf('orda', wdisc, clan)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'orda'} tip={bldStats('orda')} onClick={() => g()?.enterPlacement('orda')} />
+                  <TrainBtn label="Мавзолей" icon="star" key_="W" cost={bldCostOf('wonder', wdisc, clan)} ok={canAfford(bldCostOf('wonder', wdisc, clan)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
                 </>
               )}
             </div>
@@ -1319,8 +1328,9 @@ function unitStats(k: string): string {
   return ct ? `${base}\nКонтра: ${ct}` : base;
 }
 // цена постройки с учётом союзной скидки на дерево (ремесленные народы)
-function bldCostOf(k: keyof typeof BUILDING_DEFS, disc: number) {
-  const c = BUILDING_DEFS[k].cost;
+// и скидки рода (п.12: Арғын — загоны дешевле)
+function bldCostOf(k: keyof typeof BUILDING_DEFS, disc: number, clan: ClanId) {
+  const c = clanBldCost(clan, k);
   return { wood: Math.round(c.wood * disc), food: c.food, gold: c.gold };
 }
 function bldStats(k: string): string {
@@ -1666,6 +1676,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlay
   // Устав и Зал легенд живут в одной модалке с вкладками: null — закрыта.
   const [infoTab, setInfoTab] = useState<'how' | 'scores' | null>(null);
   const difficulty = settings.difficulty;
+  const clan = settings.clan ?? DEFAULT_CLAN;   // род-таңба (п.12)
   const hasSave = gameHasSave();
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -1748,6 +1759,25 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlay
                 <div className="flex justify-center text-amber-200"><Ico name={d.icon} className="h-7 w-7" /></div>
                 <div className="font-display mt-1 text-sm font-black text-amber-100">{d.name}</div>
                 <div className="mt-0.5 hidden text-[11px] leading-snug text-slate-400 sm:block">{d.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* род-таңба (п.12): пассивки рода, видно до старта */}
+        <div className="mt-4">
+          <div className="mb-2 text-center text-[11px] font-black tracking-[0.25em] text-slate-400">ВЫБЕРИ СВОЙ РОД</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {CLANS.map(c => (
+              <button
+                key={c.id}
+                onClick={() => updateSettings({ clan: c.id })}
+                title={c.desc}
+                className={`rounded-2xl border p-2.5 text-center transition active:scale-95 ${clan === c.id ? 'border-amber-300 bg-amber-400/15 shadow-[0_0_20px_rgba(245,158,11,.25)]' : 'panel-iron opacity-70 hover:opacity-100'}`}
+              >
+                <div className="flex justify-center text-amber-200"><Ico name={c.tamga} className="h-7 w-7" /></div>
+                <div className="font-display mt-1 text-[13px] font-black text-amber-100">{c.name}</div>
+                <div className="mt-0.5 text-[10px] leading-tight text-slate-400">{c.perk}</div>
               </button>
             ))}
           </div>

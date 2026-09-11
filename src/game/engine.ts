@@ -1,4 +1,4 @@
-import { AGES, BUILDING_DEFS, CAMPAIGNS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type CampaignDef, type Difficulty, type Settings, type UnitKey, LAW_DEFS } from './config';
+import { AGES, BUILDING_DEFS, CAMPAIGNS, DEFAULT_SETTINGS, DIFF, SCORE, TECHS, UNIT_DEFS, UPGRADES, upgradeLine, WORLD, HOME, RIVAL, type BuildingKey, type CampaignDef, type Difficulty, type Settings, type UnitKey, LAW_DEFS, clanBldCost, clanUnitCost } from './config';
 import { SoundBank } from './audio';
 import { drawIcon, drawRich, strokeRich, measureRich } from './iconset';
 import { toIso, fromIso, isoEllipse, drawIsoTree, drawIsoGold, drawIsoBerries, drawIsoFish,
@@ -11,6 +11,7 @@ import { drawConstruction, drawPixelUnit, diamondRingHalf, diamondShadow, drawTo
 import { SPR_ANCHORS } from './sprite-art';
 import { cursorCss, type CursorKind } from './cursors';
 import { hasSave, clearSave, wasInGame, setInGame } from './session';
+import { clanMods, CLAN_BY_ID } from './clans';
 import { GREATS, GREAT_BY_ID, type GreatId } from './greats';
 import { CITY_BY_ID, currentPrayer, nextPrayer, prayerTimes, PRAYER_NAMES, PRAYER_ORDER,
   fmtHM, type PrayerKey } from './prayer-times';
@@ -405,6 +406,7 @@ export interface AgeReport {
 }
 
 export interface HudSnapshot {
+  clan?: { id: string; name: string; tamga: string; perk: string };   // род-таңба игрока (п.12)
   camp?: { part: string; title: string; objs: { t: string; done: boolean }[] };   // глава кампании (п.34)
   authority: number; lawName: string | null; discontent: number;   // құрылтай (п.13)
   tel: { wool: number; feltYurts: boolean; feltArmor: boolean; hasPen: boolean };   // төл (п.14)
@@ -846,6 +848,14 @@ export class Game {
       u.upg = this.upgTier(key, owner);
     }
     // рабочие игрока (казахи) спавнятся по очереди: мужчина-крестьянин / женщина-работница
+    // РОД (п.12): пассивки накладываются при рождении юнита
+    const cm = clanMods(this.settings.clan);
+    if (owner === 'player') {
+      if (key === 'scout' && cm.scout !== 1) u.speed *= cm.scout;                       // Қыпшақ
+      if ((key === 'knight' || key === 'cavalry' || key === 'horsearcher' || key === 'camelry') && cm.cavHp !== 1) {
+        u.maxHp = Math.round(u.maxHp * cm.cavHp); u.hp = u.maxHp;                       // Найман
+      }
+    }
     if (key === 'villager' && owner === 'player') {
       this.villagerSexToggle = !this.villagerSexToggle;
       u.female = this.villagerSexToggle;
@@ -861,6 +871,11 @@ export class Game {
       done, buildT: 0, queue: [], cd: 0, rallyX: x + (owner === 'player' ? 110 : -110), rallyY: y + 90, rallyNode: -1, flash: 0, smokeT: 0,
       research: null, garrison: [], upg: key === 'tower' ? { range: 0, dmg: 0, archers: 0 } : undefined, gate: false,
     };
+    // РОД (п.12): Ұйсын — башни крепче
+    if (owner === 'player' && key === 'tower') {
+      const k = clanMods(this.settings.clan).towerHp;
+      if (k !== 1) { b.maxHp = Math.round(b.maxHp * k); b.hp = done >= 1 ? b.maxHp : Math.round(b.hp * k); }
+    }
     this.blds.push(b);
     return b;
   }
@@ -3005,7 +3020,7 @@ export class Game {
       const t = i / steps;
       const px = Math.round((x0 + dx * t) / TILE_STEP) * TILE_STEP;
       const py = Math.round((y0 + dy * t) / TILE_STEP) * TILE_STEP;
-      if (this.placementValid(px, py, key) && this.afford(BUILDING_DEFS[key].cost)) placed += this.placeSingle(key, px, py, axis) ? 1 : 0;
+      if (this.placementValid(px, py, key) && this.afford(this.bldCost(key))) placed += this.placeSingle(key, px, py, axis) ? 1 : 0;
     }
     if (placed) this.sound.place();
     if (!this.keys.has('shift')) this.placement = null;
@@ -4242,10 +4257,14 @@ export class Game {
       if ((pen.grazeDep ?? 0) >= 0.6) continue;
       const herd = this.units.filter(a => a.pastureId === pen.id);
       const sheep = herd.filter(a => a.key === 'sheep'), cows = herd.filter(a => a.key === 'cow');
+      const cm = clanMods(this.settings.clan);   // РОД (п.12): Арғын — чаще двойня
       const birth = (key: 'sheep' | 'cow', cur: number, cap: number) => {
         if (cur >= 2 && cur < cap) {
-          const a = this.addUnit(key, 'neutral', pen.x + rand(-34, 34), pen.y + rand(-26, 26));
-          a.pastureId = pen.id; a.wx = pen.pastureX ?? pen.x; a.wy = pen.pastureY ?? pen.y; born++;
+          const litter = cm.tel > 1 && rand(0, 1) < cm.tel - 1 ? 2 : 1;
+          for (let i = 0; i < litter; i++) {
+            const a = this.addUnit(key, 'neutral', pen.x + rand(-34, 34), pen.y + rand(-26, 26));
+            a.pastureId = pen.id; a.wx = pen.pastureX ?? pen.x; a.wy = pen.pastureY ?? pen.y; born++;
+          }
         }
       };
       birth('sheep', sheep.length, 12); birth('cow', cows.length, 8);
@@ -4419,7 +4438,7 @@ export class Game {
     }
   }
   bldCost(key: BuildingKey): { wood: number; food: number; gold: number } {
-    const c = BUILDING_DEFS[key].cost;
+    const c = clanBldCost(this.settings.clan, key);   // РОД (п.12): Арғын — загоны дешевле
     const d = this.woodDiscount();
     // Айтеке би: единый свод правил — артели строят дешевле на 10%
     const g = this.hasGreat('aiteke') ? 0.9 : 1;
@@ -4596,7 +4615,7 @@ export class Game {
     const qi = idx < 0 ? b.queue.length - 1 : Math.min(idx, b.queue.length - 1);
     const [item] = b.queue.splice(qi, 1);
     if (!item) return;
-    const c = UNIT_DEFS[item.key].cost;
+    const c = clanUnitCost(this.settings.clan, item.key);   // РОД (п.12): Найман — батыр дешевле
     this.res.wood += c.wood; this.res.food += c.food; this.res.gold += c.gold;
     this.sound.error();
     this.floater(b.x, b.y - 40, `${UNIT_DEFS[item.key].name}: отменён`, '#fda4af', 13);
@@ -4610,7 +4629,7 @@ export class Game {
     if (b.key === 'towncenter') { this.floater(b.x, b.y - 50, 'Ханскую ставку снести нельзя', '#f87171', 15); this.sound.error(); return; }
     // выпустить гарнизон и освободить строителей до удаления
     this.ungarrisonUnits(buildId, false);
-    const c = BUILDING_DEFS[b.key].cost;
+    const c = clanBldCost(this.settings.clan, b.key);
     this.res.wood += Math.floor(c.wood * 0.5);
     this.res.food += Math.floor(c.food * 0.3);
     this.res.gold += Math.floor(c.gold * 0.5);
@@ -6925,6 +6944,7 @@ export class Game {
         if (this.bonusTier('trade', 3)) bonus *= 1.5; // союз торговых народов: караваны богаче
         if (this.yasaActive('sauda')) bonus *= 1.3;   // Яса «Сауда жолы» (п.32)
         if (this.hasTrait('Серебряный язык')) bonus *= 1.05;   // Казыбек би (п.18)
+        bonus *= clanMods(this.settings.clan).caravan;             // РОД (п.12): Қыпшақ
         u.trGold = Math.round(Math.min(90, 14 + leg / 22) * bonus);
         // керуен (п.16): товар и живая цена; за город платят с премией риска
         if (u.trGood) {
@@ -7305,6 +7325,7 @@ export class Game {
           }
         }
         rate *= 1 + Math.min(3, helpers) * 1.1;
+        if (b.owner === 'player') rate *= clanMods(this.settings.clan).build;   // РОД (п.12): Ұйсын строит быстрее
         b.done = Math.min(1, b.done + rate * dt);
         b.hp = b.maxHp * b.done;
         if (b.done >= 1) {
@@ -7990,6 +8011,8 @@ export class Game {
       tradeRoute: this.tradeRoute, napT: Math.ceil(this.napT), condemned: this.condemned, tributeT: Math.ceil(this.tributeT),
       hasMarket: this.marketCount() > 0,
       woodDiscount: this.woodDiscount(),
+      clan: (() => { const c = CLAN_BY_ID[this.settings.clan ?? ''];
+        return { id: this.settings.clan ?? '', name: c?.name ?? '', tamga: c?.tamga ?? '', perk: c?.perk ?? '' }; })(),
       playerPow: Math.round(this.milStrength('player')), enemyPow: Math.round(this.milStrength('enemy')),
       wonderT: Math.max(0, Math.ceil(this.wonderT)), wonderHold: this.WONDER_HOLD,
       islam: { have: TRIBE_IDS.filter(nid => (this.faith[nid] ?? 0) >= 100).length, need: TRIBE_IDS.length, anyMosque: this.blds.some(b => b.owner === 'player' && b.key === 'mosque' && b.done >= 1) },
@@ -8546,7 +8569,7 @@ export class Game {
           const t = i / steps;
           const sx = Math.round((x0 + dx * t) / TILE_STEP) * TILE_STEP;
           const sy = Math.round((y0 + dy * t) / TILE_STEP) * TILE_STEP;
-          const ok = this.placementValid(sx, sy, key) && this.afford(BUILDING_DEFS[key].cost);
+          const ok = this.placementValid(sx, sy, key) && this.afford(this.bldCost(key));
           const [gx, gy] = toIso(sx, sy);
           ctx.globalAlpha = 0.55;
           hexPath(ctx, gx, gy, 0.62);
@@ -9361,6 +9384,12 @@ export class Game {
     if (b.key === 'orda') { this.drawOrda(b, ix, iy, selected); return; }
 
     const { sp, scale, ready } = placeBld(b, S);
+
+    // ТАҢБА РОДА (п.12): знак висит над ханской ставкой игрока
+    if (b.owner === 'player' && b.key === 'towncenter') {
+      const tg = CLAN_BY_ID[this.settings.clan ?? '']?.tamga;
+      if (tg) drawIcon(ctx, tg, ix, iy - (ready ? sp.img.naturalHeight * scale : S * 2.0) - 14, 18, '#f6d47c');
+    }
 
     // контактная тень-ромб на земле (точно по фундаменту)
     ctx.fillStyle = 'rgba(8,14,8,0.30)';

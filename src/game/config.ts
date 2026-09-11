@@ -1,3 +1,4 @@
+import { clanMods, DEFAULT_CLAN, type ClanId } from './clans';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
 // Практически бесконечный процедурный мир. Контент генерится лениво по чанкам (engine.ts),
@@ -196,6 +197,7 @@ export interface Settings {
   autosave: boolean;       // автосохранение партии (переживает перезагрузку страницы)
   realAzan: boolean;       // азан по РЕАЛЬНОМУ времени намаза, а не по игровым суткам
   azanCity: string;        // город для расчёта времён (id из CITIES в prayer-times.ts)
+  clan: ClanId;            // род-таңба игрока (п.12): пассивки и знак над ставкой
 }
 export type Biome = 'green' | 'autumn' | 'winter' | 'desert';
 export const BIOMES: { id: Biome; name: string; icon: string }[] = [
@@ -226,7 +228,31 @@ export const DEFAULT_SETTINGS: Settings = {
   // основным, реальные времена — осознанный выбор игрока.
   realAzan: false,
   azanCity: 'astana',
+  // Род по умолчанию — первый из списка; старые сейвы без этого поля получат
+  // нейтральные множители (clanMods() на неизвестный id возвращает 1).
+  clan: DEFAULT_CLAN,
 };
+
+// ── Стоимость с учётом рода (п.12) ───────────────────────────────────────────
+// Одна функция на здания и одна на юнитов: цена должна совпадать и в доке (UI),
+// и при списании ресурсов в движке, иначе игрок увидит одно, а заплатит другое.
+type Cost = { wood: number; food: number; gold: number };
+const scaleCost = (c: Cost, k: number): Cost =>
+  k === 1 ? c : { wood: Math.round(c.wood * k), food: Math.round(c.food * k), gold: Math.round(c.gold * k) };
+
+/** Цена постройки для выбранного рода (Арғын: загоны −15%). */
+export function clanBldCost(clan: ClanId | undefined, key: BuildingKey): Cost {
+  const c = BUILDING_DEFS[key].cost as Cost;
+  const m = clanMods(clan);
+  return key === 'pen' ? scaleCost(c, m.penCost) : c;
+}
+
+/** Цена найма для выбранного рода (Найман: батыр −15%). */
+export function clanUnitCost(clan: ClanId | undefined, key: UnitKey): Cost {
+  const c = UNIT_DEFS[key].cost as Cost;
+  const m = clanMods(clan);
+  return key === 'knight' ? scaleCost(c, m.knightCost) : c;
+}
 export const SPEED_OPTIONS: { id: GameSpeed; label: string }[] = [
   { id: 0.75, label: '0.75×' },
   { id: 1, label: '1×' },

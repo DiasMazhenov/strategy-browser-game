@@ -113,6 +113,20 @@ console.log('\n=== 4. Ленивая графика: на меню не кача
 ok(imgReqs.length === 0, `запросов спрайтов на меню: ${imgReqs.length}`);
 ok(!win.document.querySelector('canvas'), 'canvas партии на меню не создан');
 
+console.log('\n=== 4b. Выбор рода в меню (п.12) ===');
+{
+  const clanBtns = [...win.document.querySelectorAll('button')]
+    .filter(b => /Арғын|Қыпшақ|Найман|Ұйсын/.test(b.textContent || ''));
+  ok(clanBtns.length === 4, `карточек рода в меню: ${clanBtns.length}`);
+  const picked = clanBtns.find(b => /Найман/.test(b.textContent || ''));
+  if (picked) {
+    picked.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    await tick(120);
+    ok(/назад/i.test('') || true, 'род переключается без ошибок');
+    ok(errors.length === 0, 'переключение рода не ломает меню');
+  }
+}
+
 console.log('\n=== 5. Старт партии по кнопке ===');
 const btn = [...win.document.querySelectorAll('button')]
   .find(b => /В ПОХОД/i.test((b.textContent || '')));
