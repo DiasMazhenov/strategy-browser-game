@@ -64,9 +64,30 @@ console.log('\n=== 3. Касание панорамирует камеру по 
 
 console.log('\n=== 4. Подсказки: на телефоне про палец, на десктопе про клавиатуру ===');
 {
-  ok(/isMobile && \([\s\S]{0,300}палец — камера/.test(app), 'есть подсказка для касаний');
+  ok(/isMobile &&[\s\S]{0,40}\([\s\S]{0,300}палец — камера/.test(app), 'есть подсказка для касаний');
   ok(/!isMobile && \([\s\S]{0,600}WASD камера/.test(app), 'клавиатурная подсказка скрыта на телефоне');
   ok(/const isMobile = [\s\S]{0,120}pointer: coarse/.test(app), 'определение мобильности — по типу указателя');
+}
+
+
+console.log('\n=== 5. На телефоне интерфейс не висит поверх поля (1.0.137) ===');
+{
+  // левая колонка (задания + отряд + экономика) съедала 172px из 414
+  const col = app.slice(app.indexOf('{/* ===== QUESTS + ОТРЯД'), app.indexOf('{/* ===== SELECTION CARD'));
+  ok(/hidden w-\[172px\][\s\S]{0,120}sm:flex/.test(col), 'левая колонка скрыта на узком экране');
+  ok(/SquadControls[\s\S]{0,80}EconSummary/.test(col), 'её содержимое вынесено в общие компоненты');
+  // те же панели открываются вкладками дока
+  const dock = app.slice(app.indexOf('{/* ===== BOTTOM DOCK'), app.indexOf('{/* ===== КОШ'));
+  ok(/label="ОТРЯД"[\s\S]{0,200}label="СВОДКА"/.test(dock), 'в доке есть вкладки «Отряд» и «Сводка»');
+  ok(/className="sm:hidden"/.test(dock), 'эти вкладки видны только на телефоне');
+  ok(/dockOpen && dockTab === 'squad'/.test(dock) && /dockOpen && dockTab === 'info'/.test(dock), 'панели открываются по вкладке');
+  ok(/max-h-\[45dvh\]/.test(dock), 'раскрытый лист не выше 45% экрана');
+  // чистое поле: один тап прячет весь HUD
+  ok(/\{!uiHidden && \(\n      <div className="safe-top/.test(app), 'верхний HUD прячется');
+  ok(/\{!uiHidden && \(\n      <div className="pointer-events-none absolute inset-x-0 bottom-0/.test(app), 'док прячется');
+  ok(/setUiHidden\(h => !h\)/.test(app), 'есть переключатель «чистого экрана»');
+  ok(/EyeOff className="h-5 w-5"/.test(app), 'переключатель меняет иконку');
+  ok(/onPointerDown=\{\(\) => \{ if \(isMobile\) setDockOpen\(false\); \}\}/.test(app), 'тап по полю закрывает раскрытый док');
 }
 
 console.log(`\nИтог: ${n - f} ok, ${f} fail`);

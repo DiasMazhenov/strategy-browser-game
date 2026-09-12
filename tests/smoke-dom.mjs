@@ -142,6 +142,43 @@ if (btn) {
   ok(gameText.length > 0, 'интерфейс партии отрисован');
 }
 
+
+console.log('\n=== 6. «Чистый экран» и вкладка «Отряд» (1.0.137) ===');
+{
+  const doc = win.document;
+  // только #root: в body лежит ещё и <script> с бандлом, и его текст
+  // (подсказки, названия юнитов) ломает любые проверки по строкам
+  const txt = () => ((doc.getElementById('root')?.textContent) || '').replace(/\s+/g, ' ');
+  const byLabel = (re) => [...doc.querySelectorAll('button')].find(b => re.test(b.getAttribute('aria-label') || ''));
+  const click = (el) => el.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+
+  ok(/ВОЙСКА/.test(txt()), 'док с вкладками отрисован');
+  ok(/Шаруа/.test(txt()), 'по умолчанию открыта вкладка войск');
+
+  // вкладка «Отряд»: содержимое левой колонки переезжает в док
+  const squadTab = [...doc.querySelectorAll('button')].find(b => /ОТРЯД/.test(b.textContent || ''));
+  ok(!!squadTab, 'вкладка «Отряд» есть в DOM');
+  if (squadTab) {
+    click(squadTab); await tick(200);
+    ok(!/Шаруа/.test(txt()), 'ряд войск сменился панелью отряда');
+    ok(/Центр/.test(txt()) && /Работа/.test(txt()), 'в доке появились кнопки отряда');
+  }
+
+  // «чистый экран»: один тап — и HUD нет
+  const eye = byLabel(/Спрятать интерфейс/);
+  ok(!!eye, 'кнопка «чистого экрана» есть в DOM');
+  if (eye) {
+    click(eye); await tick(250);
+    ok(!/ВОЙСКА/.test(txt()), 'после нажатия док ушёл из DOM');
+    ok(!/ЗАДАНИЯ/.test(txt()), 'левая колонка тоже ушла');
+    ok(!!byLabel(/Показать интерфейс/), 'кнопка переключилась в режим «показать»');
+    const back = byLabel(/Показать интерфейс/);
+    click(back); await tick(250);
+    ok(/ВОЙСКА/.test(txt()), 'интерфейс вернулся');
+  }
+  ok(errors.length === 0, `ошибок после переключений: ${errors.length}${errors.length ? ' — ' + errors[0].slice(0, 160) : ''}`);
+}
+
 win.close();
 console.log(`\nИтог: ${n - f} ok, ${f} fail`);
 process.exit(f ? 1 : 0);

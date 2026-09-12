@@ -425,7 +425,7 @@ export interface HudSnapshot {
   wood: number; food: number; gold: number; pop: number; popCap: number;
   age: number; ageName: string; score: number; kills: number; razed: number;
   timeSec: number; wave: number; nextWave: number; enemyAge: number;
-  sel: SelSnapshot; placement: BuildingKey | null; attackArmed: boolean; rallyArmed: boolean; patrolArmed: boolean; panMode: boolean; camFollow: boolean;
+  sel: SelSnapshot; placement: BuildingKey | null; attackArmed: boolean; rallyArmed: boolean; patrolArmed: boolean; panMode: boolean; camFollow: boolean; minimapOpen: boolean;
   banner: { title: string; sub: string } | null;
   quests: { id: string; label: string; done: boolean; progress: string }[];
   muted: boolean; idleVills: number; relics: number;
@@ -754,7 +754,7 @@ export class Game {
   pointers = new Map<number, { x: number; y: number; sx: number; sy: number; t: number; moved: boolean; btn: number }>();
   pinchD = 0;
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
-  panning: { cx: number; cy: number; px: number; py: number } | null = null;
+  panning: { cx: number; cy: number; px: number; py: number; k: number } | null = null;
   mouse = { x: 0, y: 0, in: false, isTouch: false };
   // Стрелки прокрутки у краёв: dir — какая сейчас под курсором ('' = никакая),
   // hot — подсветка при наведении, edgeGlide — плавный докат после клика.
@@ -767,6 +767,11 @@ export class Game {
   hoverHex: { q: number; r: number } | null = null;
   hexPing = { x: 0, y: 0, t: 0 };             // вспышка на гексе после приказа
   minimap = { x: 0, y: 0, w: 0, h: 0 };
+  minimapOpen = false;                              // раскрытая большая карта (чип → тап)
+  uiHidden = false;                                 // «чистый экран»: React спрятал весь HUD
+  // Инерция панорамы (1.0.137): убрали палец — камера докатывается и гасится.
+  panV = { x: 0, y: 0, t: 0 };                      // последняя выборка для расчёта скорости
+  panGlide = { x: 0, y: 0 };                        // скорость доката, мировых ед./с
   grassTile: HTMLCanvasElement | null = null;
   muted = false;
   settings: Settings = { ...DEFAULT_SETTINGS };
@@ -2327,9 +2332,28 @@ export class Game {
     this.sound.ensure();
     this.canvas.setPointerCapture?.(e.pointerId);
     const w = this.screenToWorld(e.clientX, e.clientY);
+    // новое касание гасит докат камеры (1.0.137)
+    this.panGlide.x = 0; this.panGlide.y = 0; this.panV.t = 0;
     // minimap interaction
-    if (w.px >= this.minimap.x && w.px <= this.minimap.x + this.minimap.w && w.py >= this.minimap.y && w.py <= this.minimap.y + this.minimap.h) {
-      this.minimapJump(w.px, w.py);
+    const mm = this.minimap;
+    const inMM = mm.w > 0 && w.px >= mm.x && w.px <= mm.x + mm.w && w.py >= mm.y && w.py <= mm.y + mm.h;
+    const mmTouch = this.vw < 640 || e.pointerType !== 'mouse';   // телефон: карта — чип, не панель
+    if (inMM) {
+      if (this.minimapOpen || !mmTouch) {
+        this.minimapJump(w.px, w.py);
+        this.pointers.set(e.pointerId, { x: w.px, y: w.py, sx: w.px, sy: w.py, t: performance.now(), moved: true, btn: 99 });
+        return;
+      }
+      // Чип НЕ телепортирует по касанию: иначе в правом нижнем углу нельзя было начать
+      // панораму — камера прыгала раньше, чем палец успевал поехать (1.0.137).
+      // Тап открывает большую карту, а протяжка от чипа просто двигает камеру.
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: false, btn: 98 });
+      this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY, k: 1.15 };
+      return;
+    }
+    // тап вне раскрытой карты закрывает её и не отдаёт приказ юнитам
+    if (this.minimapOpen) {
+      this.minimapOpen = false;
       this.pointers.set(e.pointerId, { x: w.px, y: w.py, sx: w.px, sy: w.py, t: performance.now(), moved: true, btn: 99 });
       return;
     }
@@ -2351,17 +2375,20 @@ export class Game {
       return;
     }
     if (e.button === 1 || e.button === 2 || (e.pointerType === 'mouse' && e.button === 2)) {
-      this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY };
+      this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY, k: 1 };
       return;
     }
-    // касание: палец тащит камеру (1.0.135) — кнопка «Рамка» в HUD возвращает выделение
-    if (this.panMode && e.pointerType !== 'mouse') {
-      this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY };
-      return;
-    }
-    // режим протяжки стены/ворот — начинаем линию вместо рамки
+    // режим протяжки стены/ворот — начинаем линию вместо рамки.
+    // Стоит ДО панорамирования касанием: иначе палец всегда двигал камеру и линию
+    // стены на телефоне нельзя было провести (1.0.137).
     if (this.placement === 'wall' || this.placement === 'gate') {
       this.wallDrag = { x0: w.x, y0: w.y, x1: w.x, y1: w.y };
+      return;
+    }
+    // касание: палец тащит камеру (1.0.135) — кнопка «Рамка» в HUD возвращает выделение.
+    // k = 1.15: поле на телефоне узкое, ровно 1:1 заставляет делать лишние свайпы.
+    if (this.panMode && e.pointerType !== 'mouse') {
+      this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY, k: 1.15 };
       return;
     }
     // begin potential box
@@ -2397,9 +2424,18 @@ export class Game {
       return;
     }
     if (this.panning) {
-      this.cam.x = this.panning.cx - (e.clientX - this.panning.px) / this.cam.zoom;
-      this.cam.y = this.panning.cy - (e.clientY - this.panning.py) / this.cam.zoom;
+      const k = this.panning.k;
+      this.cam.x = this.panning.cx - ((e.clientX - this.panning.px) * k) / this.cam.zoom;
+      this.cam.y = this.panning.cy - ((e.clientY - this.panning.py) * k) / this.cam.zoom;
       this.clampCam();
+      // скорость для инерции (мировых ед./с), сглаженная по последним выборкам
+      const now = performance.now();
+      if (this.panV.t) {
+        const dt = Math.max(8, now - this.panV.t) / 1000;
+        this.panGlide.x = this.panGlide.x * 0.45 + (-((e.clientX - this.panV.x) * k) / this.cam.zoom / dt) * 0.55;
+        this.panGlide.y = this.panGlide.y * 0.45 + (-((e.clientY - this.panV.y) * k) / this.cam.zoom / dt) * 0.55;
+      }
+      this.panV = { x: e.clientX, y: e.clientY, t: now };
       return;
     }
     // minimap drag
@@ -2413,8 +2449,18 @@ export class Game {
     const p = this.pointers.get(e.pointerId);
     (this as unknown as { _pp?: unknown })._pp = undefined;
     this.pointers.delete(e.pointerId);
+    // карта: 98 — чип (тап открывает большую карту), 99 — уже раскрытая карта
+    if (p && (p.btn === 98 || p.btn === 99)) {
+      if (p.btn === 98 && !p.moved && performance.now() - p.t < 600) this.minimapOpen = true;
+      this.panning = null;
+      this.box = null;
+      return;
+    }
     if (this.panning) {
       const wasTap = p && !p.moved && performance.now() - p.t < 600;
+      // инерция: докатываем, только если палец не замер перед отпусканием
+      if (wasTap || !this.panV.t || performance.now() - this.panV.t > 90) { this.panGlide.x = 0; this.panGlide.y = 0; }
+      else this.camFollow = false;      // ручная панорама отменяет автоследование
       this.panning = null;
       if (!wasTap) return;
       // fall through: treat stationary pan-mode tap as a tap order/select
@@ -5071,6 +5117,15 @@ export class Game {
     const sdt = dt * this.settings.speed; // темп игры
     if (!this.paused && !this.over) this.update(sdt, dt);
     else if (this.over && !this.paused) this.updateFx(dt);
+    // инерция панорамы: считаем и на паузе, иначе камера застывала на полпути (1.0.137)
+    if (this.panGlide.x || this.panGlide.y) {
+      this.cam.x += this.panGlide.x * dt;
+      this.cam.y += this.panGlide.y * dt;
+      const decay = Math.pow(0.015, dt);        // ~0.6 с до полной остановки
+      this.panGlide.x *= decay; this.panGlide.y *= decay;
+      if (Math.hypot(this.panGlide.x, this.panGlide.y) < 24) { this.panGlide.x = 0; this.panGlide.y = 0; }
+      this.clampCam();
+    }
     this.render();
     this.hudT += dt;
     if (this.hudT > 0.12) { this.hudT = 0; this.pushHud(); }
@@ -8024,7 +8079,7 @@ export class Game {
       pop: this.popUsed('player'), popCap: this.popCap('player'),
       age: this.age, ageName: AGES[this.age].name, score: Math.round(this.score), kills: this.kills, razed: this.razed,
       timeSec: Math.floor(this.time), wave: this.wave, nextWave: Math.max(0, Math.ceil(this.waveT)), enemyAge: this.eage,
-      sel, placement: this.placement, attackArmed: this.attackArmed, rallyArmed: this.rallyArmed, patrolArmed: this.patrolArmed, panMode: this.panMode, camFollow: this.camFollow,
+      sel, placement: this.placement, attackArmed: this.attackArmed, rallyArmed: this.rallyArmed, patrolArmed: this.patrolArmed, panMode: this.panMode, camFollow: this.camFollow, minimapOpen: this.minimapOpen,
       banner,
       quests: [
         { id: 'wood', label: 'Нарубить 60 {i:wood}', done: !!this.questsDone.wood, progress: `${Math.min(60, Math.floor(this.woodGathered))}/60` },
@@ -9548,10 +9603,23 @@ export class Game {
   drawMinimap(ctx: CanvasRenderingContext2D) {
     // МИРОВАЯ мини-карта: показывает ВЕСЬ мир (0..WORLD), а не регион вокруг камеры.
     // Кликабельная (minimapJump переводит долю → мировую координату), с рамкой обзора.
-    const W = clamp(this.vw * 0.30, 168, 232);
-    const H = (W * WORLD.h) / WORLD.w;
+    // «чистый экран»: карту не рисуем и тапы в её стороне не перехватываем
+    if (this.uiHidden) { this.minimap = { x: 0, y: 0, w: 0, h: 0 }; return; }
     const m = 12;
-    const x = this.vw - W - m, y = this.vh - H - m - (this.vw < 640 ? 118 : 0);
+    const mob = this.vw < 640;
+    let W: number, H: number, x: number, y: number;
+    if (this.minimapOpen) {
+      // раскрытая карта: во всю ширину, но не выше половины экрана
+      W = Math.min(this.vw - m * 2, 520);
+      H = (W * WORLD.h) / WORLD.w;
+      if (H > this.vh * 0.5) { H = this.vh * 0.5; W = (H * WORLD.w) / WORLD.h; }
+      x = (this.vw - W) / 2; y = (this.vh - H) / 2 - (mob ? 28 : 0);
+    } else {
+      // на телефоне карта — чип 96px: поле боя важнее обзора всего мира (1.0.137)
+      W = mob ? 96 : clamp(this.vw * 0.30, 168, 232);
+      H = (W * WORLD.h) / WORLD.w;
+      x = this.vw - W - m; y = this.vh - H - m - (mob ? 118 : 0);
+    }
     this.minimap = { x, y, w: W, h: H };
     const sx = W / WORLD.w, sy = H / WORLD.h;
     const toMap = (wx: number, wy: number): [number, number] => [x + wx * sx, y + wy * sy];
@@ -9693,7 +9761,9 @@ export class Game {
     ctx.fillStyle = 'rgba(253,230,138,0.9)'; ctx.font = '700 9px Inter';
     ctx.textAlign = 'left';
     drawIcon(ctx, 'map', x - 2, y - 16, 10, 'rgba(253,230,138,0.9)');
-    ctx.fillText('КАРТА МИРА — клик/перетаскивание для перехода', x + 11, y - 8);
+    if (this.minimapOpen) ctx.fillText('КАРТА МИРА — тап вне карты закроет', x + 11, y - 8);
+    else if (!mob) ctx.fillText('КАРТА МИРА — клик/перетаскивание для перехода', x + 11, y - 8);
+    else ctx.fillText('КАРТА', x + 11, y - 8);
   }
 }
 

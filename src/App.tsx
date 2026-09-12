@@ -3,7 +3,7 @@ import {
   Axe, Swords, Crown, Home, Castle,
   Play, Pause, RotateCcw, Volume2, VolumeX, Trophy, Shield, Skull, Timer,
   ChevronUp, Map as MapIcon, Zap, Flag, Users, MousePointer2, Keyboard, Hand, X, Check, Sparkles, Crosshair,
-  Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye,
+  Settings as SettingsIcon, Gauge, ScrollText, Lock, Clock, Video, Landmark, Compass, Binoculars, MessageCircle, Eye, EyeOff,
 } from 'lucide-react';
 // 1.0.128 — движок уезжает в отдельный чанк: меню его не ждёт, грузим на старте
 // партии (и подгребаем в простое заранее). Типы можно импортировать всегда —
@@ -83,7 +83,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('menu');
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
-  const [dockTab, setDockTab] = useState<'units' | 'build'>('units');
+  const [dockTab, setDockTab] = useState<'units' | 'build' | 'squad' | 'info'>('units');
   const [showToy, setShowToy] = useState(false);   // той (п.20)
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [koshOpen, setKoshOpen] = useState(false);
@@ -240,6 +240,21 @@ export default function App() {
   const clan = settings.clan ?? DEFAULT_CLAN;
   const ucost = (k: UnitKey) => clanUnitCost(clan, k);
 
+  const isMobile = typeof window !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+  // 1.0.137: на телефоне док свёрнут по умолчанию — поле боя важнее кнопок.
+  // На десктопе он всегда раскрыт, как и раньше.
+  const [dockOpen, setDockOpen] = useState(!isMobile);
+  // «Чистый экран»: один тап прячет весь HUD, остаётся только поле боя.
+  const [uiHidden, setUiHidden] = useState(false);
+  const dockPick = (t: 'units' | 'build' | 'squad' | 'info') => {
+    if (dockTab === t && isMobile) setDockOpen(o => !o);      // повторный тап по вкладке — свернуть
+    else { setDockTab(t); setDockOpen(true); }
+  };
+  // движок прячет мини-карту вместе с остальным HUD
+  useEffect(() => { const gm = g(); if (gm) gm.uiHidden = uiHidden; }, [uiHidden]);
+  // раскрытая карта и раскрытый док одновременно не нужны — карта важнее
+  useEffect(() => { if (hud?.minimapOpen) setDockOpen(false); }, [hud?.minimapOpen]);
+
   if (screen === 'menu') return (
     <MenuScreen
       scores={scores} settings={settings} updateSettings={updateSettings}
@@ -249,13 +264,14 @@ export default function App() {
     />
   );
 
-  const isMobile = typeof window !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-[#0c1410] text-white">
-      <canvas ref={canvasRef} className="game-canvas absolute inset-0" />
+      <canvas ref={canvasRef} className="game-canvas absolute inset-0"
+        onPointerDown={() => { if (isMobile) setDockOpen(false); }} />
 
       {/* ===== TOP HUD ===== */}
+      {!uiHidden && (
       <div className="safe-top pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="flex items-start justify-between gap-2 p-2 sm:p-3">
           {/* resources */}
@@ -524,100 +540,23 @@ export default function App() {
           </div>
         )}
       </div>
+      )}
 
-      {/* ===== QUESTS (left) ===== */}
-      <div className="absolute left-2 top-[74px] z-20 sm:top-[86px]">
-        <div className="panel-iron pointer-events-auto w-[172px] rounded-xl p-2 sm:w-[196px]">
-          <button onClick={() => setShowQuests(s => !s)} className="flex w-full items-center justify-between text-[11px] font-black tracking-widest text-amber-200">
-            <span className="flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />ЗАДАНИЯ</span>
-            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${showQuests ? '' : 'rotate-180'}`} />
-          </button>
-          {showQuests && (
-            <div className="mt-1.5 space-y-1">
-              {hud?.quests.map(q => (
-                <div key={q.id} className={`flex items-center justify-between rounded-lg px-2 py-1 text-[11px] font-semibold ${q.done ? 'bg-lime-500/15 text-lime-300' : 'bg-white/5 text-slate-200'}`}>
-                  <span className="flex items-center gap-1.5">{q.done ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />}<RT t={q.label} /></span>
-                  <span className="text-[10px] opacity-70">{q.progress}</span>
-                </div>
-              ))}
-              <div className="rounded-lg bg-black/30 px-2 py-1 text-[10px] leading-snug text-slate-400"><Ico name="bulb" /> <RT t={hud?.hint ?? ''} /></div>
-            </div>
-          )}
-        </div>
-        {/* army controls */}
-        <div className="pointer-events-auto mt-2 flex w-[172px] flex-col gap-1 sm:w-[196px]">
-          <div className="grid grid-cols-2 gap-1">
-            <MiniBtn onClick={() => g()?.armySelect()}><Swords className="h-3.5 w-3.5" />Армия</MiniBtn>
-            <MiniBtn onClick={() => g()?.villsSelect()}><Axe className="h-3.5 w-3.5" />Кресты</MiniBtn>
-            <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
-            <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
-          </div>
-          {hud?.sel?.canEscort && (
-            <MiniBtn onClick={() => g()?.orderEscortNearest()}><Ico name="caravan" className="h-3.5 w-3.5" />Сопровождать караван</MiniBtn>
-          )}
-          {/* ===== СВОДКА ЭКОНОМИКИ: куда распределены шаруа ===== */}
-          {(hud?.econ?.total ?? 0) > 0 && (
-            <div className="rounded-xl bg-black/35 px-2 py-1.5">
-              <div className="mb-1 flex items-center justify-between text-[10px] font-black tracking-widest text-amber-200/90">
-                <span>ЭКОНОМИКА</span>
-                <span className={`rounded px-1 ${(hud!.econ.idlePct) >= 25 ? 'bg-red-500/30 text-red-200' : (hud!.econ.idlePct) >= 10 ? 'bg-amber-400/25 text-amber-200' : 'bg-lime-500/20 text-lime-300'}`}>
-                  простой {hud!.econ.idlePct}%
-                </span>
-              </div>
-              {/* полоска распределения: видно перекос одним взглядом */}
-              <div className="mb-1 flex h-1.5 overflow-hidden rounded-full bg-black/50">
-                {([['wood', 'bg-lime-600'], ['food', 'bg-rose-500'], ['gold', 'bg-amber-400'],
-                   ['build', 'bg-sky-500'], ['idle', 'bg-slate-600']] as const).map(([k, c]) => {
-                  const v = hud!.econ[k];
-                  const base = hud!.econ.total - hud!.econ.rest;
-                  return v > 0 && base > 0
-                    ? <span key={k} className={c} style={{ width: `${(v / base) * 100}%` }} />
-                    : null;
-                })}
-              </div>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] font-bold">
-                {([['wood', 'wood', 'Лес', 'text-lime-300'], ['food', 'food', 'Еда', 'text-rose-300'],
-                   ['gold', 'gold', 'Золото', 'text-amber-300'], ['build', 'hammer', 'Стройка', 'text-sky-300']] as const)
-                  .map(([k, icon, label, cls]) => (
-                    <button key={k} onClick={() => g()?.tradeSelect(k)}
-                      title={`Выделить всех шаруа: ${label.toLowerCase()}`}
-                      className={`flex items-center justify-between rounded px-1 py-0.5 hover:bg-white/10 ${cls}`}>
-                      <span className="flex items-center gap-1"><Ico name={icon} /> {label}</span><b>{hud!.econ[k]}</b>
-                    </button>
-                  ))}
-                <button onClick={() => g()?.idleSelect()} title="Выделить простаивающих"
-                  className="flex items-center justify-between rounded px-1 py-0.5 text-slate-300 hover:bg-white/10">
-                  <span><Ico name="sleep" /> Простой</span><b>{hud!.econ.idle}</b>
-                </button>
-                <div className="flex items-center justify-between px-1 py-0.5 text-indigo-300"
-                  title="Отдыхают в ночную смену — это не простой">
-                  <span><Ico name="moon" /> Отдых</span><b>{hud!.econ.rest}</b>
-                </div>
-              </div>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-1">
-            <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />Центр</MiniBtn>
-            <MiniBtn onClick={() => g()?.focusSelection()} title="Камера к выделенному юниту/группе"><Crosshair className="h-3.5 w-3.5" />К юниту</MiniBtn>
-            <MiniBtn active={hud?.camFollow} onClick={() => g()?.toggleFollow()} title="Авто-следование камеры за выделением (повторно — выкл)"><Video className="h-3.5 w-3.5" />{hud?.camFollow ? 'Следит' : 'Следить'}</MiniBtn>
-            <MiniBtn active={hud?.attackArmed} onClick={() => { const gm = g(); if (gm) { gm.attackArmed = !gm.attackArmed; gm.pushHud(); } }}><Flag className="h-3.5 w-3.5" />Атака</MiniBtn>
-            <MiniBtn active={hud?.panMode} onClick={() => { const gm = g(); if (gm) { gm.panMode = !gm.panMode; gm.pushHud(); } }}><Hand className="h-3.5 w-3.5" />{hud?.panMode ? 'Кам.' : 'Рамка'}</MiniBtn>
-          </div>
-          {/* группы контроля: ЛКМ/ПКМ по цифре = вызвать/назначить */}
-          <div className="grid grid-cols-5 gap-1" title="ЛКМ — вызвать группу, ПКМ — назначить группу на выделение (или Ctrl/Alt+1..5)">
-            {[0, 1, 2, 3, 4].map(i => (
-              <MiniBtn
-                key={i}
-                onClick={() => g()?.recallGroup(i)}
-                onContextMenu={(e) => { e.preventDefault(); g()?.setGroup(i); }}
-              >{i + 1}</MiniBtn>
-            ))}
-          </div>
+      {/* ===== QUESTS + ОТРЯД (слева, только на широком экране) =====
+           На телефоне эта колонка шириной 172px съедала 42% экрана, поэтому
+           в 1.0.137 её содержимое переехало в док (вкладки «Отряд» и «Сводка»). */}
+      {!uiHidden && (
+      <div className="absolute left-2 top-[74px] z-20 hidden w-[172px] flex-col gap-2 sm:top-[86px] sm:flex sm:w-[196px]">
+        <QuestsPanel hud={hud} open={showQuests} onToggle={() => setShowQuests(s => !s)} />
+        <div className="flex flex-col gap-1">
+          <SquadControls hud={hud} g={g} />
+          <EconSummary hud={hud} g={g} />
         </div>
       </div>
+      )}
 
       {/* ===== SELECTION CARD (above dock, grows upward) ===== */}
-      {hud && hud.sel.kind !== 'none' && (
+      {hud && hud.sel.kind !== 'none' && !uiHidden && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[236px] z-30 flex justify-center px-2 sm:bottom-[156px]">
           <div className="panel-iron scroll-thin pointer-events-auto flex max-h-[40dvh] w-[min(94vw,560px)] items-start gap-3 overflow-y-auto overscroll-contain rounded-2xl px-3 py-2">
             {hud.sel.kind === 'units' ? (
@@ -864,7 +803,7 @@ export default function App() {
       )}
 
       {/* placement / attack banners */}
-      {hud?.placement && (
+      {hud?.placement && !uiHidden && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto flex items-center gap-2 rounded-full border border-lime-300/50 bg-lime-950/90 px-4 py-1.5 text-xs font-bold text-lime-200">
             <Ico name="crane" /> Строим: {BUILDING_DEFS[hud.placement].name} — кликните по карте
@@ -872,7 +811,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {hud?.attackArmed && !hud?.placement && (
+      {hud?.attackArmed && !hud?.placement && !uiHidden && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto rounded-full border border-red-300/50 bg-red-950/90 px-4 py-1.5 text-xs font-bold text-red-200">
             <Ico name="target" /> Атака-мув готова — укажите точку набега! (Esc — отмена)
@@ -880,14 +819,28 @@ export default function App() {
         </div>
       )}
 
+      {/* ===== «ЧИСТЫЙ ЭКРАН»: один тап — и интерфейса нет ===== */}
+      <button
+        onClick={() => setUiHidden(h => !h)}
+        title={uiHidden ? 'Показать интерфейс' : 'Чистый экран: спрятать весь интерфейс'}
+        aria-label={uiHidden ? 'Показать интерфейс' : 'Спрятать интерфейс'}
+        className={`absolute right-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border backdrop-blur-sm transition active:scale-95 ${uiHidden ? 'border-amber-300/70 bg-amber-400/25 text-amber-100' : 'border-white/15 bg-black/45 text-slate-300'}`}
+      >
+        {uiHidden ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+      </button>
+
       {/* ===== BOTTOM DOCK ===== */}
+      {!uiHidden && (
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto max-w-3xl px-2">
           <div className="panel-iron pointer-events-auto rounded-2xl p-2">
-            {/* вкладки: Войска / Стройка */}
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <DockTab active={dockTab === 'units'} onClick={() => setDockTab('units')} icon={<Swords className="h-3.5 w-3.5" />} label="ВОЙСКА" />
-              <DockTab active={dockTab === 'build'} onClick={() => setDockTab('build')} icon={<Castle className="h-3.5 w-3.5" />} label="СТРОЙКА" />
+            {/* вкладки: Войска / Стройка. «Отряд» и «Сводка» — только на телефоне:
+                там нет левой колонки, и её кнопки переехали сюда (1.0.137) */}
+            <div className="mb-1.5 flex flex-wrap items-center gap-1 sm:gap-1.5">
+              <DockTab active={dockTab === 'units' && dockOpen} onClick={() => dockPick('units')} icon={<Swords className="h-3.5 w-3.5" />} label="ВОЙСКА" />
+              <DockTab active={dockTab === 'build' && dockOpen} onClick={() => dockPick('build')} icon={<Castle className="h-3.5 w-3.5" />} label="СТРОЙКА" />
+              <DockTab className="sm:hidden" active={dockTab === 'squad' && dockOpen} onClick={() => dockPick('squad')} icon={<Users className="h-3.5 w-3.5" />} label="ОТРЯД" />
+              <DockTab className="sm:hidden" active={dockTab === 'info' && dockOpen} onClick={() => dockPick('info')} icon={<Gauge className="h-3.5 w-3.5" />} label="СВОДКА" />
               <div className="ml-auto">
                 <button
                   onClick={() => g()?.ageUp()}
@@ -902,9 +855,9 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {dockOpen && dockTab === 'units' && (
             <div className="scroll-thin flex items-stretch gap-1.5 overflow-x-auto">
-              {dockTab === 'units' ? (
-                <>
+              <>
                   <TrainBtn label="Шаруа" icon="farmer" key_="1" cost={ucost('villager')} ok={canAfford(ucost('villager'))} tip={unitStats('villager')} onClick={() => g()?.train('villager')} />
                   <TrainBtn label={hud?.unitNames?.swordsman ?? 'Сарбаз'} icon="saber" key_="2" cost={ucost('swordsman')} ok={canAfford(ucost('swordsman'))} tip={unitStats('swordsman')} onClick={() => g()?.train('swordsman')} />
                   <TrainBtn label={hud?.unitNames?.archer ?? 'Мерген'} icon="bow" key_="3" cost={ucost('archer')} ok={canAfford(ucost('archer'))} tip={unitStats('archer')} onClick={() => g()?.train('archer')} />
@@ -926,9 +879,12 @@ export default function App() {
                     if (!suz) return null;   // племенной юнит появляется в доке только за сюзеренитет (п.38)
                     return <TrainBtn key={k} label={UNIT_DEFS[k].name.replace(/^(Хорезмский |Огузский |Славянский |Бухарский )/, '')} icon={k === 'camelry' ? 'camel' : k === 'mirza' ? 'scroll' : k === 'oghuzguard' ? 'spear' : 'saber'} key_="" cost={ucost(k)} ok={canAfford(ucost(k)) && (hud?.age ?? 0) >= UNIT_DEFS[k].ageReq} lock={(hud?.age ?? 0) < UNIT_DEFS[k].ageReq} tip={unitStats(k) + ` · уникальный юнит «${ndef?.name ?? nid}»`} onClick={() => g()?.train(k)} />;
                   })}
-                </>
-              ) : (
-                <>
+              </>
+            </div>
+            )}
+            {dockOpen && dockTab === 'build' && (
+            <div className="scroll-thin flex items-stretch gap-1.5 overflow-x-auto">
+              <>
                   <TrainBtn label="Юрта" icon="yurt" key_="Q" cost={bldCostOf('house', wdisc, clan)} ok={canAfford(bldCostOf('house', wdisc, clan))} active={hud?.placement === 'house'} tip={bldStats('house')} onClick={() => g()?.enterPlacement('house')} />
                   <TrainBtn label="Казармы" icon="hammerpick" key_="E" cost={bldCostOf('barracks', wdisc, clan)} ok={canAfford(bldCostOf('barracks', wdisc, clan))} active={hud?.placement === 'barracks'} tip={bldStats('barracks')} onClick={() => g()?.enterPlacement('barracks')} />
                   <TrainBtn label="Башня" icon="tower" key_="R" cost={bldCostOf('tower', wdisc, clan)} ok={canAfford(bldCostOf('tower', wdisc, clan)) && (hud?.age ?? 0) >= 1} lock={(hud?.age ?? 0) < 1} active={hud?.placement === 'tower'} tip={bldStats('tower')} onClick={() => g()?.enterPlacement('tower')} />
@@ -944,15 +900,27 @@ export default function App() {
                   <TrainBtn label="Ворота" icon="door" key_="V" cost={bldCostOf('gate', wdisc, clan)} ok={canAfford(bldCostOf('gate', wdisc, clan))} active={hud?.placement === 'gate'} tip={bldStats('gate')} onClick={() => g()?.enterPlacement('gate')} />
                   <TrainBtn label="Хан орда" icon="yurt" key_="" cost={bldCostOf('orda', wdisc, clan)} ok={canAfford(bldCostOf('orda', wdisc, clan)) && (hud?.age ?? 0) >= 2} lock={(hud?.age ?? 0) < 2} active={hud?.placement === 'orda'} tip={bldStats('orda')} onClick={() => g()?.enterPlacement('orda')} />
                   <TrainBtn label="Мавзолей" icon="star" key_="W" cost={bldCostOf('wonder', wdisc, clan)} ok={canAfford(bldCostOf('wonder', wdisc, clan)) && (hud?.age ?? 0) >= 3} lock={(hud?.age ?? 0) < 3} active={hud?.placement === 'wonder'} tip={bldStats('wonder')} onClick={() => g()?.enterPlacement('wonder')} />
-                </>
-              )}
+              </>
             </div>
-            {isMobile && (
+            )}
+            {dockOpen && dockTab === 'squad' && (
+              <div className="scroll-thin flex max-h-[45dvh] flex-col gap-1 overflow-y-auto overscroll-contain">
+                <SquadControls hud={hud} g={g} />
+              </div>
+            )}
+            {dockOpen && dockTab === 'info' && (
+              <div className="scroll-thin flex max-h-[45dvh] flex-col gap-1 overflow-y-auto overscroll-contain">
+                <EconSummary hud={hud} g={g} />
+                <QuestsPanel hud={hud} open={showQuests} onToggle={() => setShowQuests(s => !s)} />
+              </div>
+            )}
+            {/* подсказка нужна, когда интерфейса почти нет; раскрытый лист сам всё объясняет */}
+            {isMobile && !dockOpen && (
               <div className="mt-1 flex items-center justify-center gap-2 px-1 text-center text-[11px] font-semibold text-slate-300">
                 <span>палец — камера</span><span className="text-slate-600">•</span>
                 <span>щипок — зум</span><span className="text-slate-600">•</span>
                 <span>тап — выбор и приказ</span><span className="text-slate-600">•</span>
-                <span>«Рамка» — выделить отряд</span>
+                <span>чип карты — перелёт</span>
               </div>
             )}
             {!isMobile && (
@@ -964,10 +932,11 @@ export default function App() {
           </div>
         </div>
       </div>
+      )}
 
       {/* ===== КОШ (кочевой режим) ===== */}
       {/* Той (п.20): золотая кнопка праздника + модалка мини-игр */}
-      {hud?.toy?.due && !showToy && !over && (
+      {hud?.toy?.due && !showToy && !over && !uiHidden && (
         <button onClick={() => setShowToy(true)}
           className="absolute bottom-24 right-3 z-30 rounded-2xl border border-amber-300/60 bg-amber-400/25 px-3 py-2 text-xs font-black text-amber-100 shadow-lg backdrop-blur-sm animate-pulse"
           title="Той (п.20): байга, көкпар и асык. Награды, +5% к добыче на время и авторитет биев. Пропустишь — бии обидятся!">
@@ -981,7 +950,7 @@ export default function App() {
           gm.toyReward(kind, amount ?? 0); return true;
         }} />
       )}
-      {koshOpen && hud?.mode === 'nomad' && !over && (
+      {koshOpen && hud?.mode === 'nomad' && !over && !uiHidden && (
         <Overlay>
           <div className="font-display mb-2 flex items-center justify-center gap-2 text-lg font-black text-amber-100"><Ico name="camel" className="h-5 w-5" />Көш: новый жайляу</div>
           <p className="mb-3 text-[12px] leading-snug text-slate-400">Марш займёт 20 секунд — производство и стройка паузятся.
@@ -1365,6 +1334,111 @@ function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: {
     </button>
   );
 }
+// ── Панели, общие для двух раскладок (1.0.137). На узком экране левая
+// колонка не показывается: те же блоки открываются вкладками «Отряд»
+// и «Сводка» в нижнем доке. Раньше это был единственный экземпляр разметки,
+// прибитый к левому краю, — и он съедал 172px из 414. ──
+function QuestsPanel({ hud, open, onToggle }: { hud: HudSnapshot | null; open: boolean; onToggle: () => void }) {
+  return (
+    <div className="panel-iron pointer-events-auto w-full rounded-xl p-2">
+      <button onClick={onToggle} className="flex w-full items-center justify-between text-[11px] font-black tracking-widest text-amber-200">
+        <span className="flex items-center gap-1"><Sparkles className="h-3.5 w-3.5" />ЗАДАНИЯ</span>
+        <ChevronUp className={`h-3.5 w-3.5 transition-transform ${open ? '' : 'rotate-180'}`} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1">
+          {hud?.quests.map(q => (
+            <div key={q.id} className={`flex items-center justify-between rounded-lg px-2 py-1 text-[11px] font-semibold ${q.done ? 'bg-lime-500/15 text-lime-300' : 'bg-white/5 text-slate-200'}`}>
+              <span className="flex items-center gap-1.5">{q.done ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />}<RT t={q.label} /></span>
+              <span className="text-[10px] opacity-70">{q.progress}</span>
+            </div>
+          ))}
+          <div className="rounded-lg bg-black/30 px-2 py-1 text-[10px] leading-snug text-slate-400"><Ico name="bulb" /> <RT t={hud?.hint ?? ''} /></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Сводка экономики: куда распределены шаруа ──
+function EconSummary({ hud, g }: { hud: HudSnapshot | null; g: () => GameEngine | null }) {
+  if ((hud?.econ?.total ?? 0) === 0) return null;
+  return (
+    <div className="rounded-xl bg-black/35 px-2 py-1.5">
+      <div className="mb-1 flex items-center justify-between text-[10px] font-black tracking-widest text-amber-200/90">
+        <span>ЭКОНОМИКА</span>
+        <span className={`rounded px-1 ${(hud!.econ.idlePct) >= 25 ? 'bg-red-500/30 text-red-200' : (hud!.econ.idlePct) >= 10 ? 'bg-amber-400/25 text-amber-200' : 'bg-lime-500/20 text-lime-300'}`}>
+          простой {hud!.econ.idlePct}%
+        </span>
+      </div>
+      {/* полоска распределения: видно перекос одним взглядом */}
+      <div className="mb-1 flex h-1.5 overflow-hidden rounded-full bg-black/50">
+        {([['wood', 'bg-lime-600'], ['food', 'bg-rose-500'], ['gold', 'bg-amber-400'],
+           ['build', 'bg-sky-500'], ['idle', 'bg-slate-600']] as const).map(([k, c]) => {
+          const v = hud!.econ[k];
+          const base = hud!.econ.total - hud!.econ.rest;
+          return v > 0 && base > 0
+            ? <span key={k} className={c} style={{ width: `${(v / base) * 100}%` }} />
+            : null;
+        })}
+      </div>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] font-bold">
+        {([['wood', 'wood', 'Лес', 'text-lime-300'], ['food', 'food', 'Еда', 'text-rose-300'],
+           ['gold', 'gold', 'Золото', 'text-amber-300'], ['build', 'hammer', 'Стройка', 'text-sky-300']] as const)
+          .map(([k, icon, label, cls]) => (
+            <button key={k} onClick={() => g()?.tradeSelect(k)}
+              title={`Выделить всех шаруа: ${label.toLowerCase()}`}
+              className={`flex items-center justify-between rounded px-1 py-0.5 hover:bg-white/10 ${cls}`}>
+              <span className="flex items-center gap-1"><Ico name={icon} /> {label}</span><b>{hud!.econ[k]}</b>
+            </button>
+          ))}
+        <button onClick={() => g()?.idleSelect()} title="Выделить простаивающих"
+          className="flex items-center justify-between rounded px-1 py-0.5 text-slate-300 hover:bg-white/10">
+          <span><Ico name="sleep" /> Простой</span><b>{hud!.econ.idle}</b>
+        </button>
+        <div className="flex items-center justify-between px-1 py-0.5 text-indigo-300"
+          title="Отдыхают в ночную смену — это не простой">
+          <span><Ico name="moon" /> Отдых</span><b>{hud!.econ.rest}</b>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Отряд: выделение, работы, камера, группы контроля ──
+function SquadControls({ hud, g }: { hud: HudSnapshot | null; g: () => GameEngine | null }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-1">
+        <MiniBtn onClick={() => g()?.armySelect()}><Swords className="h-3.5 w-3.5" />Армия</MiniBtn>
+        <MiniBtn onClick={() => g()?.villsSelect()}><Axe className="h-3.5 w-3.5" />Кресты</MiniBtn>
+        <MiniBtn onClick={() => g()?.idleSelect()}>Простой{(hud?.idleVills ?? 0) > 0 && <b className="ml-1 rounded bg-amber-400 px-1 text-[10px] text-black">{hud?.idleVills}</b>}</MiniBtn>
+        <MiniBtn onClick={() => g()?.workIdle()}><Zap className="h-3.5 w-3.5" />Работа</MiniBtn>
+      </div>
+      {hud?.sel?.canEscort && (
+        <MiniBtn onClick={() => g()?.orderEscortNearest()}><Ico name="caravan" className="h-3.5 w-3.5" />Сопровождать караван</MiniBtn>
+      )}
+      <div className="grid grid-cols-2 gap-1">
+        <MiniBtn onClick={() => g()?.centerTC()}><MapIcon className="h-3.5 w-3.5" />Центр</MiniBtn>
+        <MiniBtn onClick={() => g()?.focusSelection()} title="Камера к выделенному юниту/группе"><Crosshair className="h-3.5 w-3.5" />К юниту</MiniBtn>
+        <MiniBtn active={hud?.camFollow} onClick={() => g()?.toggleFollow()} title="Авто-следование камеры за выделением (повторно — выкл)"><Video className="h-3.5 w-3.5" />{hud?.camFollow ? 'Следит' : 'Следить'}</MiniBtn>
+        <MiniBtn active={hud?.attackArmed} onClick={() => { const gm = g(); if (gm) { gm.attackArmed = !gm.attackArmed; gm.pushHud(); } }}><Flag className="h-3.5 w-3.5" />Атака</MiniBtn>
+        <MiniBtn active={hud?.panMode} onClick={() => { const gm = g(); if (gm) { gm.panMode = !gm.panMode; gm.pushHud(); } }}><Hand className="h-3.5 w-3.5" />{hud?.panMode ? 'Кам.' : 'Рамка'}</MiniBtn>
+      </div>
+      {/* группы контроля: ЛКМ/ПКМ по цифре = вызвать/назначить */}
+      <div className="grid grid-cols-5 gap-1" title="ЛКМ — вызвать группу, ПКМ — назначить группу на выделение (или Ctrl/Alt+1..5)">
+        {[0, 1, 2, 3, 4].map(i => (
+          <MiniBtn
+            key={i}
+            onClick={() => g()?.recallGroup(i)}
+            onContextMenu={(e) => { e.preventDefault(); g()?.setGroup(i); }}
+          >{i + 1}</MiniBtn>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
@@ -1373,11 +1447,11 @@ function Overlay({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DockTab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+function DockTab({ active, onClick, icon, label, className }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; className?: string }) {
   return (
     <button
       onClick={onClick}
-      className={`flex min-h-[40px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-black tracking-widest transition active:scale-95 sm:min-h-0 ${active ? 'btn-gold text-amber-950' : 'btn-iron text-slate-300 hover:text-white'}`}
+      className={`flex min-h-[40px] items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-black tracking-wide transition active:scale-95 sm:min-h-0 sm:px-3 sm:text-[12px] sm:tracking-widest ${active ? 'btn-gold text-amber-950' : 'btn-iron text-slate-300 hover:text-white'} ${className ?? ''}`}
     >
       {icon}{label}
     </button>
