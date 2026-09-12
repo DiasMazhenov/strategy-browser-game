@@ -287,7 +287,11 @@ export default function App() {
           </div>
 
           {/* score / wave center (компактно; дипломатия — отдельная кнопка) */}
-          <div className="flex flex-col items-center gap-1">
+          {/* 1.0.135: на телефоне это была вертикальная колонка — каждая «пилюля» на
+              своей строке, и сверху съедалось ~30% экрана. На узком экране кладём
+              их в переносимые строки (3-4 ряда вместо 12), на широком оставляем
+              колонкой как было. */}
+          <div className="flex flex-wrap items-center justify-center gap-1 sm:flex-col">
             <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-xl px-4 py-1.5 text-xs font-bold">
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
               <span className="flex items-center gap-1 text-slate-300" title={`Реальное время партии: ${fmtTime(hud?.timeSec ?? 0)}`}><Clock className="h-3.5 w-3.5" />{gameClock(hud?.day?.phase ?? 0)}</span>
@@ -943,6 +947,14 @@ export default function App() {
                 </>
               )}
             </div>
+            {isMobile && (
+              <div className="mt-1 flex items-center justify-center gap-2 px-1 text-center text-[11px] font-semibold text-slate-300">
+                <span>палец — камера</span><span className="text-slate-600">•</span>
+                <span>щипок — зум</span><span className="text-slate-600">•</span>
+                <span>тап — выбор и приказ</span><span className="text-slate-600">•</span>
+                <span>«Рамка» — выделить отряд</span>
+              </div>
+            )}
             {!isMobile && (
               <div className="mt-1 hidden items-center justify-center gap-3 text-[10px] font-semibold text-slate-400 sm:flex">
                 <span className="flex items-center gap-1"><MousePointer2 className="h-3 w-3" />Рамка — выбор • ПКМ — приказ • Колесо — зум • камера к краю</span>

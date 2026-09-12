@@ -574,7 +574,11 @@ export class Game {
   tech: Record<string, boolean> = {};         // исследованные технологии
   // туман войны: explored (видел когда-либо) и visible (сейчас) по сетке
   fogCell = 64; fogGW = 0; fogGH = 0; fogExpl: Uint8Array = new Uint8Array(0); fogVis: Uint8Array = new Uint8Array(0); fogT = 0;
-  placement: BuildingKey | null = null; attackArmed = false; rallyArmed = false; patrolArmed = false; panMode = false;
+  // panMode=true: палец по умолчанию ТАЩИТ КАМЕРУ. Раньше по умолчанию он рисовал
+  // рамку выделения, и на телефоне камеру нельзя было сдвинуть одним пальцем —
+  // только двумя или стрелками у края. Мышь это не затрагивает: она панорамирует
+  // правой/средней кнопкой, а рамку выделения ведёт левой (см. pDown/pUp).
+  placement: BuildingKey | null = null; attackArmed = false; rallyArmed = false; patrolArmed = false; panMode = true;
   wallDrag: { x0: number; y0: number; x1: number; y1: number } | null = null; // протяжка стен
   woodOnRepair = 0; // накопитель стоимости ремонта (дерево)
   trauma = 0; dmgFlash = 0;
@@ -2350,6 +2354,7 @@ export class Game {
       this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY };
       return;
     }
+    // касание: палец тащит камеру (1.0.135) — кнопка «Рамка» в HUD возвращает выделение
     if (this.panMode && e.pointerType !== 'mouse') {
       this.panning = { cx: this.cam.x, cy: this.cam.y, px: e.clientX, py: e.clientY };
       return;
@@ -2435,7 +2440,7 @@ export class Game {
     }
     const right = p.btn === 2;
     if (right) { this.issueSmart(w.x, w.y); this.box = null; return; }
-    if (!wasTap && this.box && !this.panMode) {
+    if (!wasTap && this.box && !(this.panMode && e.pointerType !== 'mouse')) {
       // box select
       const x0 = Math.min(this.box.x0, this.box.x1), x1 = Math.max(this.box.x0, this.box.x1);
       const y0 = Math.min(this.box.y0, this.box.y1), y1 = Math.max(this.box.y0, this.box.y1);
