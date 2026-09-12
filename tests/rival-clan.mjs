@@ -168,7 +168,32 @@ console.log('\n=== 7. Добыча и найм на живом движке (Д�
   ok(Math.abs(t0 / t1 - 1.15) < 0.01, `найм: ${t0.toFixed(2)} с → ${t1.toFixed(2)} с для Дулата (−15% времени)`);
 }
 
-console.log('\n=== 8. Множители врага в тех же ±15% ===');
+console.log('\n=== 8. Перевод родов врага: волны и стан (1.0.133) ===');
+{
+  // Арғын: «приплод» у врага оборачивается плотным набегом.
+  // ВАЖНО: на 1-2 волнах (n≈3) 15% тонут в округлении — эффект начинает
+  // чувствоваться с середины партии, поэтому и мерим на 6-й волне.
+  const wsize = (clan, wave = 6) => { const { game } = mkGame(); game.rivalClan = clan; game.wave = wave; return game.waveComp().length; };
+  const base = wsize('naiman'), arg = wsize('argyn');
+  ok(arg > base, `состав 6-й волны: ${base} → ${arg} воинов у джунгар-Арғын`);
+  ok(arg <= Math.ceil(base * 1.15), 'и не больше обещанных +15%');
+  ok(wsize('uisyn') === base, 'у прочих родов волна базовая');
+  ok(wsize('argyn', 0) === wsize('naiman', 0), 'на первой волне разницы ещё нет (округление) — честно');
+
+  // Дулат: «найм быстрее» у врага — людный стан (лимит его крестьян выше)
+  const vills = (clan) => {
+    const { game } = mkGame();
+    game.rivalClan = clan;
+    for (let i = 0; i < 90 * 30; i++) { game.eres.food = 9999; game.update(1 / 30); }
+    return game.units.filter(u => u.owner === 'enemy' && u.key === 'villager').length;
+  };
+  const v0 = vills('argyn'), v1 = vills('dulat');
+  ok(v1 > v0, `крестьян в стане джунгар: ${v0} → ${v1} у Дулата (+15% к лимиту)`);
+  ok(IDS.every(id => typeof RIVAL_NOTE[id] === 'string' && !/нейтрально/.test(RIVAL_NOTE[id])),
+    'у каждого рода врага теперь есть боевой эффект (ни одного «нейтрально»)');
+}
+
+console.log('\n=== 9. Множители врага в тех же ±15% ===');
 {
   const worst = Math.max(...CLANS.map(c => Math.max(
     Math.abs(c.mods.cavHp - 1), Math.abs(c.mods.towerHp - 1),

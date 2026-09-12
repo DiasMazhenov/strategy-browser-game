@@ -7549,7 +7549,8 @@ export class Game {
     const diff = DIFF[this.difficulty];
     const comp: UnitKey[] = [];
     // п.33: решимость хунтайджи меняет размер волны (корень — чтобы не молох)
-    const n = Math.round((diff.waveBase + this.wave * diff.waveGrowth) * Math.sqrt(this.aiAdapt));
+    // РОД ВРАГА (1.0.133): Арғын — «приплод» оборачивается плотным набегом
+    const n = Math.round((diff.waveBase + this.wave * diff.waveGrowth) * Math.sqrt(this.aiAdapt) * clanMods(this.rivalClan).tel);
     for (let i = 0; i < n; i++) comp.push('swordsman');
     if (this.wave >= 2) for (let i = 0; i < Math.ceil(n * 0.6); i++) comp.push('archer');
     if (this.wave >= 2) for (let i = 0; i < Math.ceil(n * 0.5); i++) comp.push('spearman');
@@ -7878,7 +7879,9 @@ export class Game {
     if (!etc) return;
     const evills = this.units.filter(u => u.owner === 'enemy' && u.key === 'villager');
     // train villagers
-    if (evills.length < 7 + Math.min(6, this.wave) && this.eres.food >= 50 && etc.queue.length < 2 && this.popUsed('enemy') < this.popCap('enemy')) {
+    // РОД ВРАГА (1.0.133): Дулат — «найм быстрее» оборачивается людным станом
+    const villCap = Math.round((7 + Math.min(6, this.wave)) * clanMods(this.rivalClan).train);
+    if (evills.length < villCap && this.eres.food >= 50 && etc.queue.length < 2 && this.popUsed('enemy') < this.popCap('enemy')) {
       this.eres.food -= 50;
       etc.queue.push({ key: 'villager', t: 0, total: 7 });
     }

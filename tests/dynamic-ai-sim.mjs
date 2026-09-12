@@ -11,7 +11,7 @@ ok(/const ratio = pm \/ Math\.max\(1, em\);/.test(eng), 'баланс сил mil
 ok(/пересчёт в diplomacyUpdate[\s\S]{0,10}/.test(eng) || /this\.aiAdapt = clamp/.test(eng), 'пересчитывается в тике дипломатии (раз в 5 с)');
 
 console.log('\n=== 2. Давление ===');
-ok(/Math\.sqrt\(this\.aiAdapt\)\)/.test(eng), 'размер волны ×√решимости (без молоха)');
+ok(/Math\.sqrt\(this\.aiAdapt\) \* clanMods\(this\.rivalClan\)\.tel/.test(eng), 'размер волны ×√решимости и ×род врага (без молоха)');
 ok(/Math\.max\(30, \(DIFF\[this\.difficulty\]\.waveInterval - this\.wave \* 3\.2\) \/ this\.aiAdapt\)/.test(eng), 'интервал волн /решимость (мин 30 с)');
 ok(/this\.eres\.wood \+= 6 \* diff\.enemyGather \* this\.aiAdapt;/.test(eng), 'экономика ИИ дышит с решимостью');
 ok(/g \*= this\.aiAdapt;   \/\/ п\.33/.test(eng), 'неприязнь масштабируется решимостью');
