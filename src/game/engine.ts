@@ -2988,7 +2988,8 @@ export class Game {
     if (!this.afford(d.cost)) { this.floater(b.x, b.y - 60, 'Не хватает ресурсов!', '#f87171', 17); this.sound.error(); return; }
     this.pay(d.cost);
     // Яса «Тез найза» (п.32): войска готовятся на 20% быстрее
-    b.queue.push({ key, t: 0, total: d.trainTime / (this.yasaActive('teznayza') ? 1.2 : 1) / (this.law === 'mobil' ? 1.25 : 1) });   // «Мобилизация» (п.13)
+    // РОД (1.0.132): Дулат готовит войска на 15% быстрее
+    b.queue.push({ key, t: 0, total: d.trainTime / (this.yasaActive('teznayza') ? 1.2 : 1) / (this.law === 'mobil' ? 1.25 : 1) / clanMods(this.settings.clan).train });   // «Мобилизация» (п.13)
     this.sound.train();
     this.burst(b.x, b.y - 20, 8, ['#f6d47c', '#fff7cc'], 60);
     this.pushHud();
@@ -3539,6 +3540,7 @@ export class Game {
     m *= this.berekeMult();                                      // благодать после намаза
     // Яса «Жер қор» (п.32): дерево и еда +15%
     if (this.yasaActive('zhorkor') && (u.carry.type === 'wood' || u.carry.type === 'food')) m *= 1.15;
+    m *= clanMods(this.settings.clan).gather;                    // РОД (1.0.132): Дулат добывает быстрее
     // чудо природы (п.29): аура места — работа рядом с ним на 25% быстрее
     for (const w of this.natWonders) {
       if (this.tdx(u.x - w.x) ** 2 + this.tdy(u.y - w.y) ** 2 < WONDER_AURA * WONDER_AURA) { m *= 1.25; break; }

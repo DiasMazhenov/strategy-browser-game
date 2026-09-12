@@ -5,4 +5,4 @@
 // vite-plugin-react «consistent-components-exports»). Держим App.tsx
 // «только компоненты», чтобы правки UI не сбрасывали игроку страницу.
 // При обновлениях поднимаем ТРЕТЬЮ цифру на 1: 1.0.008 → 1.0.009 → 1.0.010 …
-export const GAME_VERSION = '1.0.131';
+export const GAME_VERSION = '1.0.132';

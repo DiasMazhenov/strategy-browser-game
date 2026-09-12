@@ -7,7 +7,7 @@
 // Бонусы применяются ТОЛЬКО к игроку: у ИИ упрощённая экономика, и сравнивать
 // силу сторон сложнее, чем кажется (см. context.md, п.30).
 
-export type ClanId = 'argyn' | 'qypshaq' | 'naiman' | 'uisyn' | 'kerey';
+export type ClanId = 'argyn' | 'qypshaq' | 'naiman' | 'uisyn' | 'kerey' | 'dulat';
 
 /** Ключи множителей: 1 = бонуса нет. */
 export interface ClanMods {
@@ -31,9 +31,13 @@ export interface ClanMods {
   wisdom: number;
   /** стоимость посланника к племени */
   envoy: number;
+  /** скорость добычи (дерево, еда, золото) */
+  gather: number;
+  /** темп найма войск */
+  train: number;
 }
 
-const NEUTRAL: ClanMods = { tel: 1, penCost: 1, caravan: 1, scout: 1, cavHp: 1, knightCost: 1, build: 1, towerHp: 1, wisdom: 1, envoy: 1 };
+const NEUTRAL: ClanMods = { tel: 1, penCost: 1, caravan: 1, scout: 1, cavHp: 1, knightCost: 1, build: 1, towerHp: 1, wisdom: 1, envoy: 1, gather: 1, train: 1 };
 
 export interface Clan {
   id: ClanId;
@@ -78,6 +82,12 @@ export const CLANS: Clan[] = [
     desc: 'Мудрость копится на 15% быстрее, посланники к племенам дешевле на 15%',
     mods: { ...NEUTRAL, wisdom: 1.15, envoy: 0.85 },
   },
+  {
+    id: 'dulat', name: 'Дулат', tamga: 'tamga-dulat',
+    perk: 'добыча и найм',
+    desc: 'Добыча на 12% быстрее, войска готовятся на 15% быстрее',
+    mods: { ...NEUTRAL, gather: 1.12, train: 1.15 },
+  },
 ];
 
 export const CLAN_BY_ID: Record<string, Clan> = Object.fromEntries(CLANS.map(c => [c.id, c]));
@@ -99,6 +109,7 @@ export const RIVAL_NOTE: Record<ClanId, string> = {
   naiman: 'конница джунгар живучее (+10% HP)',
   uisyn: 'строит быстрее, башни крепче (+15% HP)',
   kerey: 'чаще шлёт послов к племенам',
+  dulat: 'добыча и найм — в бою нейтрально',
 };
 
 /** Случайный род — для жеребьёвки джунгар в начале партии. */

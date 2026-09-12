@@ -21,7 +21,7 @@ ok(/aulDesertion\(\)/.test(eng) && /u\.owner = 'neutral'; u\.path = undefined;/.
 console.log('=== 3. Законы работают ===');
 ok(/law === 'toler' \? 1\.3 : 1/.test(eng), 'веротерпимость: вера +30%');
 ok(/if \(this\.law === 'nalog'\) this\.res\.gold \+= 0\.5;/.test(eng), 'ясак: +0,5 золота/с');
-ok(/law === 'mobil' \? 1\.25 : 1\) \}\);/.test(eng), 'мобилизация: найм ×1,25');
+ok(/law === 'mobil' \? 1\.25 : 1\) \/ clanMods\(this\.settings\.clan\)\.train/.test(eng), 'мобилизация: найм ×1,25 (и темп рода)');
 ok(/law === 'asylum'\) c \+= 2;/.test(eng), 'убежище: +2 к населению');
 ok(/law === 'erk' && u\.owner === 'player' \? 1\.08 : 1/.test(eng), 'вольница: скорость +8% (и авторитет тает вдвое)');
 ok(/law === 'asar' \? 1\.15 : 1\)/.test(eng), 'асар: стройка +15%');

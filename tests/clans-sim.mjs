@@ -22,12 +22,12 @@ const out = await esbuild.build({
 const mod = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
 const { CLANS, clanMods, clanBldCost, clanUnitCost, BUILDING_DEFS, UNIT_DEFS, envoyCost } = mod;
 
-ok(CLANS.length === 5, `родов: ${CLANS.length} (${CLANS.map(c => c.name).join(', ')})`);
-ok(new Set(CLANS.map(c => c.id)).size === 5, 'id уникальны');
-ok(new Set(CLANS.map(c => c.tamga)).size === 5, 'у каждого рода своя таңба');
+ok(CLANS.length === 6, `родов: ${CLANS.length} (${CLANS.map(c => c.name).join(', ')})`);
+ok(new Set(CLANS.map(c => c.id)).size === 6, 'id уникальны');
+ok(new Set(CLANS.map(c => c.tamga)).size === 6, 'у каждого рода своя таңба');
 
 console.log('\n=== 2. Пассивки: ровно две на род, в ±15% ===');
-const NEUTRAL_KEYS = ['tel', 'penCost', 'caravan', 'scout', 'cavHp', 'knightCost', 'build', 'towerHp', 'wisdom', 'envoy'];
+const NEUTRAL_KEYS = ['tel', 'penCost', 'caravan', 'scout', 'cavHp', 'knightCost', 'build', 'towerHp', 'wisdom', 'envoy', 'gather', 'train'];
 for (const c of CLANS) {
   const active = NEUTRAL_KEYS.filter(k => c.mods[k] !== 1);
   ok(active.length === 2, `${c.name}: пассивок ${active.length} (${active.join(', ')}) — «${c.perk}»`);
@@ -49,6 +49,10 @@ const ker = clanMods('kerey');
 ok(ker.wisdom === 1.15 && ker.envoy === 0.85, `Керей: мудрость ×${ker.wisdom}, посланники ×${ker.envoy}`);
 ok(CLANS.every(c => c.id === 'kerey' || (c.mods.wisdom === 1 && c.mods.envoy === 1)),
   'мудрость и послы — только у Керея');
+const dul = clanMods('dulat');
+ok(dul.gather === 1.12 && dul.train === 1.15, `Дулат: добыча ×${dul.gather}, найм ×${dul.train}`);
+ok(CLANS.every(c => c.id === 'dulat' || (c.mods.gather === 1 && c.mods.train === 1)),
+  'добыча и найм — только у Дулата');
 
 console.log('\n=== 4. Неизвестный род (старый сейв) — нейтрально ===');
 const unk = clanMods('нет такого');
@@ -87,6 +91,8 @@ ok(/cm\.tel > 1 && rand\(0, 1\) < cm\.tel - 1 \? 2 : 1/.test(eng), 'припло
 ok(/clanBldCost\(this\.settings\.clan, key\)/.test(eng) && /bldCost\(key: BuildingKey\)/.test(eng), 'цены построек через единую bldCost');
 ok(/clanUnitCost\(this\.settings\.clan, item\.key\)/.test(eng), 'цена найма учитывает род');
 ok(/r \*= clanMods\(this\.settings\.clan\)\.wisdom/.test(eng), 'мудрость копится быстрее (wisdomRate)');
+ok(/m \*= clanMods\(this\.settings\.clan\)\.gather/.test(eng), 'добыча быстрее (workMult)');
+ok(/clanMods\(this\.settings\.clan\)\.train \}/.test(eng), 'найм быстрее (train)');
 ok(/envoyPrice\(nid: string\): number \{[\s\S]{0,200}?clanMods\(this\.settings\.clan\)\.envoy/.test(eng),
   'посланник дешевле (envoyPrice)');
 ok(/const cost = this\.envoyPrice\(nid\)/.test(eng) && /envoyCost: this\.envoyPrice\(d\.id\)/.test(eng),
@@ -99,7 +105,7 @@ ok(/ВЫБЕРИ СВОЙ РОД/.test(app) && /updateSettings\(\{ clan: c\.id \
 ok(/clanUnitCost\(clan, k\)/.test(app) && /ucost\(k\)/.test(app), 'док показывает цену с учётом рода');
 ok(/hud\?\.clan\?\.tamga/.test(app), 'в HUD бейдж рода');
 ok(/clan: ClanId/.test(cfg) && /clan: DEFAULT_CLAN/.test(cfg), 'род — часть настроек (сохраняется)');
-ok(['tamga-argyn', 'tamga-qypshaq', 'tamga-naiman', 'tamga-uisyn', 'tamga-kerey'].every(k => ico.includes(`'${k}'`)), '5 таңб в наборе иконок');
+ok(['tamga-argyn', 'tamga-qypshaq', 'tamga-naiman', 'tamga-uisyn', 'tamga-kerey', 'tamga-dulat'].every(k => ico.includes(`'${k}'`)), '6 таңб в наборе иконок');
 
 console.log(`\nИтог: ${n - f} ok, ${f} fail`);
 process.exit(f ? 1 : 0);

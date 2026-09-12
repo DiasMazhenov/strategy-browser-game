@@ -144,7 +144,31 @@ console.log('\n=== 6. Старый сейв без поля rivalClan ===');
   g.localStorage._v = null;
 }
 
-console.log('\n=== 7. Множители врага в тех же ±15% ===');
+console.log('\n=== 7. Добыча и найм на живом движке (Дулат) ===');
+{
+  // скорость добычи: workMult уже учитывает род владельца
+  const wm = (clan) => {
+    const { game } = mkGame({ settings: { clan, difficulty: 'normal' } });
+    const v = game.units.find(u => u.owner === 'player' && u.key === 'villager');
+    return game.workMult(v);
+  };
+  const base = wm('argyn'), dul = wm('dulat');
+  ok(Math.abs(dul / base - 1.12) < 0.01, `добыча: ×${(dul / base).toFixed(3)} для Дулата (ожидали ×1.12)`);
+  ok(Math.abs(wm('naiman') / base - 1) < 1e-9, 'для Найман добыча базовая');
+
+  // темп найма: смотрим, сколько стоит в очереди реальный юнит
+  const tq = (clan) => {
+    const { game } = mkGame({ settings: { clan, difficulty: 'normal' } });
+    game.res.food = 9999; game.res.wood = 9999; game.res.gold = 9999;
+    game.train('villager');
+    const tc = game.blds.find(b => b.owner === 'player' && b.key === 'towncenter');
+    return tc.queue[tc.queue.length - 1].total;
+  };
+  const t0 = tq('argyn'), t1 = tq('dulat');
+  ok(Math.abs(t0 / t1 - 1.15) < 0.01, `найм: ${t0.toFixed(2)} с → ${t1.toFixed(2)} с для Дулата (−15% времени)`);
+}
+
+console.log('\n=== 8. Множители врага в тех же ±15% ===');
 {
   const worst = Math.max(...CLANS.map(c => Math.max(
     Math.abs(c.mods.cavHp - 1), Math.abs(c.mods.towerHp - 1),

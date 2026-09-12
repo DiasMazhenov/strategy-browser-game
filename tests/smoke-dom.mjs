@@ -116,8 +116,8 @@ ok(!win.document.querySelector('canvas'), 'canvas партии на меню н�
 console.log('\n=== 4b. Выбор рода в меню (п.12) ===');
 {
   const clanBtns = [...win.document.querySelectorAll('button')]
-    .filter(b => /Арғын|Қыпшақ|Найман|Ұйсын|Керей/.test(b.textContent || ''));
-  ok(clanBtns.length === 5, `карточек рода в меню: ${clanBtns.length}`);
+    .filter(b => /Арғын|Қыпшақ|Найман|Ұйсын|Керей|Дулат/.test(b.textContent || ''));
+  ok(clanBtns.length === 6, `карточек рода в меню: ${clanBtns.length}`);
   const picked = clanBtns.find(b => /Керей/.test(b.textContent || ''));
   if (picked) {
     picked.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
