@@ -50,7 +50,7 @@ ok(ker.wisdom === 1.15 && ker.envoy === 0.85, `Керей: мудрость ×${
 ok(CLANS.every(c => c.id === 'kerey' || (c.mods.wisdom === 1 && c.mods.envoy === 1)),
   'мудрость и послы — только у Керея');
 const dul = clanMods('dulat');
-ok(dul.gather === 1.12 && dul.train === 1.15, `Дулат: добыча ×${dul.gather}, найм ×${dul.train}`);
+ok(dul.gather === 1.10 && dul.train === 1.10, `Дулат: добыча ×${dul.gather}, найм ×${dul.train}`);
 ok(CLANS.every(c => c.id === 'dulat' || (c.mods.gather === 1 && c.mods.train === 1)),
   'добыча и найм — только у Дулата');
 

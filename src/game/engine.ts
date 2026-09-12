@@ -856,6 +856,7 @@ export class Game {
     const cm = clanMods(owner === 'enemy' ? this.rivalClan : this.settings.clan);
     if (owner === 'player' || owner === 'enemy') {
       if (key === 'scout' && cm.scout !== 1) u.speed *= cm.scout;                       // Қыпшақ
+      if (key === 'trader' && cm.caravan !== 1) u.speed *= cm.caravan;                 // Қыпшақ (1.0.134): керуены ходят быстрее
       if ((key === 'knight' || key === 'cavalry' || key === 'horsearcher' || key === 'camelry') && cm.cavHp !== 1) {
         u.maxHp = Math.round(u.maxHp * cm.cavHp); u.hp = u.maxHp;                       // Найман
       }
@@ -1399,7 +1400,7 @@ export class Game {
     } else {
       // племя
       if (act === 'gift') {
-        const cost = def.choices.find(c => c.act === 'gift')?.gold ?? 40;
+        const cost = this.giftPrice(nid);
         if (this.res.gold >= cost) { this.res.gold -= cost; this.tribeRel[nid] = 'friend'; this.pushBanner(`{i:handshake} Дружба с «${def.name}»`, `${def.title} ${def.ruler} обещает не трогать ваши караваны и границы`, 4); this.sound.coin(); }
         else { this.floater(this.cam.x, this.cam.y - 90, `Нужно ${cost} {i:gold}`, '#f87171', 15); }
       } else if (act === 'threat') { this.tribeRel[nid] = 'hostile'; this.provokeTribeById(nid); this.pushBanner(`{i:spark} Угроза племени «${def.name}»`, `${def.title} ${def.ruler} в ярости — воины хватаются за оружие`, 4); }
@@ -1571,6 +1572,12 @@ export class Game {
   envoyPrice(nid: string): number {
     const have = this.envoys[nid] ?? 0;
     return Math.round(envoyCost(have) * clanMods(this.settings.clan).envoy * (this.yasaActive('aralas') ? 0.5 : 1));
+  }
+
+  /** Реальная цена дара племени: скидка рода Керей + Яса «Аралас ұлыс». */
+  giftPrice(nid: string): number {
+    const base = NATION_BY_ID[nid]?.choices.find(c => c.act === 'gift')?.gold ?? 40;
+    return Math.round(base * clanMods(this.settings.clan).envoy * (this.yasaActive('aralas') ? 0.5 : 1));
   }
 
   sendEnvoy(nid: string): boolean {
@@ -2032,8 +2039,8 @@ export class Game {
     if (act === 'threat') act = 'attack';
     if (act === 'greet') { this.greetShown.delete(nid); this.greeting = { nationId: nid }; return true; }
     if (act === 'gift') {
-      // Яса «Аралас ұлыс» (п.32): дары племенам вдвое дешевле
-      const cost = Math.round((def.choices.find(c => c.act === 'gift')?.gold ?? 40) * (this.yasaActive('aralas') ? 0.5 : 1));
+      // Яса «Аралас ұлыс» (п.32): дары вдвое дешевле; род Керей: −15% (1.0.134)
+      const cost = this.giftPrice(nid);
       if (rel === 'friend') { this.floater(this.cam.x, this.cam.y - 100, 'Уже дружны', '#94a3b8', 14); return false; }
       if (this.res.gold < cost) { this.floater(this.cam.x, this.cam.y - 100, `Нужно ${cost} {i:gold}`, '#f87171', 15); return false; }
       this.res.gold -= cost; this.tribeRel[nid] = 'friend';
@@ -3557,6 +3564,8 @@ export class Game {
       const pen = this.blds.find(b => b.id === u.penId);
       if (pen) m *= 1 - 0.5 * (pen.grazeDep ?? 0);
     }
+    // РОД (1.0.134): Арғын — животновод: приплод чаще И дойка быстрее
+    if (u.wkind === 'milk') m *= clanMods(this.settings.clan).tel;
     return m;
   }
   readonly FRESH_BONUS = 1.35;   // насколько быстрее работает отдохнувший
@@ -8123,7 +8132,7 @@ export class Game {
         atWar: d.id === 'rival' ? this.atWar : this.tribeRel[d.id] === 'hostile',
         power: met ? Math.round(this.nationPower(d.id)) : 0,
         camps: d.kind === 'tribe' ? this.nationCampCount(d.id) : 0,
-        gift: d.choices.find(c => c.act === 'gift')?.gold ?? 40,
+        gift: this.giftPrice(d.id),
         canGreet: met,
         envoys: this.envoys[d.id] ?? 0,
         rivalEnvoys: this.rivalEnvoys[d.id] ?? 0,

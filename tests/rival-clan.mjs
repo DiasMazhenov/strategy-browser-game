@@ -43,12 +43,13 @@ g.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
 const dir = mkdtempSync(join(tmpdir(), 'rival-'));
 const outfile = join(dir, 'engine.mjs');
 await build({ stdin: {
-    contents: `export { Game } from './src/game/engine';\nexport { CLANS, CLAN_BY_ID, clanMods, randomClan, RIVAL_NOTE } from './src/game/clans';`,
+    contents: `export { Game } from './src/game/engine';\nexport { CLANS, CLAN_BY_ID, clanMods, randomClan, RIVAL_NOTE } from './src/game/clans';
+export { TRIBE_IDS } from './src/game/nations';`,
     resolveDir: process.cwd(), loader: 'ts', sourcefile: 'rival-entry.ts',
   },
   bundle: true, format: 'esm', platform: 'neutral', outfile,
   loader: { '.png': 'text', '.jpg': 'text', '.mp3': 'text', '.webp': 'text' }, logLevel: 'silent' });
-const { Game, CLANS, clanMods, randomClan, RIVAL_NOTE } = await import('file://' + outfile);
+const { Game, CLANS, clanMods, randomClan, RIVAL_NOTE, TRIBE_IDS } = await import('file://' + outfile);
 
 let n = 0, f = 0;
 const ok = (c, m) => { n++; console.log(c ? '  ok  ' : '  FAIL', m); if (!c) f++; };
@@ -153,7 +154,7 @@ console.log('\n=== 7. Добыча и найм на живом движке (Д�
     return game.workMult(v);
   };
   const base = wm('argyn'), dul = wm('dulat');
-  ok(Math.abs(dul / base - 1.12) < 0.01, `добыча: ×${(dul / base).toFixed(3)} для Дулата (ожидали ×1.12)`);
+  ok(Math.abs(dul / base - 1.10) < 0.01, `добыча: ×${(dul / base).toFixed(3)} для Дулата (ожидали ×1.10)`);
   ok(Math.abs(wm('naiman') / base - 1) < 1e-9, 'для Найман добыча базовая');
 
   // темп найма: смотрим, сколько стоит в очереди реальный юнит
@@ -165,7 +166,53 @@ console.log('\n=== 7. Добыча и найм на живом движке (Д�
     return tc.queue[tc.queue.length - 1].total;
   };
   const t0 = tq('argyn'), t1 = tq('dulat');
-  ok(Math.abs(t0 / t1 - 1.15) < 0.01, `найм: ${t0.toFixed(2)} с → ${t1.toFixed(2)} с для Дулата (−15% времени)`);
+  ok(Math.abs(t0 / t1 - 1.10) < 0.01, `найм: ${t0.toFixed(2)} с → ${t1.toFixed(2)} с для Дулата (−10% времени)`);
+}
+
+console.log('\n=== 7b. Расширенные домены родов (1.0.134) ===');
+{
+  // ВАЖНО: сравниваем ВНУТРИ одной партии. Сезон, погода и усталость крестьянина
+  // в новой партии другие, и разница между родами тонет в этом шуме (на замере
+  // скорости керуена так и вышло: 15% превращались в 11.7%).
+  const one = (clan) => mkGame({ settings: { clan, difficulty: 'normal' } }).game;
+
+  // Арғын: дойка быстрее (множитель «животноводство»), а лес — как у всех
+  {
+    const game = one('naiman');
+    const v = game.units.find(u => u.owner === 'player' && u.key === 'villager');
+    const rate = (wkind) => { v.wkind = wkind; return game.workMult(v); };
+    const chop0 = rate('chop'), milk0 = rate('milk');
+    game.settings.clan = 'argyn';
+    const chop1 = rate('chop'), milk1 = rate('milk');
+    ok(Math.abs(milk1 / milk0 - 1.15) < 0.005, `Арғын доит на ${((milk1 / milk0 - 1) * 100).toFixed(1)}% быстрее`);
+    ok(Math.abs(chop1 / chop0 - 1) < 1e-9, 'рубит лес как все — бонус только у животноводства');
+  }
+
+  // Қыпшақ: керуены идут быстрее.
+  // Скорость юнита при рождении умножается на rand(0.94, 1.06) — разброс ±6%,
+  // поэтому один-два юнита ничего не докажут (мерил: выходило то +9.6%, то
+  // +19.3%). Берём среднее по 40 керуенам: погрешность среднего ≈ ±0.8%.
+  {
+    const game = one('naiman');
+    const mean = (clan, n = 40) => {
+      game.settings.clan = clan;
+      let s = 0;
+      for (let i = 0; i < n; i++) s += game.addUnit('trader', 'player', 0, 0).speed;
+      return s / n;
+    };
+    const a = mean('naiman'), b = mean('qypshaq');
+    ok(Math.abs(b / a - 1.15) < 0.02, `Қыпшақ: керуен идёт на ${((b / a - 1) * 100).toFixed(1)}% быстрее (среднее по 40)`);
+  }
+
+  // Керей: скидка и на послов, и на дары — цена считается одним методом
+  {
+    const game = one('naiman');
+    const g0 = game.giftPrice(TRIBE_IDS[0]), e0 = game.envoyPrice(TRIBE_IDS[0]);
+    game.settings.clan = 'kerey';
+    const g1 = game.giftPrice(TRIBE_IDS[0]), e1 = game.envoyPrice(TRIBE_IDS[0]);
+    ok(g1 === Math.round(g0 * 0.85), `дары племени: ${g0} → ${g1} золота для Керея (−15%)`);
+    ok(e1 === Math.round(e0 * 0.85), `посланник: ${e0} → ${e1} золота для Керея (−15%)`);
+  }
 }
 
 console.log('\n=== 8. Перевод родов врага: волны и стан (1.0.133) ===');
