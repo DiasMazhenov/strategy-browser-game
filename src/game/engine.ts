@@ -9575,7 +9575,7 @@ export class Game {
 
   drawUnitIso(u: Unit, ix: number, iy: number, water = 0) {
     // y-подскок юнита компенсирован внутри pixelart через bob — передаём «земную» точку
-    drawPixelUnit(this.ctx, u, ix, iy, this.time, this.selected.has(u.id), water);
+    drawPixelUnit(this.ctx, u, ix, iy, this.time, this.selected.has(u.id), water, this.cam.zoom);
     // ── полоса КАМЛАНИЯ над обращаемым юнитом (видно, что душу перетягивают) ──
     if (u.convProg != null && u.convProg > 0) {
       const ctx = this.ctx;
