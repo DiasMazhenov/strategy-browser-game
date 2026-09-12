@@ -273,9 +273,12 @@ export default function App() {
       {/* ===== TOP HUD ===== */}
       {!uiHidden && (
       <div className="safe-top pointer-events-none absolute inset-x-0 top-0 z-20">
-        <div className="flex items-start justify-between gap-2 p-2 sm:p-3">
+        {/* 1.0.138: на телефоне три полосы HUD идут друг под другом, каждая — одной
+            строкой с горизонтальной прокруткой. Раньше они переносились в 3-4 ряда
+            и сверху съедалось до 30% экрана; на широком экране раскладка прежняя. */}
+        <div className="flex flex-col items-stretch gap-1 p-2 sm:flex-row sm:items-start sm:justify-between sm:gap-2 sm:p-3">
           {/* resources */}
-          <div className="kz-border-bottom panel-iron pointer-events-auto flex items-center gap-1 rounded-xl px-2 py-1.5 sm:gap-2 sm:px-3">
+          <div className="kz-border-bottom panel-iron scroll-thin pointer-events-auto flex min-w-0 items-center gap-1 overflow-x-auto rounded-xl px-2 py-1.5 [&>*]:shrink-0 sm:gap-2 sm:overflow-x-visible sm:px-3">
             <Res icon={<Ico name="wood" className="h-4 w-4 text-lime-300" />} val={hud?.wood ?? 0} />
             <Res icon={<Ico name="food" className="h-4 w-4 text-rose-300" />} val={hud?.food ?? 0} />
             <Res icon={<Ico name="gold" className="h-4 w-4 text-yellow-300" />} val={hud?.gold ?? 0} />
@@ -307,7 +310,7 @@ export default function App() {
               своей строке, и сверху съедалось ~30% экрана. На узком экране кладём
               их в переносимые строки (3-4 ряда вместо 12), на широком оставляем
               колонкой как было. */}
-          <div className="flex flex-wrap items-center justify-center gap-1 sm:flex-col">
+          <div className="scroll-thin flex min-w-0 items-center gap-1 overflow-x-auto [&>*]:shrink-0 sm:flex-col sm:justify-center sm:overflow-x-visible">
             <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-xl px-4 py-1.5 text-xs font-bold">
               <span className="flex items-center gap-1 text-amber-300"><Trophy className="h-3.5 w-3.5" />{hud?.score ?? 0}</span>
               <span className="flex items-center gap-1 text-slate-300" title={`Реальное время партии: ${fmtTime(hud?.timeSec ?? 0)}`}><Clock className="h-3.5 w-3.5" />{gameClock(hud?.day?.phase ?? 0)}</span>
@@ -485,7 +488,7 @@ export default function App() {
           </div>
 
           {/* buttons */}
-          <div className="pointer-events-auto flex items-center gap-1.5">
+          <div className="scroll-thin pointer-events-auto flex min-w-0 items-center gap-1.5 overflow-x-auto [&>*]:shrink-0 sm:justify-end sm:overflow-x-visible">
             <div className="panel-iron hidden items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-bold text-amber-200 sm:flex">
               <Crown className="h-4 w-4" />{hud?.ageName ?? 'Заря степи'}
             </div>
@@ -519,7 +522,7 @@ export default function App() {
         </div>
 
         {/* mobile score strip */}
-        <div className="flex justify-center md:hidden">
+        <div className="hidden justify-center sm:flex md:hidden">
           <div className="panel-iron pointer-events-auto flex items-center gap-3 rounded-full px-3 py-1 text-[11px] font-bold">
             <span className="text-amber-300"><Ico name="trophy" />{hud?.score ?? 0}</span>
             <span className="text-slate-300" title={`Реальное время партии: ${fmtTime(hud?.timeSec ?? 0)}`}>{gameClock(hud?.day?.phase ?? 0)}</span>
@@ -557,7 +560,7 @@ export default function App() {
 
       {/* ===== SELECTION CARD (above dock, grows upward) ===== */}
       {hud && hud.sel.kind !== 'none' && !uiHidden && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[236px] z-30 flex justify-center px-2 sm:bottom-[156px]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[104px] z-30 flex justify-center px-2 sm:bottom-[156px]">
           <div className="panel-iron scroll-thin pointer-events-auto flex max-h-[40dvh] w-[min(94vw,560px)] items-start gap-3 overflow-y-auto overscroll-contain rounded-2xl px-3 py-2">
             {hud.sel.kind === 'units' ? (
               <>
@@ -804,7 +807,7 @@ export default function App() {
 
       {/* placement / attack banners */}
       {hud?.placement && !uiHidden && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[76px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto flex items-center gap-2 rounded-full border border-lime-300/50 bg-lime-950/90 px-4 py-1.5 text-xs font-bold text-lime-200">
             <Ico name="crane" /> Строим: {BUILDING_DEFS[hud.placement].name} — кликните по карте
             <button onClick={() => g()?.cancelPlacement()} className="rounded-full bg-white/10 p-1"><X className="h-3.5 w-3.5" /></button>
@@ -812,7 +815,7 @@ export default function App() {
         </div>
       )}
       {hud?.attackArmed && !hud?.placement && !uiHidden && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-20 flex justify-center sm:bottom-[128px]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[76px] z-20 flex justify-center sm:bottom-[128px]">
           <div className="anim-banner pointer-events-auto rounded-full border border-red-300/50 bg-red-950/90 px-4 py-1.5 text-xs font-bold text-red-200">
             <Ico name="target" /> Атака-мув готова — укажите точку набега! (Esc — отмена)
           </div>
@@ -1981,7 +1984,7 @@ function MenuScreen({ scores, settings, updateSettings, onPlay, onResume, onPlay
                   </div>
                   <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
                     <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><MousePointer2 className="h-3.5 w-3.5" />ПК</span>Рамка — выбор • ПКМ — приказ • WASD + колесо камера • Home — к ставке • 0-9 / QERFKMZXC / G / H / N звук / Space</div>
-                    <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>Касание — выбор • касание земли — приказ • Рамка/Камера • щипковый зум • прыжок по мини-карте</div>
+                    <div className="rounded-xl bg-black/30 p-2 text-[11px] font-semibold text-slate-300"><span className="mb-1 flex items-center gap-1 font-black text-slate-100"><Hand className="h-3.5 w-3.5" />Сенсор</span>палец — камера (с инерцией) • тап — выбор и приказ • щипок — зум • «Рамка» — выделить отряд • чип карты в углу — перелёт, тап вне карты закрывает её • док снизу: вкладки «Отряд» и «Сводка», тап по полю его закрывает • «глаз» у правого края — чистый экран</div>
                   </div>
                 </>
               ) : (

@@ -90,5 +90,22 @@ console.log('\n=== 5. На телефоне интерфейс не висит �
   ok(/onPointerDown=\{\(\) => \{ if \(isMobile\) setDockOpen\(false\); \}\}/.test(app), 'тап по полю закрывает раскрытый док');
 }
 
+
+console.log('\n=== 6. Верхний HUD не съедает треть экрана (1.0.138) ===');
+{
+  const top = app.slice(app.indexOf('{/* ===== TOP HUD'), app.indexOf('{/* ===== QUESTS + ОТРЯД'));
+  // три полосы друг под другом, каждая — одна строка с прокруткой
+  ok(/flex flex-col items-stretch gap-1 p-2 sm:flex-row/.test(top), 'на телефоне полосы HUD идут столбиком');
+  const strips = top.match(/overflow-x-auto/g) || [];
+  ok(strips.length >= 3, `полос с горизонтальной прокруткой: ${strips.length} (ресурсы, события, кнопки)`);
+  ok(/\[&>\*\]:shrink-0/.test(top), 'пилюли внутри не сжимаются (иначе цифры обрезаются)');
+  ok(!/flex flex-wrap items-center justify-center gap-1 sm:flex-col/.test(top), 'старого переноса в 3-4 ряда больше нет');
+  // полоса счёта дублировала события — на телефоне её быть не должно
+  ok(/hidden justify-center sm:flex md:hidden/.test(top), 'дублирующая полоса счёта убрана с телефона');
+  // карточки, привязанные к высоте дока
+  ok(/bottom-\[104px\][^"]*sm:bottom-\[156px\]/.test(app), 'карточка выделения поднялась вслед за низким доком');
+  ok(/bottom-\[76px\][^"]*sm:bottom-\[128px\]/.test(app), 'баннеры режима тоже');
+}
+
 console.log(`\nИтог: ${n - f} ok, ${f} fail`);
 process.exit(f ? 1 : 0);
