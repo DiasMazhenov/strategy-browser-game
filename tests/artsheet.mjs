@@ -90,38 +90,81 @@ ok(!!cv, 'canvas листа создан');
 ok(cv && cv.width > 400 && cv.height > 400, `размер полотна: ${cv?.width}×${cv?.height}`);
 
 const frames = Number((text.match(/кадров:\s*(\d+)/) || [])[1] || 0);
-const cached = Number((text.match(/в кэше:\s*(\d+)/) || [])[1] || 0);
 const units = Number((text.match(/юнитов:\s*(\d+)/) || [])[1] || 0);
 ok(units >= 12, `юнитов на листе: ${units}`);
 ok(frames >= units * 4, `кадров отрисовано: ${frames} (по 4 на юнита)`);
-ok(cached > 0 && cached <= frames, `в кэше кадров: ${cached} — переиспользуются, а не рисуются заново`);
+ok(/масштаб ×6/.test(text), 'по умолчанию открывается крупный масштаб ×6');
+ok(/v1\.0\.\d+/.test(text), `версия в шапке: ${(text.match(/v1\.0\.\d+/) || ['?'])[0]}`);
 
-console.log('\n=== 4. Переключение команды не ломает лист ===');
+console.log('\n=== 4. Масштаб переключается, кэш включается только в боевом размере ===');
+let cached0 = 0;
+{
+  const big = [...root.querySelectorAll('button')].find(b => /^×6$/.test((b.textContent || '').trim()));
+  const one = [...root.querySelectorAll('button')].find(b => /^×1$/.test((b.textContent || '').trim()));
+  ok(!!big && !!one, 'кнопки масштаба ×1 и ×6 найдены');
+  // при ×6 кэш сбрасывается: кадры уникальны, в бою их не переиспользовать
+  ok(/кэш сбрасывается/.test(text), 'при ×6 кэш не копится (каждый кадр уникален)');
+  if (one) {
+    one.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    await tick(300);
+    const t1 = (root.textContent || '').replace(/\s+/g, ' ');
+    ok(/масштаб ×1/.test(t1), 'переключились на боевой масштаб ×1');
+    cached0 = Number((t1.match(/в кэше:\s*(\d+)/) || [])[1] || 0);
+    ok(cached0 > 0, `в боевом масштабе кэш работает: ${cached0} кадров`);
+  }
+}
+
+console.log('\n=== 5. Переключение команды не ломает лист (боевой масштаб ×1) ===');
 {
   const btn = [...root.querySelectorAll('button')].find(b => /Джунгары/.test(b.textContent || ''));
+  cnt.fillRect = 0;
   ok(!!btn, 'кнопка «Джунгары» найдена');
   if (btn) {
     btn.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
     await tick(250);
     const t2 = (root.textContent || '').replace(/\s+/g, ' ');
     ok(/кадров:\s*\d+/.test(t2), 'лист перерисовался на другой команде');
-    ok(/в кэше:\s*(\d+)/.test(t2) && Number((t2.match(/в кэше:\s*(\d+)/) || [])[1]) > cached - 1, 'кэш пополнился кадрами другой команды');
+    ok(/в кэше:\s*(\d+)/.test(t2) && Number((t2.match(/в кэше:\s*(\d+)/) || [])[1]) >= cached0, `кэш держит кадры: было ${cached0}, стало ${Number((t2.match(/в кэше:\s*(\d+)/) || [])[1] || 0)}`);
   }
 }
 
-console.log('\n=== 5. Кэш кадров: повторная отрисовка не рисует заново ===');
-const cold = cnt.fillRect;   // сколько примитивов ушло на первый (холодный) проход
+console.log('\n=== 6. Кэш кадров: повторная отрисовка не рисует заново (боевой масштаб) ===');
 {
-  // вернулись на «Казахов»: их кадры уже собраны при первом проходе
-  const btn = [...root.querySelectorAll('button')].find(b => /Казахи/.test(b.textContent || ''));
-  ok(!!btn, 'кнопка «Казахи» найдена');
-  cnt.fillRect = 0; cnt.drawImage = 0;
-  btn.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-  await tick(250);
-  // контур каждого нового кадра = 8 drawImage, но на уже готовые кадры
-  // fillRect тратиться не должен — только на те, что собраны не были
-  console.log(`  · диагностика: fillRect=${cnt.fillRect} drawImage=${cnt.drawImage}`);
-  ok(cnt.fillRect < cold / 5, `повторный проход ${cnt.fillRect} примитивов против ${cold} на холодном кэше — кэш работает`);
+  const btn = (re) => [...root.querySelectorAll('button')].find(b => re.test(b.textContent || ''));
+  // ×6 чистит кэш после каждого кадра — им и сбрасываем накопленное, чтобы
+  // замер начался с чистого листа (иначе в кэше уже лежат кадры из раздела 5)
+  btn(/^×6$/).dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  await tick(500);
+  btn(/^×1$/).dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  await tick(400);
+  // холодный проход: команда, которой в кэше ещё нет
+  cnt.fillRect = 0;
+  btn(/Казахи/).dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  await tick(300);
+  const cold = cnt.fillRect;
+  // уводим на другую команду и возвращаемся — должны попасть в готовые кадры
+  btn(/Джунгары/).dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  await tick(300);
+  cnt.fillRect = 0;
+  const back = btn(/Казахи/);
+  ok(!!back, 'кнопка «Казахи» найдена');
+  back.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  await tick(300);
+  console.log(`  · диагностика: холодный ${cold}, повторный ${cnt.fillRect}`);
+  ok(cnt.fillRect < cold / 5, `повторный проход ${cnt.fillRect} примитивов против ${cold} на холодном — кэш работает`);
+}
+
+console.log('\n=== 7. Крупный масштаб ×6 ===');
+{
+  const big = [...root.querySelectorAll('button')].find(b => /^×6$/.test((b.textContent || '').trim()));
+  ok(!!big, 'кнопка ×6 найдена');
+  if (big) {
+    big.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    await tick(600);
+    const t2 = (root.textContent || '').replace(/\s+/g, ' ');
+    ok(/масштаб ×6/.test(t2), 'крупный масштаб ×6 отрисовывается без ошибок');
+    ok(/кэш сбрасывается/.test(t2), 'в ×6 кэш не копит память');
+  }
 }
 
 ok(errors.length === 0, `ошибок в консоли: ${errors.length}${errors.length ? ' — ' + errors[0].slice(0, 200) : ''}`);

@@ -1274,9 +1274,11 @@ function cx(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, c: s
 // Теперь кадр собирается в ART раз крупнее и уменьшается при выводе — как у
 // художника, который рисует в три-четыре раза больше экранного.
 // На приближении кадр и так большой, поэтому запас снижаем (память кэша).
-// ×4 на обычном обзоре (юнит ~34 единицы → черновик 136 пикселей, как у
-// настоящих спрайтов 87×150), ×3 и ×2 на приближении, где кадр и так крупный.
-const artFor = (zoom: number) => (zoom >= 1.75 ? 2 : zoom >= 1.25 ? 3 : 4);
+// Сколько пикселей черновика на одну игровую единицу. На листе арта (/?dev=art,
+// масштаб ×3–×6) запас нужен не меньше, а БОЛЬШЕ, чем в бою: иначе крупный кадр
+// просто растягивается из мелкого черновика и вместо деталей получается мыло.
+// В бою: ×4 на обычном обзоре, ×3 и ×2 на приближении (память кэша дороже).
+const artFor = (zoom: number) => (zoom >= 3 ? 4 : zoom >= 1.75 ? 2 : zoom >= 1.25 ? 3 : 4);
 let UUB = 1 / 3;                    // шаг сетки: один пиксель черновика (ставится на время отрисовки кадра)
 const PROC = new Map<string, { cv: HTMLCanvasElement; w: number; h: number; ox: number; oy: number }>();
 /** Сколько кадров в кэше (для тестов и диагностики). */
@@ -1424,6 +1426,27 @@ function ell(ctx: CanvasRenderingContext2D, cx0: number, cy0: number, rx: number
   ctx.fillStyle = grad(ctx, 0, cy0 - ry, 0, cy0 + ry, cTop, cBot);
   ctx.beginPath(); ctx.ellipse(cx0, cy0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
 }
+// Фактура «под ткань / шерсть»: редкие штрихи поверх заливки. Узор зависит
+// только от координат (никакого Math.random), иначе соседние кадры анимации
+// начинали бы рябить: один и тот же юнит должен выглядеть одинаково в каждом
+// кадре цикла.
+function tex(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c: string,
+             stepX = 2.2, stepY = 2.4, len = 1.2, thick = 0.4) {
+  ctx.fillStyle = c;
+  for (let yy = y; yy < y + h; yy += stepY) {
+    const row = Math.round(yy / stepY);
+    const off = row % 2 ? stepX / 2 : 0;
+    for (let xx = x + off; xx < x + w; xx += stepX) ctx.fillRect(xx, yy, len, thick);
+  }
+}
+/** Падающая тень: тёмный полигон под выступающей деталью. */
+function shadowPoly(ctx: CanvasRenderingContext2D, pts: number[][], alpha = 0.2) {
+  ctx.fillStyle = `rgba(12,16,12,${alpha})`;
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath(); ctx.fill();
+}
+
 // Орнамент «қошқар мүйіз» (бараньи рога) — волнистая линия по кайме одежды
 function ornament(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, amp: number, c: string) {
   ctx.strokeStyle = c; ctx.lineWidth = 0.5;
@@ -1612,6 +1635,7 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
         dark ? '#241a12' : '#2f2115');
       pxu(ctx, lx - 1.5 + ph * 0.9, y + 1.2, 3.8, 0.7, '#1c140d');             // подошва
       pxu(ctx, lx - 1.4 + ph * 0.9, y - 1.6, 2.8, 0.6, L('#4a3520'));          // рант голенища
+      pxu(ctx, lx + 1.1 + ph * 0.9, y - 1.2, 0.4, 2.2, D('#2f2115'));          // задний шов
     }
   }
 
@@ -1707,6 +1731,9 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   pxu(ctx, x - 0.9, y - 4.9, 1.8, 1.9, '#c9a05c');                            // пряжка
   for (let i = -1; i <= 1; i++) pxu(ctx, x + i * 2.6 - 0.5, y - 4.7, 1, 1, '#c9a05c'); // бляхи
   ornament(ctx, x - 4.4, y - 2.8, x + 4.4, y - 2.8, 0.28, isVill ? '#f6d47c' : t.trim); // қошқар мүйіз по подолу
+  if (!armored) tex(ctx, x - 4.4, y - 10.2, 8.8, 7.6, D(robeC), 2.4, 2.6, 1.3);   // фактура ткани (1.0.142)
+  // тень, которую подол бросает на шалбар
+  shadowPoly(ctx, [[x - 4.6, y - 2.4], [x + 4.6, y - 2.4], [x + 4.2, y - 1.2], [x - 4.2, y - 1.2]], 0.16);
   if (isVill) {
     poly(ctx, [[x - 4.4, y - 10.6], [x + 4.4, y - 10.6], [x + 4.4, y - 8.6], [x - 4.4, y - 8.6]], t.tunic); // накидка рода
     ornament(ctx, x - 4.2, y - 9, x + 4.2, y - 9, 0.22, '#f6d47c');
@@ -1730,9 +1757,16 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   lnu(ctx, shx, shy, elx, ely, 2.1, robeC);
   lnu(ctx, elx, ely, hdx, hdy, 1.8, robeC);
   pxu(ctx, shx - 0.6, shy, 0.7, 3.6, L(robeC));
-  cxu(ctx, hdx, hdy, 1.2, SKIN);
+  // кисть: ладонь и три пальца (1.0.142) — на размере «шарик» читался как культя
+  cxu(ctx, hdx, hdy, 1.1, SKIN);
+  pxu(ctx, hdx - 0.9, hdy - 0.2, 1.6, 0.5, SKIN);
+  pxu(ctx, hdx - 0.9, hdy + 0.5, 1.7, 0.5, SKIN);
+  pxu(ctx, hdx - 0.8, hdy + 1.1, 1.5, 0.45, D(SKIN));
+  pxu(ctx, hdx + f * 0.9, hdy - 0.6, 0.9, 0.5, SKIN);                      // большой палец
 
   // ── ГОЛОВА: смуглая, скулы, эпикантус, усы ──
+  // тень от головы на плечи и ворот
+  shadowPoly(ctx, [[x - 4.2, y - 11.2], [x + 4.2, y - 11.2], [x + 3.8, y - 9.8], [x - 3.8, y - 9.8]], 0.22);
   pxu(ctx, x - 0.9, y - 11, 1.8, 1.5, D(SKIN));                               // шея
   ell(ctx, x, y - 14.6, 3, 3.75, SKIN, SKIN_D);
   pxu(ctx, x + f * 1.6, y - 14.6, 1.4, 5.4, SKIN_D);                           // скула в тени
@@ -1813,6 +1847,11 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
     pxu(ctx, x + f * (ext - 1.4), y - 12.6, 2.8, 1.6, '#b91c1c');              // кисть
     pxu(ctx, x + f * (ext - 1.4), y - 11.6, 2.8, 0.8, D('#b91c1c'));
   } else {
+    // қынап — ножны на поясе, с наконечником и подвесом
+    pxu(ctx, x - f * 3, y - 6, 4.6, 1.8, '#5c3618');
+    pxu(ctx, x - f * 3, y - 6, 4.6, 0.5, L('#6b4423'));
+    pxu(ctx, x - f * 3.4, y - 4.4, 1.6, 1.2, '#8a6a2a');
+    pxu(ctx, x - f * 1.4, y - 7.4, 0.6, 1.6, '#3f2a15');                    // подвес к белбеу
     // қылыш: изогнутая сабля — клинок дугой, елмань, гарда, рукоять
     const a = 0.9 - atk * 2.2;
     const hiltX = hdx, hiltY = hdy;
@@ -1879,6 +1918,8 @@ function drawHorse(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw
   pxu(ctx, x + f * 5.5, y - 16, 0.6, 3.6, D(body));
   pxu(ctx, x - 7, y - 20.4, 6, 0.5, L(body));
   pxu(ctx, x - 1, y - 19.4, 7, 0.5, L(body));
+  tex(ctx, x - 10, y - 20.5, 20, 8, D(body), 3.2, 3.4, 1.6, 0.35);            // шерсть (1.0.142)
+  tex(ctx, x + f * 3, y - 19, 7, 6, L(body), 3.6, 3.6, 1.2, 0.3);
 
   // ── ШЕЯ: короткая и мясистая (у степной лошади, не «лебяжья») ──
   polyG(ctx, [[x + f * 4, y - 20], [x + f * 9, y - 24], [x + f * 12.5, y - 22.5], [x + f * 7.5, y - 15.5]],
@@ -1916,11 +1957,13 @@ function drawHorse(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw
   pxu(ctx, x - 6, y - 22, 11.5, 1.4, teamD);
   ornament(ctx, x - 5.6, y - 15, x + 5.6, y - 15, 0.35, teamT);                 // орнамент по краю попоны
   pxu(ctx, x - 5, y - 12.6, 10, 1.4, '#2b1d12');                                // подпруга
+  for (let i = 0; i < 7; i++) pxu(ctx, x - 5.4 + i * 1.7, y - 13.4, 0.6, 1.6, teamT); // бахрома по краю попоны
   // седло с высокой передней лукой
   polyG(ctx, [[x - 3.6, y - 21.6], [x + 3.6, y - 21.6], [x + 3.2, y - 18], [x - 3.2, y - 18]], '#7a4a22', '#4a2c14');
   poly(ctx, [[x - f * 3.4, y - 21.6], [x - f * 1.4, y - 21.6], [x - f * 1.8, y - 25], [x - f * 3.8, y - 24.4]], '#4a2c14'); // передняя лукa
   poly(ctx, [[x + f * 2.6, y - 21.6], [x + f * 4, y - 21.6], [x + f * 3.6, y - 23.8], [x + f * 2.4, y - 23.6]], '#4a2c14'); // задняя лука
   pxu(ctx, x - 3.6, y - 21.6, 7.2, 0.8, L('#8a5a2a'));
+  shadowPoly(ctx, [[x - 6, y - 18.2], [x + 6, y - 18.2], [x + 5.6, y - 16.8], [x - 5.6, y - 16.8]], 0.18); // тень под седлом
   pxu(ctx, x + f * 5.6, y - 14.4, 2.6, 1.2, '#3f2a15');                         // стремя
   pxu(ctx, x + f * 5.6, y - 13.4, 2.6, 0.6, '#6b5a3a');
 }
