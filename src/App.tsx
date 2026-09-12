@@ -1036,7 +1036,7 @@ export default function App() {
       {/* ===== СЛУЧАЙНОЕ СОБЫТИЕ СТЕПИ (выбор реакции, Civ-стиль) ===== */}
       {hud?.event && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-5">
+          <div className="max-h-[88dvh] overflow-y-auto scroll-thin kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-5">
             <div className="mb-1 flex items-center gap-2.5">
               <Ico name={hud.event.icon} className="h-9 w-9 text-amber-200" />
               <div className="font-display text-lg font-black tracking-wide text-amber-200"><RT t={hud.event.title} /></div>
@@ -1059,7 +1059,7 @@ export default function App() {
       {showGreats && hud && (
         <div className="absolute inset-0 z-[61] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={() => setShowGreats(false)}>
-          <div className="kz-corners panel-iron w-full max-w-2xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+          <div className="max-h-[88dvh] overflow-y-auto scroll-thin kz-corners panel-iron w-full max-w-2xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
               <div className="font-display text-lg font-black tracking-wide text-amber-200"><Ico name="sparkle" /> ВЕЛИКИЕ ЛЮДИ СТЕПИ</div>
               <button onClick={() => setShowGreats(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10"><Ico name="cross" /></button>
@@ -1103,7 +1103,7 @@ export default function App() {
       {showYasa && hud && (
         <div className="absolute inset-0 z-[61] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={() => setShowYasa(false)}>
-          <div className="kz-corners panel-iron w-full max-w-xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+          <div className="max-h-[88dvh] overflow-y-auto scroll-thin kz-corners panel-iron w-full max-w-xl rounded-3xl p-5" onClick={e => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
               <div className="font-display text-lg font-black tracking-wide text-amber-200"><Ico name="scroll" /> ЯСА ХАНСТВА</div>
               <button onClick={() => setShowYasa(false)} className="rounded-lg px-2 py-0.5 text-slate-400 hover:bg-white/10"><Ico name="cross" /></button>
@@ -1135,7 +1135,7 @@ export default function App() {
       {/* ===== ИТОГИ ЭПОХИ ===== */}
       {hud?.ageReport && (
         <div className="absolute inset-0 z-[62] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-5">
+          <div className="max-h-[88dvh] overflow-y-auto scroll-thin kz-corners panel-iron anim-banner w-full max-w-lg rounded-3xl p-5">
             <div className="mb-3 text-center">
               <div className="text-[11px] font-black tracking-[0.2em] text-slate-400">ЭПОХА ЗАВЕРШЕНА</div>
               <div className="font-display mt-1 flex items-center justify-center gap-2 text-lg font-black text-amber-200">
@@ -1319,7 +1319,7 @@ function IconBtn({ children, onClick, label }: { children: React.ReactNode; onCl
 }
 function MiniBtn({ children, onClick, active, onContextMenu, title }: { children: React.ReactNode; onClick: () => unknown; active?: boolean; onContextMenu?: (e: React.MouseEvent) => void; title?: string }) {
   return (
-    <button title={title} onClick={onClick} onContextMenu={onContextMenu} className={`btn-iron flex min-h-[38px] items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold text-slate-200 sm:min-h-0 ${active ? 'active text-amber-200' : ''}`}>
+    <button title={title} onClick={onClick} onContextMenu={onContextMenu} className={`btn-iron flex min-h-[42px] items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-[12px] font-bold text-slate-200 sm:min-h-0 sm:text-[11px] ${active ? 'active text-amber-200' : ''}`}>
       {children}
     </button>
   );
@@ -1355,11 +1355,11 @@ function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: {
     <button
       onClick={onClick}
       title={tip ? plainRich(tip) : undefined}
-      className={`relative flex w-[72px] shrink-0 flex-col items-center rounded-xl border px-1 py-1.5 transition active:scale-95 ${active ? 'border-amber-300 bg-amber-400/20' : ok && !lock ? 'btn-iron hover:border-amber-300/50' : 'border-white/5 bg-black/40 opacity-45'}`}
+      className={`relative flex w-[76px] shrink-0 flex-col items-center rounded-xl border px-1 py-2 transition active:scale-95 sm:w-[72px] sm:py-1.5 ${active ? 'border-amber-300 bg-amber-400/20' : ok && !lock ? 'btn-iron hover:border-amber-300/50' : 'border-white/5 bg-black/40 opacity-45'}`}
     >
       <Ico name={lock ? 'lock' : icon} className="h-6 w-6" />
-      <span className="mt-0.5 text-[10px] font-black leading-none text-slate-100">{label}</span>
-      <span className="mt-0.5 flex items-center justify-center gap-0.5 text-[8.5px] font-bold leading-none text-slate-400"><RT t={costStr(cost)} /></span>
+      <span className="mt-0.5 text-[11px] font-black leading-none text-slate-100 sm:text-[10px]">{label}</span>
+      <span className="mt-0.5 flex items-center justify-center gap-0.5 text-[10px] font-bold leading-none text-slate-400 sm:text-[8.5px]"><RT t={costStr(cost)} /></span>
       <span className="absolute right-1 top-1 rounded bg-black/60 px-1 text-[8px] font-black text-amber-200/90">{key_}</span>
       {!ok && !lock && <span className="absolute inset-x-2 bottom-6 h-0.5 rounded bg-red-500/70" />}
     </button>
@@ -1368,7 +1368,7 @@ function TrainBtn({ label, icon, key_, cost, ok, onClick, active, lock, tip }: {
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-6 text-center">{children}</div>
+      <div className="max-h-[88dvh] overflow-y-auto scroll-thin kz-corners panel-iron anim-banner w-full max-w-md rounded-3xl p-6 text-center">{children}</div>
     </div>
   );
 }
@@ -1377,7 +1377,7 @@ function DockTab({ active, onClick, icon, label }: { active: boolean; onClick: (
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-black tracking-widest transition active:scale-95 ${active ? 'btn-gold text-amber-950' : 'btn-iron text-slate-300 hover:text-white'}`}
+      className={`flex min-h-[40px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-black tracking-widest transition active:scale-95 sm:min-h-0 ${active ? 'btn-gold text-amber-950' : 'btn-iron text-slate-300 hover:text-white'}`}
     >
       {icon}{label}
     </button>
@@ -2275,7 +2275,7 @@ function ToyModal({ onClose, act }: { onClose: () => void; act: (kind: 'baiga' |
   };
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 p-4" onClick={onClose}>
-      <div className="kz-corners panel-iron w-full max-w-md rounded-3xl p-5" onClick={e => e.stopPropagation()}>
+      <div className="max-h-[88dvh] overflow-y-auto scroll-thin kz-corners panel-iron w-full max-w-md rounded-3xl p-5" onClick={e => e.stopPropagation()}>
         <div className="mb-3 text-center font-display text-xl font-black tracking-wide text-amber-200">ТОЙ! <span className="text-[11px] text-slate-400">праздник между волнами</span></div>
         {tab === 'pick' && (
           <div className="grid gap-2">
