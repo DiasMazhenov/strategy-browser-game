@@ -1266,10 +1266,18 @@ function cx(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, c: s
 // выводе — края становятся гладкими, а число деталей几乎 перестаёт влиять на
 // стоимость кадра: платим один раз на каждую комбинацию «юнит · команда ·
 // поворот · фаза», а не на каждого юнита в каждом тике.
-// во сколько раз выше разрешение черновика. На приближении кадр и так большой,
-// поэтому запас уменьшаем — иначе кэш съедает десятки мегабайт.
-const ssFor = (zoom: number) => (zoom >= 1.75 ? 1.25 : zoom >= 1.25 ? 1.5 : 2);
-const UUB = 1;                      // шаг сетки для юнитов: 1 — максимальная детализация
+// ── АРТ-МАСШТАБ (1.0.140) ───────────────────────────────────────────────────
+// Настоящие спрайты нарисованы крупно (87×150, 127×150) и только потом
+// уменьшаются до 46–60 пикселей — оттого в них и читается материал. Процедурный
+// юнит рисовался сразу в боевой размер (~34), и это была главная причина
+// «детского рисунка»: на таком размере не помещается ни кисть, ни черта лица.
+// Теперь кадр собирается в ART раз крупнее и уменьшается при выводе — как у
+// художника, который рисует в три-четыре раза больше экранного.
+// На приближении кадр и так большой, поэтому запас снижаем (память кэша).
+// ×4 на обычном обзоре (юнит ~34 единицы → черновик 136 пикселей, как у
+// настоящих спрайтов 87×150), ×3 и ×2 на приближении, где кадр и так крупный.
+const artFor = (zoom: number) => (zoom >= 1.75 ? 2 : zoom >= 1.25 ? 3 : 4);
+let UUB = 1 / 3;                    // шаг сетки: один пиксель черновика (ставится на время отрисовки кадра)
 const PROC = new Map<string, { cv: HTMLCanvasElement; w: number; h: number; ox: number; oy: number }>();
 /** Сколько кадров в кэше (для тестов и диагностики). */
 export function procCacheSize() { return PROC.size; }
@@ -1305,15 +1313,18 @@ interface ProcBox { w: number; h: number; ox: number; oy: number }
 function procFrame(key: string, box: ProcBox, zoom: number, draw: (c: CanvasRenderingContext2D) => void) {
   const hit = PROC.get(key);
   if (hit) return hit;
-  const SS = ssFor(zoom);
+  const A = artFor(zoom);
   const cv = document.createElement('canvas');
-  cv.width = Math.max(1, Math.ceil(box.w * SS));
-  cv.height = Math.max(1, Math.ceil(box.h * SS));
+  cv.width = Math.max(1, Math.ceil(box.w * A));
+  cv.height = Math.max(1, Math.ceil(box.h * A));
   const c = cv.getContext('2d')!;
-  c.scale(SS, SS);
+  c.scale(A, A);
   c.translate(box.ox, box.oy);
   c.lineJoin = 'round'; c.lineCap = 'round';
+  const keepUUB = UUB;
+  UUB = 1 / A;                       // примитивы теперь кладут пиксель черновика
   draw(c);
+  UUB = keepUUB;
 
   // ── КОНТУР (1.0.139) ──
   // Мелкие детали на фоне степи сливались: брал силуэт кадра по альфе, красил
@@ -1332,11 +1343,11 @@ function procFrame(key: string, box: ProcBox, zoom: number, draw: (c: CanvasRend
     out = document.createElement('canvas');
     out.width = cv.width; out.height = cv.height;
     const oc = out.getContext('2d')!;
-    const d = Math.max(1, Math.round(SS * 0.8));
+    const d = 1;
     oc.drawImage(mask, d, 0); oc.drawImage(mask, -d, 0);
     oc.drawImage(mask, 0, d); oc.drawImage(mask, 0, -d);
     // диагонали — чтобы обводка не рвалась на скосах
-    const dd = Math.max(1, Math.round(d * 0.7));
+    const dd = 1;
     oc.drawImage(mask, dd, dd); oc.drawImage(mask, -dd, dd);
     oc.drawImage(mask, dd, -dd); oc.drawImage(mask, -dd, -dd);
     oc.drawImage(cv, 0, 0);
@@ -1409,7 +1420,7 @@ function drawProcUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: numbe
   // Защита памяти. Комбинаций много (юнит × команда × поворот × фаза × зум),
   // а каждый кадр — отдельный канвас: держим кэш в пределах пары сотен и
   // выбрасываем самые старые (Map помнит порядок вставки).
-  if (PROC.size > 260) {
+  if (PROC.size > 180) {
     let drop = Math.floor(PROC.size * 0.4);
     for (const k of PROC.keys()) { if (drop-- <= 0) break; PROC.delete(k); }
   }
@@ -1503,35 +1514,11 @@ export function drawPixelUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, i
 }
 
 // ── ноги пешего юнита ──
-function drawLegs(ctx: CanvasRenderingContext2D, x: number, y: number, sw: number, col: string, step = 6) {
-  // ноги с объёмом: голень в тени, сапог темнее штанины (1.0.139)
-  const sh = sw * step;
-  pxu(ctx, x - 4 + sh * 0.4, y - 9, 3, 11, col);
-  pxu(ctx, x + 1 - sh * 0.4, y - 9, 3, 11, D(col));
-  pxu(ctx, x - 4 + sh * 0.4, y - 9, 1, 11, L(col));
-  // сапоги
-  pxu(ctx, x - 4 + sh * 0.4, y - 2, 3, 4, '#2b1d12');
-  pxu(ctx, x + 1 - sh * 0.4, y - 2, 3, 4, '#1f150c');
-  // ступни с шагом
-  pxu(ctx, x - 5 + sh, y, 5, 3, '#231a12');
-  pxu(ctx, x + 1 - sh, y, 5, 3, '#1a1209');
-}
-
-/** Лицо: белки, зрачки, брови, нос, усы. Мелко, но именно это превращает
- *  «цилиндр с точкой» в лицо. 1.0.139 */
-function drawFace(ctx: CanvasRenderingContext2D, x: number, y: number, f: number, beard: boolean) {
-  pxu(ctx, x + f * 1, y - 21, 2.5, 2, '#f8fafc');          // белок ближнего глаза
-  pxu(ctx, x + f * 2, y - 21, 1.5, 2, '#241a10');          // зрачок
-  pxu(ctx, x - f * 2, y - 21, 2, 2, '#e8eef2');            // белок дальнего глаза
-  pxu(ctx, x - f * 1.2, y - 21, 1.5, 2, '#3b2412');
-  pxu(ctx, x + f * 1, y - 23, 3, 1, '#4a3115');            // брови
-  pxu(ctx, x - f * 2, y - 23, 2.5, 1, '#3d2712');
-  pxu(ctx, x + f * 3, y - 19, 1.5, 2, SKIN_D);             // нос
-  pxu(ctx, x + f * 0.5, y - 17, 5, 1.5, '#5b3a1c');        // усы
-  if (beard) pxu(ctx, x + f * 0.5, y - 15, 5, 3, '#4a3115'); // борода
-}
-
 // ── гуманоид: крестьянин / ополченец / копейщик / лучник / монах ──
+// Пропорции 1.0.140: рост 34 единицы при голове 6 (было 14) — то есть шесть
+// голов на рост вместо двух с половиной. Раньше голова занимала чуть не треть
+// фигуры, отчего юнит выглядел ребёнком. Высота силуэта не изменилась, поэтому
+// тень, попадание и посадка на тайл считаются по-прежнему.
 function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw: number, atk: number, _time: number, t: typeof TEAM.player) {
   const f = u.face;
   const isMonk = u.key === 'monk';
@@ -1539,205 +1526,257 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   const isVill = u.key === 'villager';
   const isArch = u.key === 'archer';
   const isSpear = u.key === 'spearman';
+  const step = sw * 2.4;                       // размах шага
+  const swing = atk * 4;                       // вынос руки в ударе
 
-  // ── НОГИ ──
+  // ── НОГИ: бедро → колено → голень → сапог, ноги в противофазе ──
+  const legC = isArch ? '#4a4030' : isVill ? '#5c4033' : '#3a3a3a';
+  const legD = D(legC);
   if (isMonk) {
-    // роба скрывает ноги
-    pxu(ctx, x - 3, y - 4, 3, 8, '#6b5230');
-    pxu(ctx, x + 1, y - 4, 3, 8, D('#6b5230'));
-    pxu(ctx, x - 4 + sw * 4, y, 4, 3, '#3a2d1c');
-    pxu(ctx, x + 1 - sw * 4, y, 4, 3, '#2a2013');
+    // роба до земли: видны только ступни
+    pxu(ctx, x - 2 + sw * 2, y - 1, 3, 2.5, '#3a2d1c');
+    pxu(ctx, x - 1 - sw * 2, y - 1, 3, 2.5, '#2a2013');
   } else {
-    drawLegs(ctx, x, y, sw, isArch ? '#4a4030' : isVill ? '#5c4033' : '#3a3a3a');
+    for (const [side, ph] of [[-1, step], [1, -step]] as [number, number][]) {
+      const lx = x + side * 2.3;
+      const dark = side < 0;                   // дальняя нога в тени
+      pxu(ctx, lx - 1.3, y - 10, 2.6, 5.5, dark ? legD : legC);       // бедро
+      pxu(ctx, lx + ph * 0.45 - 1.1, y - 4.8, 2.2, 5, dark ? legD : legC); // голень
+      pxu(ctx, lx - 1.2, y - 10, 1, 10, L(legC));                     // свет по передней кромке
+      pxu(ctx, lx + ph * 0.9 - 1.5, y - 0.5, 3, 3.2, dark ? '#241a12' : '#2f2115'); // сапог
+      pxu(ctx, lx + ph * 0.9 - 1.5, y + 2.2, 3.4, 1.2, '#1c140d');    // подошва
+      pxu(ctx, lx + ph * 0.9 - 1.5, y - 0.5, 3, 0.8, L('#3f2f1f'));   // рант
+    }
   }
 
   if (isMonk) {
-    // ИМАМ: длинный чапан-роба, белая чалма, посох с полумесяцем (не крест — казахи мусульмане)
+    // ИМАМ: длинный чапан до пят, белая чалма, посох с полумесяцем
     const robe = '#14b8a6', robeD = '#0f766e';
-    pxu(ctx, x - 9, y + 2, 18, 4, robeD);
-    pxu(ctx, x - 8, y - 12, 16, 14, robe);
-    pxu(ctx, x + f * 4, y - 12, 5, 14, D(robe));
-    pxu(ctx, x - f * 7, y - 12, 3, 14, L(robe));
-    pxu(ctx, x - 8, y - 14, 16, 4, robeD);
-    pxu(ctx, x - 7, y - 5, 14, 2, D(robeD));
-    // лицо и белая чалма
-    cxu(ctx, x, y - 19, 7, SKIN);
-    cxu(ctx, x + f * 2.5, y - 19, 4.5, SKIN_D);
-    drawFace(ctx, x, y, f, true);
-    cxu(ctx, x, y - 23, 8, '#f8fafc');
-    pxu(ctx, x - 8, y - 24, 16, 3, '#e2e8f0');
-    cxu(ctx, x + f * 3, y - 23, 5, D('#dbe2ea'));
+    pxu(ctx, x - 5.5, y + 1.5, 11, 2, D(robeD));                      // подол
+    pxu(ctx, x - 5, y - 10.5, 10, 12, robe);
+    pxu(ctx, x + f * 2.6, y - 10.5, 3, 12, D(robe));
+    pxu(ctx, x - f * 4.4, y - 10.5, 2, 12, L(robe));
+    pxu(ctx, x - 5, y - 4.5, 10, 1.2, D(robeD));                      // пояс
+    pxu(ctx, x - 5, y - 10.5, 10, 1.5, robeD);                        // ворот
+    pxu(ctx, x - 0.6, y - 10.5, 1.2, 6, D(robe));                     // запах чапана
+    // руки
+    pxu(ctx, x - f * 5, y - 9 + step * 0.5, 2.2, 6, D(robe));
+    pxu(ctx, x + f * 4.6, y - 9 - swing, 2.2, 6, robe);
+    pxu(ctx, x + f * 4.6, y - 3.4 - swing, 2.4, 2.2, SKIN);           // кисть
+    // голова: овал, а не шар
+    cxu(ctx, x, y - 14.5, 3.2, SKIN);
+    cxu(ctx, x + f * 1.2, y - 14.5, 2.2, SKIN_D);
+    pxu(ctx, x + f * 0.6, y - 15.4, 1.2, 1.2, '#241a10');             // глаза
+    pxu(ctx, x - f * 1.4, y - 15.4, 1, 1.2, '#3b2412');
+    pxu(ctx, x + f * 0.4, y - 13.6, 2, 1, '#5b3a1c');                 // усы
+    pxu(ctx, x + f * 0.4, y - 12.6, 2.2, 2.4, '#4a3115');             // борода
+    // чалма
+    cxu(ctx, x, y - 17.2, 3.6, '#f8fafc');
+    cxu(ctx, x + f * 1.4, y - 17.2, 2.4, D('#e2e8f0'));
+    pxu(ctx, x - 4, y - 18, 8, 1.6, '#e2e8f0');
+    pxu(ctx, x - f * 2.4, y - 16, 1.6, 3, D('#dbe2ea'));
     // посох с полумесяцем
-    const sx2 = x + f * 10;
-    lnu(ctx, sx2, y + 2, sx2, y - 22, 2.5, '#8a6d3b');
-    cxu(ctx, sx2, y - 25, 4, '#fde68a');
-    cxu(ctx, sx2 + f * 1.6, y - 25, 3.2, '#14b8a6');
+    const sx2 = x + f * 6.5;
+    lnu(ctx, sx2, y + 2, sx2, y - 17, 1.4, '#8a6d3b');
+    lnu(ctx, sx2 - 0.4, y + 2, sx2 - 0.4, y - 17, 0.4, L('#a7884f'));
+    cxu(ctx, sx2, y - 19, 2.2, '#fde68a');
+    cxu(ctx, sx2 + f * 0.9, y - 19, 1.7, '#14b8a6');
     if (atk > 0) {
       ctx.globalAlpha = atk * 0.8;
-      cxu(ctx, sx2, y - 20, 7, '#fde68a');
-      cxu(ctx, x, y - 14, 10, '#86efac');
+      cxu(ctx, sx2, y - 15, 4, '#fde68a');
+      cxu(ctx, x, y - 9, 6, '#86efac');
       ctx.globalAlpha = 1;
     }
     return;
   }
 
   if (isTrader) {
-    // КӨПЕС: полосатый халат-чапан, тюбетейка, тюк товара за спиной
+    // КӨПЕС: полосатый халат, тюбетейка, тюк за спиной
     const coat = '#7c3aed';
-    pxu(ctx, x - 7, y - 13, 14, 15, coat);
-    pxu(ctx, x + f * 4, y - 13, 4, 15, D(coat));
-    pxu(ctx, x - f * 6, y - 13, 3, 15, L(coat));
-    pxu(ctx, x - 7, y - 13, 14, 3, t.tunic);
-    pxu(ctx, x - 7, y - 8, 14, 2, '#a78bfa');
-    pxu(ctx, x - 7, y - 4, 14, 3, '#4c1d95');
-    // тюк с товаром на спине
-    pxu(ctx, x - f * 10, y - 18, 8, 10, '#a16207');
-    pxu(ctx, x - f * 10, y - 16, 8, 2, '#facc15');
-    pxu(ctx, x - f * 10, y - 18, 2, 10, D('#a16207'));
-    // голова + тюбетейка
-    cxu(ctx, x, y - 20, 7, SKIN);
-    cxu(ctx, x + f * 2.5, y - 20, 4.5, SKIN_D);
-    drawFace(ctx, x, y, f, true);
-    cxu(ctx, x, y - 24, 7, '#1e3a8a');
-    pxu(ctx, x - 7, y - 23, 14, 2, '#fbbf24');
-    cxu(ctx, x + f * 3, y - 24, 4.5, D('#1e3a8a'));
-    // кошель с монетами в руке
-    const px2 = x + f * 9;
-    pxu(ctx, px2 - 2, y - 9, 5, 6, '#b45309');
-    pxu(ctx, px2 - 1, y - 10, 3, 2, '#fde047');
+    pxu(ctx, x - 4.6, y - 10.5, 9.2, 11, coat);
+    pxu(ctx, x + f * 2.4, y - 10.5, 2.8, 11, D(coat));
+    pxu(ctx, x - f * 4, y - 10.5, 1.8, 11, L(coat));
+    pxu(ctx, x - 4.6, y - 10.5, 9.2, 2, t.tunic);                     // накидка
+    pxu(ctx, x - 4.6, y - 6.5, 9.2, 1.2, '#a78bfa');                  // полоса
+    pxu(ctx, x - 4.6, y - 2.6, 9.2, 1.6, '#4c1d95');                  // подол
+    // тюк за спиной
+    pxu(ctx, x - f * 6.5, y - 13, 5, 6.5, '#a16207');
+    pxu(ctx, x - f * 6.5, y - 11.5, 5, 1.2, '#facc15');
+    pxu(ctx, x - f * 6.5, y - 13, 1.4, 6.5, L('#b8710d'));
+    // руки
+    pxu(ctx, x - f * 4.8, y - 9 + step * 0.5, 2.2, 6, D(coat));
+    pxu(ctx, x + f * 4.4, y - 9, 2.2, 6, coat);
+    pxu(ctx, x + f * 4.4, y - 3.4, 2.4, 2.2, SKIN);
+    // голова
+    cxu(ctx, x, y - 14.5, 3.2, SKIN);
+    cxu(ctx, x + f * 1.2, y - 14.5, 2.2, SKIN_D);
+    pxu(ctx, x + f * 0.6, y - 15.4, 1.2, 1.2, '#241a10');
+    pxu(ctx, x - f * 1.4, y - 15.4, 1, 1.2, '#3b2412');
+    pxu(ctx, x + f * 0.4, y - 13.6, 2, 1, '#5b3a1c');
+    cxu(ctx, x, y - 17.2, 3.2, '#1e3a8a');                            // тюбетейка
+    cxu(ctx, x + f * 1.4, y - 17.2, 2, D('#1e3a8a'));
+    pxu(ctx, x - 3.4, y - 16.6, 6.8, 1.2, '#fbbf24');
+    // кошель в руке
+    pxu(ctx, x + f * 5.6, y - 4.4, 3, 3.4, '#b45309');
+    pxu(ctx, x + f * 5.6, y - 5, 2, 1.2, '#fde047');
     return;
   }
 
-  // ── КОРПУС: трапецией, с объёмом, складками и поясом (1.0.139) ──
+  // ── КОРПУС ──
   const robeC = isVill ? '#b07520'
     : isArch ? (u.owner === 'player' ? '#15803d' : '#9a3412')
       : isSpear ? t.tunicD : t.tunic;
-  const topY = y - 13;
-  // задняя рука — за корпусом, идёт в противофазе шагу
-  const armSw = -sw * 2.5;
-  pxu(ctx, x - f * 8, topY + 2 + armSw, 3, 9, D(robeC));
-  pxu(ctx, x - 7, topY, 14, 15, robeC);
-  pxu(ctx, x + f * 4, topY, 4, 15, D(robeC));             // тень со спины
-  pxu(ctx, x - f * 6, topY, 3, 15, L(robeC));             // блик по груди
-  pxu(ctx, x - 7, y - 5, 14, 2, D(robeC));                // подол
-  pxu(ctx, x - 1, y - 6, 3, 3, '#f6d47c');                // пряжка пояса
+  const armor = !isVill && !isArch;
+  // дальняя рука — за корпусом, в противофазе шагу
+  pxu(ctx, x - f * 5, y - 10 + step * 0.6, 2.2, 6.5, D(robeC));
+  pxu(ctx, x - f * 5, y - 4, 2.2, 2, D(SKIN));
+  // торс: плечи шире талии
+  pxu(ctx, x - 4.6, y - 10.5, 9.2, 7, robeC);                         // грудь
+  pxu(ctx, x - 3.8, y - 3.8, 7.6, 3.4, robeC);                        // живот
+  pxu(ctx, x + f * 2.4, y - 10.5, 2.6, 10, D(robeC));                 // тень со спины
+  pxu(ctx, x - f * 4.2, y - 10.5, 1.8, 10, L(robeC));                 // блик по груди
+  pxu(ctx, x - 4, y - 4.6, 8, 1.2, D(robeC));                         // пояс
+  pxu(ctx, x - 0.9, y - 5, 1.8, 1.8, '#f6d47c');                      // пряжка
+  if (armor) {
+    // чешуя: ряды пластин со светлым верхом и тёмным низом
+    for (let ry = 0; ry < 4; ry++) {
+      for (let cxi = -2; cxi <= 2; cxi++) {
+        const cxx = x + cxi * 1.8, cyy = y - 10 + ry * 1.7;
+        pxu(ctx, cxx - 0.8, cyy, 1.6, 1.5, ry % 2 ? D(robeC) : robeC);
+        pxu(ctx, cxx - 0.8, cyy, 1.6, 0.4, L(robeC));
+        pxu(ctx, cxx - 0.8, cyy + 1.2, 1.6, 0.3, D(D(robeC)));
+      }
+    }
+    pxu(ctx, x - 4.4, y - 10.8, 8.8, 1.4, '#e2e8f0');                 // ворот-ожерелье
+  } else {
+    // складки ткани
+    pxu(ctx, x - 2.6, y - 9.5, 0.8, 9, D(robeC));
+    pxu(ctx, x + 1.2, y - 9, 0.8, 8.4, D(robeC));
+    pxu(ctx, x - f * 0.4, y - 10.5, 1.2, 10, L(robeC));
+  }
   if (isVill) {
-    pxu(ctx, x - 2, y - 4, 4, 3, '#f6d47c');
-    pxu(ctx, x - 7, topY, 14, 3, t.tunic);                // командная накидка
-    pxu(ctx, x + f * 4, topY, 4, 3, D(t.tunic));
+    pxu(ctx, x - 4.6, y - 10.5, 9.2, 2, t.tunic);                     // командная накидка
+    pxu(ctx, x + f * 2.4, y - 10.5, 2.6, 2, D(t.tunic));
+    pxu(ctx, x - 0.6, y - 10.5, 1.2, 5, D(t.tunic));                  // запах
   }
   if (isArch) {
-    // колчан со стрелами
-    pxu(ctx, x - f * 8, y - 16, 4, 11, '#5c3618');
-    pxu(ctx, x - f * 8, y - 16, 2, 11, L('#5c3618'));
-    pxu(ctx, x - f * 8, y - 12, 4, 2, D('#5c3618'));
+    // колчан со стрелами за спиной
+    pxu(ctx, x - f * 5.2, y - 12, 2.6, 6, '#5c3618');
+    pxu(ctx, x - f * 5.2, y - 12, 0.9, 6, L('#6b4423'));
+    for (let i = 0; i < 3; i++) pxu(ctx, x - f * (4.4 + i * 0.7), y - 13.6, 0.5, 2, '#d6c9a8');
   }
-  if (!isVill && !isArch) {
-    // наплечники с объёмом
-    cxu(ctx, x - 8, y - 12, 4, '#c7c7c7');
-    cxu(ctx, x + 8, y - 12, 4, '#c7c7c7');
-    cxu(ctx, x + f * 8, y - 11, 3, D('#a9a9a9'));
-    cxu(ctx, x - f * 8, y - 13, 2.5, L('#d8d8d8'));
-    pxu(ctx, x - 8, y - 2, 16, 3, '#4a3115');
-    pxu(ctx, x + f * 5, y - 2, 5, 3, D('#4a3115'));
+  if (armor) {
+    // наплечники
+    cxu(ctx, x - 5, y - 10.4, 2.4, '#c7c7c7');
+    cxu(ctx, x + 5, y - 10.4, 2.4, '#c7c7c7');
+    cxu(ctx, x + f * 5, y - 9.8, 1.8, D('#a9a9a9'));
+    cxu(ctx, x - f * 5, y - 10.8, 1.4, L('#d8d8d8'));
   }
-  // передняя рука: при ударе выносится вперёд и вверх
-  const reach = atk * 5;
-  pxu(ctx, x + f * 6, topY + 2 - reach, 3, 8, robeC);
-  pxu(ctx, x + f * 6, y - 5 - reach, 4, 3, SKIN);
+  // ближняя рука: плечо → локоть → кисть, при ударе выносится вперёд-вверх
+  const shx = x + f * 4.2, shy = y - 10.2 - swing * 0.5;
+  const elx = shx + f * (1 + swing * 0.6), ely = y - 6.5 - swing;
+  const hdx = elx + f * (0.8 + swing * 0.5), hdy = y - 3.6 - swing * 1.2;
+  lnu(ctx, shx, shy, elx, ely, 2.2, robeC);
+  lnu(ctx, elx, ely, hdx, hdy, 1.9, robeC);
+  pxu(ctx, shx - 0.7, shy, 0.7, 4, L(robeC));
+  cxu(ctx, hdx, hdy, 1.2, SKIN);
 
-  // ── ГОЛОВА ──
+  // ── ГОЛОВА: шея, овал, черты лица, убор ──
+  pxu(ctx, x - 0.8, y - 12.4, 1.6, 1.6, D(SKIN));                     // шея
+  cxu(ctx, x, y - 14.6, 3.1, SKIN);
+  cxu(ctx, x + f * 1.1, y - 14.6, 2.2, SKIN_D);                       // теневая сторона
+  pxu(ctx, x + f * 0.7, y - 15.4, 1.3, 1.3, '#f8fafc');               // белки
+  pxu(ctx, x - f * 1.5, y - 15.4, 1.1, 1.3, '#e8eef2');
+  pxu(ctx, x + f * 1.1, y - 15.3, 0.8, 1.3, '#241a10');               // зрачки
+  pxu(ctx, x - f * 1.1, y - 15.3, 0.7, 1.3, '#3b2412');
+  pxu(ctx, x + f * 0.6, y - 16.1, 1.5, 0.5, '#4a3115');               // брови
+  pxu(ctx, x + f * 1.9, y - 14.2, 0.6, 1.2, SKIN_D);                  // нос
+  pxu(ctx, x + f * 0.3, y - 13.5, 2, 0.9, '#5b3a1c');                 // усы
+  if (armor || isVill) pxu(ctx, x + f * 0.3, y - 12.6, 2.2, 1.8, '#4a3115'); // борода
+
   if (isVill) {
-    cxu(ctx, x, y - 20, 7, SKIN);
-    cxu(ctx, x + f * 2.5, y - 20, 4.5, SKIN_D);
-    drawFace(ctx, x, y, f, false);
-    // шляпа
-    cxu(ctx, x, y - 24, 7, '#6b3a10');
-    pxu(ctx, x - 9, y - 23, 18, 3, '#6b3a10');
-    pxu(ctx, x - 9, y - 21, 18, 1, D('#5a2f0c'));
-    cxu(ctx, x - f * 3, y - 25, 3, L('#7d4513'));
+    cxu(ctx, x, y - 17.2, 3.2, '#6b3a10');                            // войлочная шляпа
+    pxu(ctx, x - 5.2, y - 16.4, 10.4, 1.4, '#6b3a10');                // поля
+    pxu(ctx, x - 5.2, y - 15.4, 10.4, 0.6, D('#5a2f0c'));
+    cxu(ctx, x - f * 1.6, y - 17.8, 1.4, L('#7d4513'));
   } else if (isArch) {
-    // капюшон с остриём
     const hd = u.owner === 'player' ? '#0f6930' : '#7c2d12';
-    cxu(ctx, x, y - 20, 8, hd);
-    cxu(ctx, x + f * 3, y - 20, 5, D(hd));
-    pxu(ctx, x - f * 5 - 2, y - 27, 4, 6, hd);
-    cxu(ctx, x + f * 2, y - 18, 5, SKIN);
-    cxu(ctx, x + f * 3.5, y - 18, 3, SKIN_D);
-    pxu(ctx, x + f * 4, y - 19, 2, 2, '#2d1b0e');
-    pxu(ctx, x + f * 1, y - 17, 4, 1.5, '#5b3a1c');
+    cxu(ctx, x, y - 15, 3.5, hd);                                     // капюшон
+    cxu(ctx, x + f * 1.3, y - 15, 2.4, D(hd));
+    pxu(ctx, x - f * 2.4, y - 18.6, 2, 3.4, hd);                      // остриё
+    cxu(ctx, x + f * 1, y - 14.4, 2.4, SKIN);                         // лицо в тени капюшона
+    pxu(ctx, x + f * 1.6, y - 14.8, 1.2, 1.2, '#241a10');
+    pxu(ctx, x + f * 0.2, y - 13.4, 1.8, 0.8, '#5b3a1c');
   } else {
-    cxu(ctx, x, y - 20, 7, SKIN);
-    cxu(ctx, x + f * 2.5, y - 20, 4.5, SKIN_D);
-    drawFace(ctx, x, y, f, true);
-    // шлем
-    cxu(ctx, x, y - 22, 8, '#c0c0c0');
-    cxu(ctx, x + f * 3.5, y - 22, 4.5, D('#a3a3a3'));
-    pxu(ctx, x - 7, y - 24, 14, 3, '#8a8a8a');
-    pxu(ctx, x - 1, y - 25, 3, 7, '#a0a0a0'); // наносник
-    pxu(ctx, x - f * 3, y - 21, 2, 2, '#1c1917');
-    pxu(ctx, x + f * 2 - 1, y - 21, 2, 2, '#1c1917');
-    cxu(ctx, x - f * 3.5, y - 24, 2.5, L('#d5d5d5'));     // блик на metalе
-    // султан
-    pxu(ctx, x - 2, y - 31, 4, 4, t.plume);
-    pxu(ctx, x - f * 6, y - 29, 5, 3, t.plume);
+    cxu(ctx, x, y - 16.4, 3.4, '#c0c0c0');                            // шлем
+    cxu(ctx, x + f * 1.6, y - 16.4, 2.1, D('#a3a3a3'));
+    pxu(ctx, x - 3.6, y - 17.2, 7.2, 1.4, '#8a8a8a');                 // обод
+    pxu(ctx, x - 0.6, y - 17.6, 1.2, 3.6, '#a0a0a0');                 // наносник
+    pxu(ctx, x - f * 1.6, y - 15.4, 1, 1.2, '#1c1917');               // прорезь
+    pxu(ctx, x + f * 1, y - 15.4, 1, 1.2, '#1c1917');
+    cxu(ctx, x - f * 1.8, y - 17.6, 1.3, L('#d5d5d5'));               // блик metalа
+    pxu(ctx, x - 3.4, y - 15.2, 6.8, 0.8, D('#8a8a8a'));              // край шлема
+    pxu(ctx, x - 1.2, y - 20, 2.4, 2.6, t.plume);                     // султан
+    pxu(ctx, x - f * 3, y - 19.2, 3, 1.6, t.plume);
+    pxu(ctx, x - 1.2, y - 20, 1, 2.6, L(t.plume));
   }
 
   // груз на голове у крестьянина
   if (isVill && u.carry && u.carry.amt > 1) {
     const c = u.carry.type === 'wood' ? '#a16207' : u.carry.type === 'food' ? '#fb7185' : '#facc15';
-    pxu(ctx, x - 4, y - 32, 8, 5, c);
-    pxu(ctx, x + f * 2, y - 32, 3, 5, D(c));
+    pxu(ctx, x - 2.6, y - 21, 5.2, 3, c);
+    pxu(ctx, x + f * 1.4, y - 21, 1.8, 3, D(c));
+    pxu(ctx, x - 2.6, y - 21, 5.2, 0.6, L(c));
   }
 
   // ── ОРУЖИЕ ──
-  const hx = x + f * 8, hy = y - 10;
   if (isVill) {
-    // топор/мотыга: замах при работе
     const a = -0.4 + atk * 1.4;
-    const tx = hx + f * Math.cos(a) * 12, ty = hy + Math.sin(a) * 12 - 8;
-    lnu(ctx, hx, hy + 2, tx, ty, 3, '#78450f');
-    pxu(ctx, tx - 3, ty - 3, 6, 5, '#b8b8b8');
-    pxu(ctx, tx - 3, ty - 3, 2, 5, L('#c9c9c9'));
-    pxu(ctx, tx + f * 3, ty - 3, 2, 5, D('#8f8f8f'));
+    const tx = hdx + f * Math.cos(a) * 8, ty = hdy + Math.sin(a) * 8 - 3;
+    lnu(ctx, hdx, hdy + 1, tx, ty, 1.2, '#78450f');                   // рукоять
+    pxu(ctx, tx - 1.6, ty - 2, 3.2, 2.6, '#b8b8b8');                  // лезвие
+    pxu(ctx, tx - 1.6, ty - 2, 1, 2.6, L('#c9c9c9'));
+    pxu(ctx, tx + f * 1.2, ty - 2, 1, 2.6, D('#8f8f8f'));
   } else if (isArch) {
-    const bx = x + f * 12, by = y - 10;
-    // дуга лука
-    for (let i = 0; i <= 8; i++) {
-      const a = -1.3 + (i / 8) * 2.6;
-      pxu(ctx, bx + f * Math.cos(a) * 9, by + Math.sin(a) * 9, 2.5, 2.5, '#6b3a10');
+    const bx = x + f * 7, by = y - 6.5;
+    for (let i = 0; i <= 10; i++) {                                   // дуга лука
+      const a = -1.3 + (i / 10) * 2.6;
+      pxu(ctx, bx + f * Math.cos(a) * 5.5, by + Math.sin(a) * 5.5, 1.1, 1.1, '#6b3a10');
     }
-    // тетива (натянута при выстреле)
-    const pull = atk * 5;
-    lnu(ctx, bx + f * Math.cos(-1.3) * 9, by + Math.sin(-1.3) * 9, bx - f * pull, by, 1.5, '#fef3c7');
-    lnu(ctx, bx + f * Math.cos(1.3) * 9, by + Math.sin(1.3) * 9, bx - f * pull, by, 1.5, '#fef3c7');
-    // стрела
-    if (atk > 0.25) lnu(ctx, bx - f * pull, by, bx + f * 7, by, 2, '#8a6a3a');
+    const pull = atk * 3;
+    lnu(ctx, bx + f * Math.cos(-1.3) * 5.5, by + Math.sin(-1.3) * 5.5, bx - f * pull, by, 0.6, '#fef3c7');
+    lnu(ctx, bx + f * Math.cos(1.3) * 5.5, by + Math.sin(1.3) * 5.5, bx - f * pull, by, 0.6, '#fef3c7');
+    if (atk > 0.25) lnu(ctx, bx - f * pull, by, bx + f * 5, by, 0.9, '#8a6a3a');
   } else if (isSpear) {
-    // длинное копьё, укол при атаке
-    const ext = 18 + atk * 10;
-    lnu(ctx, x - f * 2, y - 4, x + f * ext, y - 22, 3, '#8a5a2a');
-    pxu(ctx, x + f * (ext + 2), y - 27, 3, 6, '#d6d3d1');
-    pxu(ctx, x + f * (ext + 2), y - 27, 1.5, 6, L('#e7e5e4'));
-    // большой щит
-    pxu(ctx, x - f * 16, y - 13, 7, 14, t.tunicD);
-    pxu(ctx, x - f * 16, y - 13, 7, 3, '#f6d47c');
-    pxu(ctx, x - f * 13, y - 8, 3, 3, '#f6d47c');
-    pxu(ctx, x - f * 16, y - 13, 2, 14, D(t.tunicD));
-  } else {
-    // меч ополченца: взмах
-    const a = 0.9 - atk * 2.2;
-    const tx = hx + f * Math.cos(a) * 15, ty = hy + Math.sin(a) * 15;
-    lnu(ctx, hx, hy + 2, tx, ty, 3.5, '#e8e8e8');
-    pxu(ctx, hx - 3, hy + 1, 7, 3, '#f6d47c');
+    const ext = 13 + atk * 7;
+    lnu(ctx, x - f * 1, y - 2, x + f * ext, y - 14, 1.1, '#8a5a2a');   // древко
+    lnu(ctx, x - f * 1, y - 2.5, x + f * ext, y - 14.5, 0.4, L('#a5743c'));
+    pxu(ctx, x + f * (ext + 1), y - 16.5, 1.4, 4, '#d6d3d1');          // наконечник
+    pxu(ctx, x + f * (ext + 1), y - 16.5, 0.6, 4, L('#e7e5e4'));
+    pxu(ctx, x + f * (ext - 1), y - 13, 1.6, 0.8, '#b45309');          // обмотка
     // щит
-    pxu(ctx, x - f * 15, y - 13, 7, 12, t.tunicD);
-    pxu(ctx, x - f * 15, y - 13, 7, 2.5, '#f6d47c');
-    pxu(ctx, x - f * 12, y - 8, 3, 3, '#f6d47c');
-    pxu(ctx, x - f * 15, y - 13, 2, 12, D(t.tunicD));
+    pxu(ctx, x - f * 8.5, y - 10, 2.2, 8, t.tunicD);
+    pxu(ctx, x - f * 8.5, y - 10, 2.2, 0.9, '#f6d47c');
+    pxu(ctx, x - f * 8.5, y - 10, 0.8, 8, D(t.tunicD));
+    cxu(ctx, x - f * 7.4, y - 6, 0.8, '#f6d47c');
+  } else {
+    const a = 0.9 - atk * 2.2;
+    const tx = hdx + f * Math.cos(a) * 9, ty = hdy + Math.sin(a) * 9;
+    lnu(ctx, hdx, hdy, tx, ty, 1.1, '#e8e8e8');                        // клинок
+    lnu(ctx, hdx, hdy - 0.5, tx, ty - 0.5, 0.4, L('#f6f6f6'));
+    pxu(ctx, hdx - 0.8, hdy - 1.6, 2.4, 0.8, '#f6d47c');               // гарда
+    pxu(ctx, hdx - 0.6, hdy - 0.8, 1.6, 2.2, '#5c3618');               // рукоять
+    pxu(ctx, x - f * 8, y - 9.5, 2.2, 7, t.tunicD);                    // щит
+    pxu(ctx, x - f * 8, y - 9.5, 2.2, 0.9, '#f6d47c');
+    pxu(ctx, x - f * 8, y - 9.5, 0.8, 7, D(t.tunicD));
+    cxu(ctx, x - f * 6.9, y - 6, 0.8, '#f6d47c');
   }
 }
 
+// ── КОНЬ (1.0.140) ──────────────────────────────────────────────────────────
+// Прежний конь был «круг с четырьмя палками»: корпус радиусом 12 при голове 6 —
+// жеребёнок, а не боевой конь. Теперь: холка 24 единицы, корпус вытянут (24×11),
+// голова 9 единиц, ноги — бедро, голень, копыто.
 function drawHorse(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw: number, _time: number) {
   const f = u.face;
   const blue = u.owner === 'player';
@@ -1746,382 +1785,456 @@ function drawHorse(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw
   const light = isCav ? (blue ? '#9a3412' : '#0e7490') : (blue ? '#5c2da0' : '#7f2222');
   const dark = isCav ? (blue ? '#5c1f0c' : '#0c4a5e') : (blue ? '#351666' : '#501010');
   const teamC = TEAM[u.owner].tunic, teamD = TEAM[u.owner].tunicD;
+  const lp = sw * 3.2;
 
-  // ── НОГИ: бедро → голень → копыто, диагональные пары идут в противофазе ──
-  const lp = sw * 5;
-  const legs: [number, number][] = [[-11, lp], [-4, -lp], [4, lp], [9, -lp]];
-  for (const [lx, ph] of legs) {
-    pxu(ctx, x + lx, y - 8, 4, 9, dark);                          // бедро
-    pxu(ctx, x + lx, y - 8, 1.5, 9, L(dark));                     // свет по передней кромке
-    pxu(ctx, x + lx + ph * 0.35, y - 1, 3.5, 6, D(dark));         // голень уходит по фазе шага
-    pxu(ctx, x + lx + ph * 0.6, y + 3, 5, 3, '#241a12');          // копыто
-    pxu(ctx, x + lx + ph * 0.6, y + 3, 5, 1, '#3a2a1c');          // блик копыта
+  // ── НОГИ: бедро → колено → голень → копыто; диагонали в противофазе ──
+  for (const [lx, ph] of [[-9.5, lp], [-4.5, -lp], [4.5, lp], [9, -lp]] as [number, number][]) {
+    const back = lx < 0;
+    const kx = x + lx + ph * 0.5;
+    pxu(ctx, x + lx - 1.4, y - 13, 2.8, 7, back ? D(dark) : dark);         // бедро
+    pxu(ctx, x + lx - 1.4, y - 13, 0.8, 7, back ? dark : L(dark));         // свет по кромке
+    pxu(ctx, kx - 1, y - 6.4, 2, 6.4, back ? D(dark) : dark);              // голень
+    pxu(ctx, kx - 1.2, y - 1.4, 2.4, 2.4, back ? '#1f150c' : '#2b1d12');   // копыто
+    pxu(ctx, kx - 1.2, y - 1.4, 2.4, 0.7, '#443422');                      // венчик
   }
 
-  // ── КОРПУС: не круг, а вытянутое тело с крупом, грудью и объёмом ──
-  cxu(ctx, x, y - 12, 12, body);
-  pxu(ctx, x - 11, y - 17, 22, 9, body);                          // спина вытянута
-  cxu(ctx, x - f * 9, y - 13, 9, body);                           // круп
-  cxu(ctx, x + f * 8, y - 13, 8, light);                          // грудь светлее
-  pxu(ctx, x - 12, y - 8, 24, 5, D(body));                        // тень по брюху
-  pxu(ctx, x - 10, y - 19, 20, 3, L(body));                       // блик по спине
+  // ── КОРПУС: грудь, холка, круп, пах — отдельными массами ──
+  cxu(ctx, x + f * 1, y - 17, 8, body);                                    // грудь
+  pxu(ctx, x - 11, y - 21, 20, 8, body);                                   // спина
+  cxu(ctx, x, y - 17, 11, body);                                           // основная масса
+  cxu(ctx, x - f * 8, y - 17.5, 7, body);                                  // круп
+  pxu(ctx, x - 11, y - 22, 20, 2.5, L(body));                              // свет по хребту
+  pxu(ctx, x - 11, y - 12, 22, 3.5, D(body));                              // тень по брюху
+  // мышцы: короткие штрихи по крупу и плечу
+  pxu(ctx, x - f * 8.5, y - 18, 3, 0.6, D(body));
+  pxu(ctx, x - f * 8, y - 15.5, 2.4, 0.6, D(body));
+  pxu(ctx, x + f * 5.5, y - 16, 0.6, 4, D(body));
+  // шерсть: редкие светлые штрихи
+  pxu(ctx, x - 6, y - 20.5, 5, 0.5, L(body));
+  pxu(ctx, x - 2, y - 19, 6, 0.5, L(body));
 
-  // ── ШЕЯ: клином от холки к затылку ──
-  for (let i = 0; i < 8; i++) {
-    const t2 = i / 7;
-    pxu(ctx, x + f * (7 + t2 * 10), y - 17 - t2 * 5, 5.5 - t2 * 1.8, 6, i < 4 ? light : body);
+  // ── ШЕЯ: трапеция от холки к затылку ──
+  for (let i = 0; i < 9; i++) {
+    const t2 = i / 8;
+    pxu(ctx, x + f * (6 + t2 * 8), y - 19 - t2 * 7, 4.4 - t2 * 1.4, 4.5, i < 5 ? light : body);
   }
-  pxu(ctx, x + f * 8, y - 20, 9, 3, L(light));                    // свет по гребню шеи
+  pxu(ctx, x + f * 7, y - 21.5, 8, 1.6, L(light));                          // гребень
 
-  // ── ГОЛОВА: вытянутая морда, ноздря, глаз с белком, уши ──
-  cxu(ctx, x + f * 18, y - 22, 5, light);
-  pxu(ctx, x + f * 19, y - 24, 9, 6, light);                      // морда
-  pxu(ctx, x + f * 24, y - 20, 6, 3, D(light));                   // низ морды
-  cxu(ctx, x + f * 26, y - 19, 2.5, dark);                        // ноздря
-  pxu(ctx, x + f * 22, y - 24, 2, 2, '#f8fafc');                  // белок
-  pxu(ctx, x + f * 22.5, y - 24, 1.5, 2, '#1c1917');              // зрачок
-  pxu(ctx, x + f * 15, y - 28, 2.5, 4, dark);                     // ухо
-  pxu(ctx, x + f * 19, y - 29, 2.5, 4, dark);                     // второе ухо
-  // уздечка
-  pxu(ctx, x + f * 20, y - 21, 8, 1.5, '#3f2a15');
-  lnu(ctx, x + f * 20, y - 21, x + f * 12, y - 15, 1.5, '#3f2a15'); // повод
+  // ── ГОЛОВА: вытянутая, наклонённая, с храпом ──
+  pxu(ctx, x + f * 14, y - 26.5, 9, 4.2, light);                           // морда
+  pxu(ctx, x + f * 20, y - 25, 3.4, 3.4, light);                           // храп
+  pxu(ctx, x + f * 14, y - 23.5, 9, 1.6, D(light));                        // низ морды
+  pxu(ctx, x + f * 22, y - 24.2, 1.2, 1.2, dark);                          // ноздря
+  pxu(ctx, x + f * 17, y - 26.5, 0.8, 0.8, '#1c1917');                     // глаз
+  pxu(ctx, x + f * 16.6, y - 27, 1.1, 0.8, '#f8fafc');
+  pxu(ctx, x + f * 12.5, y - 30.5, 1.6, 3, dark);                          // уши
+  pxu(ctx, x + f * 15, y - 31, 1.6, 3, dark);
+  // уздечка и повод
+  pxu(ctx, x + f * 15, y - 24.4, 8, 0.8, '#3f2a15');
+  pxu(ctx, x + f * 19, y - 27.5, 0.8, 3, '#3f2a15');
+  lnu(ctx, x + f * 17, y - 24.5, x + f * 11, y - 20, 0.8, '#3f2a15');
+  pxu(ctx, x + f * 18, y - 24.6, 1.2, 1.2, '#c9a05c');                     // бляха
 
-  // грива прядями (вверх по шее)
-  for (let i = 0; i < 5; i++) pxu(ctx, x + f * (7 + i * 2.2), y - 22 - i * 0.9, 3, 5 - i * 0.4, dark);
-  // чёлка
-  pxu(ctx, x + f * 17, y - 26, 4, 3, dark);
+  // грива и чёлка прядями
+  for (let i = 0; i < 7; i++) pxu(ctx, x + f * (6.5 + i * 1.5), y - 23 - i * 1.1, 1.8, 3.4, dark);
+  pxu(ctx, x + f * 13.5, y - 29.5, 3.4, 2.4, dark);
 
-  // ── ХВОСТ: две пряди, колышется в такт шагу ──
-  lnu(ctx, x - f * 12, y - 16, x - f * 20, y - 11 + sw * 3, 5, dark);
-  lnu(ctx, x - f * 12, y - 14, x - f * 19, y - 6 + sw * 3, 3, D(dark));
+  // ── ХВОСТ: три пряди ──
+  lnu(ctx, x - f * 11, y - 20, x - f * 17, y - 14 + sw * 2, 2.2, dark);
+  lnu(ctx, x - f * 11, y - 18.5, x - f * 18, y - 10 + sw * 2, 1.8, D(dark));
+  lnu(ctx, x - f * 11, y - 17, x - f * 16, y - 8 + sw * 2, 1.4, dark);
 
-  // ── СБРУЯ: попона команды, подпруга, седло с лукой ──
-  pxu(ctx, x - f * 3, y - 18, 14, 9, teamC);
-  pxu(ctx, x - f * 3, y - 18, 14, 2, teamD);
-  pxu(ctx, x + f * 8, y - 18, 3, 9, D(teamC));
-  pxu(ctx, x - f * 2, y - 10, 12, 2, '#2b1d12');                  // подпруга
-  cxu(ctx, x - f * 2, y - 18, 6, '#5c3618');                      // седло
-  pxu(ctx, x - f * 5, y - 21, 2.5, 4, '#4a2c14');                 // передняя лука
-  pxu(ctx, x + f * 1, y - 20, 2.5, 3, '#4a2c14');                 // задняя лука
-  pxu(ctx, x - f * 2, y - 18, 5, 2, L('#6b4423'));                // блик кожи
+  // ── СБРУЯ: попона, подпруга, седло, стремя ──
+  pxu(ctx, x - 5.5, y - 21.5, 11, 8, teamC);                               // попона
+  pxu(ctx, x - 5.5, y - 21.5, 11, 1.4, teamD);
+  pxu(ctx, x + f * 4, y - 21.5, 2.6, 8, D(teamC));
+  pxu(ctx, x - 5.5, y - 14.5, 11, 1, '#fbbf24');                           // кайма
+  pxu(ctx, x - 4.5, y - 12.5, 9, 1.4, '#2b1d12');                          // подпруга
+  pxu(ctx, x - 3.4, y - 22.5, 6.8, 3, '#5c3618');                          // седло
+  pxu(ctx, x - 3.4, y - 22.5, 6.8, 0.9, L('#7a4a22'));
+  pxu(ctx, x - f * 4, y - 25, 2, 3, '#4a2c14');                            // лука
+  pxu(ctx, x + f * 2.6, y - 24.2, 2, 2.4, '#4a2c14');
+  pxu(ctx, x + f * 5.4, y - 15, 2.4, 1, '#3f2a15');                        // стремя
+  pxu(ctx, x + f * 5.4, y - 14, 2.4, 0.6, '#6b5a3a');
 }
 
 // ── всадник ──
 function drawRider(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw: number, atk: number, _time: number, t: typeof TEAM.player) {
   const f = u.face;
-  const rx = x - f * 2, ry = y - 18;
-  // ─ НОГА в стремя (перед всадником — видна поверх попоны) ─
-  pxu(ctx, rx + f * 2, ry + 1, 3.5, 7, D('#3a3a3a'));
-  pxu(ctx, rx + f * 3, ry + 6, 5, 3, '#231a12');                  // сапог
-  pxu(ctx, rx + f * 3, ry + 5, 5, 1.5, '#2f2418');                // стремя
-  // ─ КОРПУС: кираса с объёмом ─
+  const rx = x - f * 1.5, ry = y - 22;                                     // точка сидения
   const met = '#c0c0c0';
-  pxu(ctx, rx - 6, ry - 8, 12, 13, met);
-  pxu(ctx, rx + f * 3, ry - 8, 4, 13, D(met));
-  pxu(ctx, rx - f * 5, ry - 8, 3, 13, L(met));
-  pxu(ctx, rx - 6, ry - 5, 12, 1.5, D(met));                      // линия талии
-  pxu(ctx, rx - 6, ry - 2, 12, 5, t.tunic);                       // накидка
-  pxu(ctx, rx + f * 3, ry - 2, 4, 5, D(t.tunic));
-  cxu(ctx, rx - 7, ry - 7, 3.5, '#9aa0a6');
-  cxu(ctx, rx + 7, ry - 7, 3.5, '#9aa0a6');
-  cxu(ctx, rx + f * 7.5, ry - 6, 3, D('#828892'));
-  cxu(ctx, rx - f * 7.5, ry - 8, 2.5, L('#d5d5d5'));
-  // рука: держит пику/повод, при ударе выносится вперёд
-  pxu(ctx, rx + f * 6, ry - 6 - atk * 3, 3, 8, met);
-  pxu(ctx, rx + f * 6, ry - 0 - atk * 3, 4, 3, SKIN);
-  // ─ ШЛЕМ с лицом ─
-  cxu(ctx, rx, ry - 13, 6, '#b0b0b0');
-  cxu(ctx, rx + f * 2, ry - 13, 4, D('#949494'));
-  pxu(ctx, rx - 5, ry - 15, 10, 3, '#888');
-  cxu(ctx, rx, ry - 12, 5, SKIN);                                 // лицо
-  cxu(ctx, rx + f * 2, ry - 12, 3.2, SKIN_D);
-  pxu(ctx, rx + f * 1.5, ry - 13, 2, 1.5, '#241a10');             // глаза
-  pxu(ctx, rx - f * 1.5, ry - 13, 1.5, 1.5, '#3b2412');
-  pxu(ctx, rx + f * 1, ry - 10, 4, 1.5, '#5b3a1c');               // усы
-  pxu(ctx, rx - f * 3, ry - 16, 2.5, 3, L('#cfcfcf'));           // блик metalа
-  pxu(ctx, rx - 2, ry - 21, 4, 5, t.plume);
-  pxu(ctx, rx - f * 6, ry - 19, 5, 3, t.plume);
-  // пика — таранный удар
-  const ext = 20 + atk * 10;
-  lnu(ctx, rx + f * 4, ry - 8, rx + f * ext, ry - 14 - atk * 4, 3.5, '#78450f');
-  pxu(ctx, rx + f * (ext + 2), ry - 15 - atk * 4, 3, 5, '#d6d3d1');
-  pxu(ctx, rx + f * (ext + 2), ry - 15 - atk * 4, 1.5, 5, L('#e7e5e4'));
+  // ─ НОГА: бедро вперёд, голень вниз, сапог в стремени ─
+  pxu(ctx, rx + f * 1, ry - 1, 5, 2.4, D('#3a3a3a'));                      // бедро
+  pxu(ctx, rx + f * 5.2, ry - 0.5, 2.2, 7, '#3a3a3a');                     // голень
+  pxu(ctx, rx + f * 5.2, ry - 0.5, 0.8, 7, L('#4a4a4a'));
+  pxu(ctx, rx + f * 4.6, ry + 5.4, 3.2, 2.6, '#231a12');                   // сапог
+  pxu(ctx, rx + f * 4.6, ry + 7.4, 3.6, 1, '#1c140d');                     // подошва
+  // ─ КОРПУС ─
+  pxu(ctx, rx - 3.4, ry - 9.5, 6.8, 7, met);                               // кираса
+  pxu(ctx, rx + f * 2, ry - 9.5, 2, 7, D(met));
+  pxu(ctx, rx - f * 3, ry - 9.5, 1.6, 7, L(met));
+  pxu(ctx, rx - 3.4, ry - 3, 6.8, 1.4, D(met));                            // пояс
+  pxu(ctx, rx - 3.4, ry - 2.4, 6.8, 3.4, t.tunic);                         // накидка
+  pxu(ctx, rx + f * 2, ry - 2.4, 2, 3.4, D(t.tunic));
+  for (let ry2 = 0; ry2 < 3; ry2++)                                        // чешуя
+    for (let cxi = -1; cxi <= 1; cxi++) {
+      const cxx = rx + cxi * 2, cyy = ry - 9 + ry2 * 2;
+      pxu(ctx, cxx - 0.9, cyy, 1.8, 1.7, met);
+      pxu(ctx, cxx - 0.9, cyy, 1.8, 0.5, L(met));
+      pxu(ctx, cxx - 0.9, cyy + 1.3, 1.8, 0.4, D(met));
+    }
+  cxu(ctx, rx - 4.2, ry - 9, 2.2, '#9aa0a6');                              // наплечники
+  cxu(ctx, rx + 4.2, ry - 9, 2.2, '#9aa0a6');
+  cxu(ctx, rx + f * 4.2, ry - 8.6, 1.6, D('#828892'));
+  cxu(ctx, rx - f * 4.2, ry - 9.4, 1.3, L('#d5d5d5'));
+  // рука: вперёд-вниз к пике, при ударе выносится
+  const hdx = rx + f * 4.4, hdy = ry - 3.5 - atk * 2;
+  lnu(ctx, rx + f * 3.4, ry - 8.4, rx + f * 4.6, ry - 5.4 - atk, 2.2, met);
+  lnu(ctx, rx + f * 4.6, ry - 5.4 - atk, hdx, hdy, 1.9, met);
+  cxu(ctx, hdx, hdy, 1.2, SKIN);
+  // ─ ШЛЕМ И ЛИЦО ─
+  pxu(ctx, rx - 0.9, ry - 10.6, 1.8, 1.4, D(SKIN));                        // шея
+  cxu(ctx, rx, ry - 13.4, 3, SKIN);
+  cxu(ctx, rx + f * 1.1, ry - 13.4, 2, SKIN_D);
+  pxu(ctx, rx + f * 0.7, ry - 14.2, 1.2, 1.2, '#f8fafc');
+  pxu(ctx, rx + f * 1.1, ry - 14.1, 0.8, 1.2, '#241a10');
+  pxu(ctx, rx - f * 1.4, ry - 14.2, 1, 1.2, '#e8eef2');
+  pxu(ctx, rx + f * 0.3, ry - 12.4, 2, 0.9, '#5b3a1c');                    // усы
+  cxu(ctx, rx, ry - 15.2, 3.2, '#b0b0b0');                                 // шлем
+  cxu(ctx, rx + f * 1.5, ry - 15.2, 2, D('#949494'));
+  pxu(ctx, rx - 3.4, ry - 16, 6.8, 1.3, '#888');
+  cxu(ctx, rx - f * 1.8, ry - 16.4, 1.2, L('#cfcfcf'));
+  pxu(ctx, rx - 1, ry - 19, 2, 2.4, t.plume);                              // султан
+  pxu(ctx, rx - f * 2.8, ry - 18.2, 2.8, 1.4, t.plume);
+  // пика
+  const ext = 15 + atk * 8;
+  lnu(ctx, rx + f * 3, ry - 6, rx + f * ext, ry - 12 - atk * 3, 1.4, '#78450f');
+  lnu(ctx, rx + f * 3, ry - 6.6, rx + f * ext, ry - 12.6 - atk * 3, 0.5, L('#a5743c'));
+  pxu(ctx, rx + f * (ext + 1), ry - 14 - atk * 3, 1.4, 3.6, '#d6d3d1');
+  pxu(ctx, rx + f * (ext + 1), ry - 14 - atk * 3, 0.6, 3.6, L('#e7e5e4'));
   // щит
-  pxu(ctx, rx - f * 10, ry - 6, 5, 9, t.tunicD);
-  pxu(ctx, rx - f * 10, ry - 6, 5, 2, '#f6d47c');
-  pxu(ctx, rx - f * 10, ry - 6, 1.5, 9, D(t.tunicD));
+  pxu(ctx, rx - f * 6.6, ry - 7, 2.2, 6.5, t.tunicD);
+  pxu(ctx, rx - f * 6.6, ry - 7, 2.2, 0.9, '#f6d47c');
+  pxu(ctx, rx - f * 6.6, ry - 7, 0.8, 6.5, D(t.tunicD));
 }
 
-// ── скот: овца / корова / олень. Плотный непрозрачный пиксель-арт, три вида (бок/перёд/спина) + шаг ──
+// ── скот: овца / корова / олень (1.0.140) ───────────────────────────────────
+// Было: «шар с четырьмя палками и круглой головой» — корпус радиусом 8–11 при
+// голове радиусом 5–6, то есть голова занимала добрую треть туши. Теперь корпус
+// вытянут (20–24 единицы длиной при высоте 11), голова 6–7 единиц, ноги —
+// бедро, голень, копытце; шерсть клочьями, глаза с белком, у коровы вымя и
+// пятна, у оленя ветвистые рога.
 function drawLivestock(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw: number, bob: number) {
   const f = u.face;
   const fmode = u.fmode ?? 0;
   const deer = u.key === 'deer', cow = u.key === 'cow', sheep = u.key === 'sheep';
-  y += bob * 0.5; // лёгкое покачивание при ходьбе/дыхании
+  y += bob * 0.5;
 
-  // палитра
   const bodyCol = deer ? '#b07d4f' : cow ? '#e7dcc3' : '#efeadd';   // корпус
   const bodyHi  = deer ? '#c99863' : cow ? '#f7efdd' : '#faf8f2';   // свет
   const darkCol = deer ? '#8a5a34' : cow ? '#6b4a36' : '#cfc7b8';   // тень/пятна/уши
   const legCol  = deer ? '#8a5a34' : cow ? '#6b4a36' : '#3f3a36';
   const spot    = cow ? '#5b3d2b' : darkCol;
-
-  // фазы ног: lp — амплитуда шага (вбок), передние/задние в противофазе
-  const lp = sw;
-  const stepUp = Math.max(0, lp), stepDn = Math.max(0, -lp);
+  const lp = sw * 2.4;
+  // габарит туши
+  const L = deer ? 20 : cow ? 23 : 18;                              // длина корпуса
+  const Hh = deer ? 9 : cow ? 11 : 12;                              // высота корпуса
+  const legH = deer ? 13 : cow ? 11 : 9;                            // длина ноги
+  const bodyY = y - legH - Hh / 2 + 1;                              // центр корпуса
 
   if (fmode === 0) {
-    // ── БОКОВОЙ ВИД (морда в сторону face) ──
+    // ── БОКОВОЙ ВИД ──
     const F = f;
-    // ноги (4): задние и передние, диагональные пары в противофазе
-    pxu(ctx, x - 9, y - 6, 3, 8 + lp * 4, legCol);
-    pxu(ctx, x - 2, y - 6, 3, 8 - lp * 4, legCol);
-    pxu(ctx, x + 4, y - 6, 3, 8 + lp * 4, legCol);
-    pxu(ctx, x + 9, y - 6, 3, 8 - lp * 4, legCol);
-    // копытца
-    pxu(ctx, x - 9, y + 1 + lp * 4, 3, 2, '#241c17');
-    pxu(ctx, x + 9, y + 1 - lp * 4, 3, 2, '#241c17');
-    // корпус + брюхо-тень
-    cxu(ctx, x, y - 11, deer ? 8 : cow ? 11 : 9, bodyCol);
-    if (!sheep) cxu(ctx, x - f * 1, y - 14, deer ? 5 : 7, bodyHi);   // блик по спине (1.0.139)
-    pxu(ctx, x - 6, y - 7, 14, 4, darkCol);
-    if (!sheep) pxu(ctx, x - 6, y - 7, 14, 1.5, D(darkCol));         // тень по брюху
+    // ноги: две пары, диагонали в противофазе; задняя пара в тени
+    for (const [lx, ph] of [[-L / 2 + 3, lp], [-L / 2 + 6.5, -lp], [L / 2 - 6.5, lp], [L / 2 - 3, -lp]] as [number, number][]) {
+      const back = lx < 0;
+      const kx = x + lx + ph * 0.45;
+      pxu(ctx, x + lx - 1, y - legH, 2, legH * 0.55, back ? D(legCol) : legCol);   // бедро
+      pxu(ctx, kx - 0.8, y - legH * 0.5, 1.6, legH * 0.5, back ? D(legCol) : legCol); // голень
+      pxu(ctx, kx - 0.9, y - 1.6, 1.8, 1.8, back ? '#241c17' : '#2f251c');         // копытце
+    }
+    // корпус: вытянутый овал + круп
+    cxu(ctx, x, bodyY, Hh / 2 + 1, bodyCol);
+    pxu(ctx, x - L / 2 + 2, bodyY - Hh / 2 + 1, L - 4, Hh - 2, bodyCol);
+    cxu(ctx, x - F * L / 2 + 2, bodyY - 0.5, Hh / 2, bodyCol);                     // круп
+    pxu(ctx, x - L / 2 + 2, bodyY - Hh / 2 + 1, L - 4, 2, bodyHi);                 // свет по спине
+    pxu(ctx, x - L / 2 + 2, bodyY + Hh / 2 - 3, L - 4, 2.4, D(bodyCol));           // тень по брюху
+    if (sheep) {
+      // шерсть клочьями по всему силуэту
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        cxu(ctx, x + Math.cos(a) * (L / 2 - 2), bodyY + Math.sin(a) * (Hh / 2 - 1.5), 3.2, bodyHi);
+      }
+      cxu(ctx, x, bodyY - 2, 5, bodyHi);
+    }
     if (cow) {
-      // пятна коровы
-      pxu(ctx, x - 6, y - 14, 5, 5, spot);
-      pxu(ctx, x + 2, y - 11, 5, 5, spot);
-      pxu(ctx, x - 1, y - 17, 3, 3, spot);
-      // вымя
-      pxu(ctx, x - 4, y - 6, 5, 4, '#e89aa6');
+      pxu(ctx, x - 7, bodyY - 5, 5.5, 5, spot);                     // пятна
+      pxu(ctx, x + 2, bodyY - 1, 5, 5, spot);
+      pxu(ctx, x - 1, bodyY - 7, 3.5, 3.5, spot);
+      pxu(ctx, x - 4, y - legH + 1, 5, 4, '#e89aa6');               // вымя
+      pxu(ctx, x - 4, y - legH + 1, 5, 1, '#d98a97');
     }
-    if (sheep) { cxu(ctx, x - 5, y - 15, 4, bodyHi); cxu(ctx, x + 5, y - 15, 4, bodyHi); cxu(ctx, x, y - 18, 4, bodyHi); }
-    // голова
-    const hy = y - (deer ? 14 : 12);
-    cxu(ctx, x + F * 14, hy, deer ? 5 : 6, bodyCol);
-    cxu(ctx, x + F * 15, hy + 1, deer ? 3.5 : 4.5, bodyHi);          // свет по морде
-    pxu(ctx, x + F * 16, hy - 2, 2, 2, '#f8fafc');                   // белок глаза
-    pxu(ctx, x + F * 17, hy - 2, 1.5, 2, '#1c1917');                 // зрачок
-    pxu(ctx, x + F * 19, hy + 2, 2, 2, '#2a2a2a');                   // ноздря
-    if (cow) pxu(ctx, x + F * 19, hy + 3, 3, 2, '#e89aa6'); // розовый нос
-    // уши
-    pxu(ctx, x + F * 11, hy - 5, 3, 4, darkCol);
-    pxu(ctx, x + F * 16, hy - 5, 3, 4, darkCol);
-    if (cow) { // рожки
-      pxu(ctx, x + F * 12, hy - 8, 2, 3, '#d8cfae');
-      pxu(ctx, x + F * 16, hy - 8, 2, 3, '#d8cfae');
+    // шея и голова
+    const hy = bodyY - (deer ? 7 : 4);
+    pxu(ctx, x + F * (L / 2 - 4), bodyY - 2, 5, 5, bodyCol);        // шея
+    pxu(ctx, x + F * (L / 2 - 1), hy + 1, 7, deer ? 4 : 5, bodyCol);// голова
+    pxu(ctx, x + F * (L / 2 + 3), hy + 2, 3, deer ? 3 : 3.6, bodyHi); // морда
+    pxu(ctx, x + F * (L / 2 + 5), hy + 3.4, 2, 1.6, darkCol);       // ноздря/губа
+    pxu(ctx, x + F * (L / 2 - 1), hy, 1.4, 1.4, '#f8fafc');         // белок
+    pxu(ctx, x + F * (L / 2 - 0.4), hy, 1, 1.4, '#1c1917');         // зрачок
+    pxu(ctx, x + F * (L / 2 - 4), hy - 4, 1.6, 2.6, darkCol);       // ухо
+    if (cow) {                                                       // рожки
+      pxu(ctx, x + F * (L / 2 - 3), hy - 5.5, 1.6, 2.4, '#d8cfae');
+      pxu(ctx, x + F * (L / 2 + 0.5), hy - 5.5, 1.6, 2.4, '#d8cfae');
     }
-    // рога оленя
-    if (deer) {
-      lnu(ctx, x + F * 13, hy - 4, x + F * 10, hy - 13, 3, '#7a5230');
-      lnu(ctx, x + F * 17, hy - 4, x + F * 20, hy - 13, 3, '#7a5230');
+    if (deer) {                                                      // ветвистые рога
+      lnu(ctx, x + F * (L / 2 - 3), hy - 3, x + F * (L / 2 - 6), hy - 11, 1.4, '#7a5230');
+      lnu(ctx, x + F * (L / 2 - 4.4), hy - 7, x + F * (L / 2 - 8), hy - 9, 1, '#7a5230');
+      lnu(ctx, x + F * (L / 2 + 0.5), hy - 3, x + F * (L / 2 + 3), hy - 11, 1.4, '#7a5230');
+      lnu(ctx, x + F * (L / 2 + 2), hy - 7, x + F * (L / 2 + 6), hy - 9, 1, '#7a5230');
     }
     // хвост
-    cxu(ctx, x - F * 12, y - 13, 2.5, darkCol);
-    if (cow) cxu(ctx, x - F * 13, y - 10, 2, spot);
-    void stepUp; void stepDn;
+    lnu(ctx, x - F * (L / 2 - 1), bodyY - 4, x - F * (L / 2 + 3), bodyY + 3 + lp, 1.6, darkCol);
+    if (cow) cxu(ctx, x - F * (L / 2 + 3.4), bodyY + 4 + lp, 1.6, spot);
   } else {
-    // ── ВИД СПЕРЕДИ (fmode 1, морда к камере) / СЗАДИ (fmode 2, круп к камере) ──
+    // ── ВИД СПЕРЕДИ (fmode 1) / СЗАДИ (fmode 2) ──
     const front = fmode === 1;
-    // ноги: две ближние (левая/правая), шагают в противофазе по вертикали
-    const legA = 5 + lp * 3, legB = 5 - lp * 3;
-    pxu(ctx, x - 7, y - 4 - Math.max(0, legA - 5), 4, Math.max(4, legA + 3), legCol);
-    pxu(ctx, x + 3, y - 4 - Math.max(0, legB - 5), 4, Math.max(4, legB + 3), legCol);
-    // копытца
-    pxu(ctx, x - 7, y + 2 - Math.max(0, legA - 5), 4, 2, '#241c17');
-    pxu(ctx, x + 3, y + 2 - Math.max(0, legB - 5), 4, 2, '#241c17');
-    // тело (широкий овал)
-    cxu(ctx, x, y - 11, deer ? 8 : cow ? 11 : 9, bodyCol);
-    if (!sheep) cxu(ctx, x, y - 14, deer ? 4 : 6, bodyHi);           // блик по спине
-    pxu(ctx, x - 8, y - 8, 16, 4, darkCol); // нижняя тень
-    if (!sheep) pxu(ctx, x - 8, y - 8, 16, 1.5, D(darkCol));
-    if (sheep) { // комки шерсти по силуэту
-      cxu(ctx, x - 7, y - 12, 5, bodyHi); cxu(ctx, x + 7, y - 12, 5, bodyHi);
-      cxu(ctx, x - 4, y - 18, 5, bodyHi); cxu(ctx, x + 4, y - 18, 5, bodyHi);
-      cxu(ctx, x, y - 20, 5, bodyHi);
+    for (const [lx, ph] of [[-3.4, lp], [3.4, -lp]] as [number, number][]) {
+      pxu(ctx, x + lx - 1, y - legH, 2, legH * 0.55, legCol);
+      pxu(ctx, x + lx + ph * 0.4 - 0.8, y - legH * 0.5, 1.6, legH * 0.5, legCol);
+      pxu(ctx, x + lx + ph * 0.6 - 0.9, y - 1.6, 1.8, 1.8, '#241c17');
+    }
+    cxu(ctx, x, bodyY, Hh / 2, bodyCol);
+    pxu(ctx, x - Hh / 2 + 1, bodyY - Hh / 2 + 1, Hh - 2, Hh - 2, bodyCol);
+    pxu(ctx, x - Hh / 2 + 1, bodyY - Hh / 2 + 1, Hh - 2, 1.8, bodyHi);
+    pxu(ctx, x - Hh / 2 + 1, bodyY + Hh / 2 - 3, Hh - 2, 2.2, D(bodyCol));
+    if (sheep) for (let i = 0; i < 7; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      cxu(ctx, x + Math.cos(a) * (Hh / 2 - 1.5), bodyY + Math.sin(a) * (Hh / 2 - 1.5), 3, bodyHi);
     }
     if (cow && !front) {
-      // вид сзади: пятно на крупе + хвост
-      pxu(ctx, x - 3, y - 13, 6, 6, spot);
-      lnu(ctx, x, y - 16, x, y - 5, 2, darkCol);
-      cxu(ctx, x, y - 4, 2.5, spot);
-      // вымя сзади
-      pxu(ctx, x - 3, y - 6, 6, 4, '#e89aa6');
+      pxu(ctx, x - 3, bodyY - 4, 6, 6, spot);
+      lnu(ctx, x, bodyY + 1, x, y - 3, 1.6, darkCol);
+      cxu(ctx, x, y - 2.4, 1.6, spot);
+      pxu(ctx, x - 3, y - legH + 1, 6, 4, '#e89aa6');
     }
-    // голова/круп сверху
-    const hw = deer ? 5 : 6;
-    cxu(ctx, x, y - (deer ? 20 : 18), hw, front ? bodyCol : bodyCol);
+    const hx = bodyY - (deer ? 8 : 6);
     if (front) {
-      // морда к камере: глаза, нос
-      pxu(ctx, x - 4, y - (deer ? 21 : 19), 3, 2, '#f8fafc');        // белки
-      pxu(ctx, x + 2, y - (deer ? 21 : 19), 3, 2, '#f8fafc');
-      pxu(ctx, x - 3, y - (deer ? 21 : 19), 1.5, 2, '#241c17');      // зрачки
-      pxu(ctx, x + 3, y - (deer ? 21 : 19), 1.5, 2, '#241c17');
-      pxu(ctx, x - 1, y - (deer ? 17 : 15), 3, cow ? 3 : 2, cow ? '#e89aa6' : darkCol);
-      // уши по бокам
-      pxu(ctx, x - 8, y - (deer ? 24 : 22), 3, 4, darkCol);
-      pxu(ctx, x + 5, y - (deer ? 24 : 22), 3, 4, darkCol);
-      if (cow) { pxu(ctx, x - 5, y - 26, 2, 3, '#d8cfae'); pxu(ctx, x + 3, y - 26, 2, 3, '#d8cfae'); }
-      if (deer) { // рога вверх
-        lnu(ctx, x - 3, y - 24, x - 5, y - 32, 3, '#7a5230');
-        lnu(ctx, x + 3, y - 24, x + 5, y - 32, 3, '#7a5230');
+      cxu(ctx, x, hx, 3.2, bodyCol);
+      pxu(ctx, x - 1.2, hx - 0.6, 3.4, 3.4, bodyCol);
+      pxu(ctx, x - 1, hx, 1.4, 1.4, '#f8fafc');
+      pxu(ctx, x - 0.5, hx + 0.2, 0.9, 1.2, '#1c1917');
+      pxu(ctx, x + 1.6, hx, 1.4, 1.4, '#f8fafc');
+      pxu(ctx, x + 2.1, hx + 0.2, 0.9, 1.2, '#1c1917');
+      pxu(ctx, x - 1, hx + 2.6, 2, 1.6, cow ? '#e89aa6' : darkCol);
+      pxu(ctx, x - 4.4, hx - 1.4, 1.8, 2.6, darkCol);                 // уши
+      pxu(ctx, x + 2.6, hx - 1.4, 1.8, 2.6, darkCol);
+      if (cow) { pxu(ctx, x - 3, hx - 4, 1.6, 2.2, '#d8cfae'); pxu(ctx, x + 1.4, hx - 4, 1.6, 2.2, '#d8cfae'); }
+      if (deer) {
+        lnu(ctx, x - 1.6, hx - 3, x - 3, hx - 10, 1.3, '#7a5230');
+        lnu(ctx, x - 2.4, hx - 6.5, x - 5, hx - 8, 0.9, '#7a5230');
+        lnu(ctx, x + 1.6, hx - 3, x + 3, hx - 10, 1.3, '#7a5230');
+        lnu(ctx, x + 2.4, hx - 6.5, x + 5, hx - 8, 0.9, '#7a5230');
       }
     } else {
-      // вид сзади: уши/рога чуть торчат, морды не видно
-      pxu(ctx, x - 6, y - (deer ? 24 : 21), 3, 3, darkCol);
-      pxu(ctx, x + 3, y - (deer ? 24 : 21), 3, 3, darkCol);
-      if (deer) { lnu(ctx, x - 2, y - 24, x - 4, y - 31, 3, '#7a5230'); lnu(ctx, x + 2, y - 24, x + 4, y - 31, 3, '#7a5230'); }
-      if (cow) { pxu(ctx, x - 4, y - 24, 2, 3, '#d8cfae'); pxu(ctx, x + 2, y - 24, 2, 3, '#d8cfae'); }
+      cxu(ctx, x, hx, 3, bodyCol);
+      pxu(ctx, x - 2.2, hx - 1, 1.6, 2.4, darkCol);                  // уши торчком
+      pxu(ctx, x + 0.6, hx - 1, 1.6, 2.4, darkCol);
+      if (deer) {
+        lnu(ctx, x - 1.2, hx - 3, x - 2.6, hx - 9, 1.2, '#7a5230');
+        lnu(ctx, x + 1.2, hx - 3, x + 2.6, hx - 9, 1.2, '#7a5230');
+      }
+      if (cow) { pxu(ctx, x - 2.4, hx - 4, 1.6, 2.2, '#d8cfae'); pxu(ctx, x + 0.8, hx - 4, 1.6, 2.2, '#d8cfae'); }
     }
   }
 }
 
-// ── волк ──
+// ── волк (1.0.140) ─────────────────────────────────────────────────────────
+// Было: корпус-шар r=11 при голове r=6. Теперь вытянутое тело 22×10, холка 12,
+// голова 7, ноги с голенью и лапой, лохматая шерсть по силуэту.
 function drawWolf(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, sw: number, time: number) {
   const f = u.face;
   const fur = '#7a7e85', furD = '#4b5563', furL = '#9ca3af';
-  const lp = sw * 5;
-  // ── ЛАПЫ: бедро → лапа, диагональные пары в противофазе ──
-  for (const [lx, ph] of [[-10, lp], [-3, -lp], [4, lp], [9, -lp]] as [number, number][]) {
-    pxu(ctx, x + lx, y - 8, 3.5, 9, furD);
-    pxu(ctx, x + lx, y - 8, 1.5, 9, fur);                        // свет по передней кромке
-    pxu(ctx, x + lx + ph * 0.3, y - 1, 3.5, 5, D(furD));
-    pxu(ctx, x + lx + ph * 0.55, y + 2, 4.5, 2.5, '#2b2f36');   // лапа
+  const lp = sw * 3;
+  const legH = 11;
+  const bodyY = y - legH - 4;
+  // ── ЛАПЫ ──
+  for (const [lx, ph] of [[-8, lp], [-4.5, -lp], [4.5, lp], [8.5, -lp]] as [number, number][]) {
+    const back = lx < 0;
+    const kx = x + lx + ph * 0.45;
+    pxu(ctx, x + lx - 0.9, y - legH, 1.8, legH * 0.55, back ? furD : fur);
+    pxu(ctx, kx - 0.7, y - legH * 0.5, 1.5, legH * 0.5, back ? furD : fur);
+    pxu(ctx, kx - 0.9, y - 1.5, 2, 1.8, back ? '#2b2f36' : '#3a3f47');   // лапа
+    pxu(ctx, kx - 0.9, y - 1.5, 2, 0.6, '#52585f');
   }
-  // ── КОРПУС: вытянутый, с хребтом, брюхом и лохматым силуэтом ──
-  cxu(ctx, x, y - 10, 11, fur);
-  pxu(ctx, x - 10, y - 14, 20, 8, fur);
-  pxu(ctx, x - 10, y - 16, 18, 2.5, furL);                      // свет по хребту
-  pxu(ctx, x - 10, y - 7, 20, 4, D(fur));                       // тень по брюху
-  for (let i = -8; i <= 8; i += 4) pxu(ctx, x + i, y - 17, 2, 2, furD);  // клочья шерсти
+  // ── КОРПУС ──
+  cxu(ctx, x, bodyY, 5.4, fur);
+  pxu(ctx, x - 9, bodyY - 4, 18, 8, fur);
+  cxu(ctx, x - f * 7, bodyY - 0.5, 5, fur);                             // круп
+  pxu(ctx, x - 9, bodyY - 5, 18, 1.8, furL);                            // свет по хребту
+  pxu(ctx, x - 9, bodyY + 2, 19, 2.4, D(fur));                          // тень по брюху
+  for (let i = -8; i <= 8; i += 2.6) pxu(ctx, x + i, bodyY - 6, 1.6, 2, furD); // клочья шерсти
   // ── ШЕЯ И ГОЛОВА ──
-  pxu(ctx, x + f * 10, y - 16, 6, 7, fur);
-  cxu(ctx, x + f * 15, y - 13, 6, '#5b5f66');
-  // уши
-  pxu(ctx, x + f * 12, y - 20, 3, 6, '#4b5563');
-  pxu(ctx, x + f * 17, y - 20, 3, 6, '#4b5563');
-  pxu(ctx, x + f * 12, y - 19, 1.5, 4, D('#3f4650'));
-  pxu(ctx, x + f * 17.5, y - 19, 1.5, 4, D('#3f4650'));
-  // морда: острая, нос мочкой, клыки
-  cxu(ctx, x + f * 20, y - 10, 3.5, '#6b7280');
-  pxu(ctx, x + f * 23, y - 10, 3, 3, '#9ca3af');
-  pxu(ctx, x + f * 24, y - 10, 2, 2, '#1f2937');                // нос
-  pxu(ctx, x + f * 22, y - 8, 2, 2, '#f8fafc');                 // клыки
-  // глаза: жёлтые, с зрачком и бликом
-  pxu(ctx, x + f * 16, y - 14, 3, 2.5, '#fbbf24');
-  pxu(ctx, x + f * 17, y - 14, 1.5, 2.5, '#1f2937');
-  pxu(ctx, x + f * 15.5, y - 15, 1.2, 1.2, '#fef3c7');
-  // ── ХВОСТ: пушистый, ходит в такт бегу ──
-  lnu(ctx, x - f * 12, y - 12, x - f * 20, y - 18 + Math.sin(time * 3) * 2, 5, furD);
-  lnu(ctx, x - f * 12, y - 10, x - f * 19, y - 14 + Math.sin(time * 3) * 2, 3, fur);
+  pxu(ctx, x + f * 7, bodyY - 4, 5, 4.5, fur);                          // шея
+  pxu(ctx, x + f * 9.5, bodyY - 6.5, 7, 4.2, fur);                      // голова
+  pxu(ctx, x + f * 13.5, bodyY - 5.6, 3.4, 3, furD);                    // морда
+  pxu(ctx, x + f * 15.5, bodyY - 5.2, 2, 2, '#1f2937');                 // нос
+  pxu(ctx, x + f * 13.6, bodyY - 4.4, 2, 1.4, '#f8fafc');               // клыки
+  pxu(ctx, x + f * 10.5, bodyY - 7.4, 1.6, 1.6, '#f8fafc');             // белок
+  pxu(ctx, x + f * 11.1, bodyY - 7.3, 1, 1.6, '#fbbf24');               // жёлтый зрачок
+  pxu(ctx, x + f * 10.2, bodyY - 7.8, 0.7, 0.7, '#fef3c7');             // блик
+  pxu(ctx, x + f * 7.5, bodyY - 9.5, 1.6, 2.8, furD);                   // уши
+  pxu(ctx, x + f * 10, bodyY - 9.8, 1.6, 2.8, furD);
+  // ── ХВОСТ ──
+  lnu(ctx, x - f * 9, bodyY - 3, x - f * 15, bodyY - 1 + Math.sin(time * 3) * 2, 3, furD);
+  lnu(ctx, x - f * 9, bodyY - 1.5, x - f * 14, bodyY + 3 + Math.sin(time * 3) * 2, 2, fur);
 }
 
-// ── катапульта ──
+// ── катапульта (1.0.140) ────────────────────────────────────────────────────
+// Прежняя была «два колеса и палка». Теперь: клёпаные колёса со спицами и
+// шиной, рама из брусьев с.visible волокнами древесины, А-образная стойка,
+// ворот с верёвкой, метательный рычаг с ковшом и противовесом.
 function drawCatapult(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw: number, _time: number) {
   const f = u.face;
   const move = moving(u);
-  const wob = move ? Math.sin(u.anim) * 1.5 : 0;
-  // большие колёса со спицами (1.0.139: обод с бликом, тень под колесом)
-  for (const wx of [-12, 12]) {
-    const cy0 = y + 6;
-    cxu(ctx, x + wx + wob, cy0, 8, '#2e1a06');
-    cxu(ctx, x + wx + wob, cy0, 6, '#4a2c10');
-    cxu(ctx, x + wx + wob, cy0, 2.5, '#a8824a');
-    pxu(ctx, x + wx + wob - 6, cy0 - 7, 12, 2, D('#4a2c10'));    // тень сверху под рамой
+  const wob = move ? Math.sin(u.anim) * 1.2 : 0;
+  const wood = '#5c3f1c', woodL = '#7a5628', woodD = '#3f2a12';
+
+  // ── КОЛЁСА ──
+  for (const wx of [-9, 9]) {
+    const cy0 = y + 1;
+    cxu(ctx, x + wx + wob, cy0, 6, woodD);
+    cxu(ctx, x + wx + wob, cy0, 4.8, wood);
+    cxu(ctx, x + wx + wob, cy0, 1.6, '#a8824a');
+    pxu(ctx, x + wx + wob - 6, cy0 - 6.5, 12, 1.6, woodD);            // тень сверху
     const rot = move ? u.anim * f : 0;
-    for (let i = 0; i < 4; i++) {
-      const a = rot + i * Math.PI / 2;
-      lnu(ctx, x + wx + wob, cy0, x + wx + wob + Math.cos(a) * 6, cy0 + Math.sin(a) * 6, 2, '#c9a05c');
+    for (let i = 0; i < 6; i++) {                                     // спицы
+      const a = rot + (i * Math.PI) / 3;
+      lnu(ctx, x + wx + wob, cy0, x + wx + wob + Math.cos(a) * 4.4, cy0 + Math.sin(a) * 4.4, 0.9, '#c9a05c');
     }
+    cxu(ctx, x + wx + wob - 1.4, cy0 - 1.4, 1.2, L('#c9a05c'));       // блик обода
   }
-  // рама: широкое основание-рама между колёсами
-  pxu(ctx, x - 16 + wob, y - 2, 32, 7, '#5c3f1c');
-  pxu(ctx, x - 16 + wob, y - 2, 32, 2, '#7a5628');               // блик по верхней кромке
-  pxu(ctx, x - 16 + wob, y + 3, 32, 2, D('#3f2a12'));            // тень по низу рамы
-  for (let i = -14; i <= 14; i += 7) pxu(ctx, x + i + wob, y - 1, 1.5, 5, D('#5c3f1c')); // волокна древесины
-  // диагональные упоры (А-образная стойка)
-  lnu(ctx, x - 8 + wob, y - 2, x - 2 + wob, y - 20, 5, '#6b4a22');
-  lnu(ctx, x + 8 + wob, y - 2, x + 2 + wob, y - 20, 5, '#6b4a22');
-  lnu(ctx, x - 8 + wob, y - 3, x - 2 + wob, y - 21, 1.5, L('#8a6132'));
-  lnu(ctx, x + 8 + wob, y - 3, x + 2 + wob, y - 21, 1.5, L('#8a6132'));
-  pxu(ctx, x - 4 + wob, y - 22, 8, 5, '#4a3115'); // ось рычага
-  // метательный рычаг: взведён назад (вверх) → бросок вперёд-вниз
+  // ── РАМА ──
+  pxu(ctx, x - 13 + wob, y - 4, 26, 3, wood);
+  pxu(ctx, x - 13 + wob, y - 4, 26, 0.9, woodL);
+  pxu(ctx, x - 13 + wob, y - 1.4, 26, 0.9, woodD);
+  for (let i = -11; i <= 11; i += 5) pxu(ctx, x + i + wob, y - 3.6, 0.8, 2.6, woodD); // волокна
+  pxu(ctx, x - 13 + wob, y - 4, 2, 3, '#3f2a12');                     // торцы бруса
+  pxu(ctx, x + 11 + wob, y - 4, 2, 3, '#3f2a12');
+  // ── А-ОБРАЗНАЯ СТОЙКА ──
+  lnu(ctx, x - 6 + wob, y - 4, x - 2 + wob, y - 15, 2, '#6b4a22');
+  lnu(ctx, x + 6 + wob, y - 4, x + 2 + wob, y - 15, 2, '#6b4a22');
+  lnu(ctx, x - 6 + wob, y - 5, x - 2 + wob, y - 16, 0.7, L('#8a6132'));
+  lnu(ctx, x + 6 + wob, y - 5, x + 2 + wob, y - 16, 0.7, L('#8a6132'));
+  pxu(ctx, x - 3 + wob, y - 16, 6, 1.6, '#4a3115');                   // ось рычага
+  cxu(ctx, x - 2.6 + wob, y - 15.2, 1, '#8a8580');                    // заклёпка оси
+  cxu(ctx, x + 2.6 + wob, y - 15.2, 1, '#8a8580');
+  // ── РЫЧАГ С КОВШОМ ──
   const ang = -1.5 + u.atkAnim * 2.6;
-  const ax = x + wob, ay = y - 20;
-  const tx = ax + f * Math.cos(ang) * 26, ty = ay + Math.sin(ang) * 26;
-  lnu(ctx, ax, ay, tx, ty, 5, '#8a5a2a');
-  lnu(ctx, ax, ay - 1.5, tx, ty - 1.5, 1.5, L('#a5743c'));       // свет по рычагу
-  // ковш с камнем
-  cxu(ctx, tx, ty, 5, '#3f2a14');
-  if (u.atkAnim < 0.45) {
-    cxu(ctx, tx - f * 2, ty - 4, 4.5, '#8a8580');
-    cxu(ctx, tx - f * 3, ty - 5, 2, '#b8b3ac');
+  const ax = x + wob, ay = y - 15;
+  const tx = ax + f * Math.cos(ang) * 20, ty = ay + Math.sin(ang) * 20;
+  lnu(ctx, ax, ay, tx, ty, 1.8, '#8a5a2a');
+  lnu(ctx, ax, ay - 0.7, tx, ty - 0.7, 0.6, L('#a5743c'));
+  cxu(ctx, tx, ty, 2.8, '#3f2a14');                                   // ковш
+  pxu(ctx, tx - 2.6, ty - 1, 5.2, 1, '#5c3f14');
+  if (u.atkAnim < 0.45) {                                             // камень в ковше
+    cxu(ctx, tx - f * 1.2, ty - 2.4, 2.6, '#8a8580');
+    cxu(ctx, tx - f * 1.8, ty - 3, 1.2, L('#b8b3ac'));
+    cxu(ctx, tx - f * 0.4, ty - 1.6, 1, D('#6f6b66'));
   }
-  // противовес на заднем конце
-  cxu(ctx, ax - f * Math.cos(ang) * 8, ay - Math.sin(ang) * 8, 5, '#57534e');
+  cxu(ctx, ax - f * Math.cos(ang) * 6, ay - Math.sin(ang) * 6, 3, '#57534e'); // противовес
+  cxu(ctx, ax - f * Math.cos(ang) * 6, ay - Math.sin(ang) * 6 - 1, 2, L('#6f6b66'));
 }
 
-// ── ТАРАН: бревно с окованным наконечником под навесом из кож на четырёх колёсах ──
+// ── ТАРАН: бревно с окованным наконечником под навесом из кож на колёсах ──
 function drawRam(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw: number, _time: number) {
   const f = u.face;
   const move = moving(u);
-  const wob = move ? Math.sin(u.anim) * 1.2 : 0;
+  const wob = move ? Math.sin(u.anim) * 1 : 0;
   const blue = u.owner === 'player';
-  for (const wx of [-14, 14]) {
-    const cy0 = y + 6;
-    cxu(ctx, x + wx + wob, cy0, 6, '#2e1a06'); cxu(ctx, x + wx + wob, cy0, 4.5, '#4a2c10'); cxu(ctx, x + wx + wob, cy0, 2, '#a8824a');
+
+  for (const wx of [-11, 11]) {
+    const cy0 = y + 1;
+    cxu(ctx, x + wx + wob, cy0, 4.4, '#2e1a06');
+    cxu(ctx, x + wx + wob, cy0, 3.2, '#4a2c10');
+    cxu(ctx, x + wx + wob, cy0, 1.2, '#a8824a');
+    const rot = move ? u.anim * f : 0;
+    for (let i = 0; i < 4; i++) {
+      const a = rot + (i * Math.PI) / 2;
+      lnu(ctx, x + wx + wob, cy0, x + wx + wob + Math.cos(a) * 2.8, cy0 + Math.sin(a) * 2.8, 0.7, '#c9a05c');
+    }
   }
-  // рама и навес (двускатная крыша из кож)
-  pxu(ctx, x - 18 + wob, y - 1, 36, 6, '#5c3f1c');
-  pxu(ctx, x - 18 + wob, y + 3, 36, 2, D('#3f2a12'));                 // тень под рамой
-  ctx.fillStyle = blue ? '#7c5a3a' : '#6b4a3a';
-  ctx.beginPath(); ctx.moveTo(x - 20 + wob, y - 2); ctx.lineTo(x + wob, y - 22); ctx.lineTo(x + 20 + wob, y - 2); ctx.closePath(); ctx.fill();
+  // рама
+  pxu(ctx, x - 15 + wob, y - 3, 30, 2.6, '#5c3f1c');
+  pxu(ctx, x - 15 + wob, y - 3, 30, 0.8, '#7a5628');
+  pxu(ctx, x - 15 + wob, y - 0.8, 30, 0.8, '#3f2a12');
+  // навес: двускатная крыша из кож (векторная заливка — скат без ступенек)
+  const roof = blue ? '#7c5a3a' : '#6b4a3a';
+  ctx.fillStyle = roof;
+  ctx.beginPath(); ctx.moveTo(x - 16 + wob, y - 3); ctx.lineTo(x + wob, y - 17); ctx.lineTo(x + 16 + wob, y - 3); ctx.closePath(); ctx.fill();
   ctx.fillStyle = blue ? '#9a7450' : '#8a6350';
-  ctx.beginPath(); ctx.moveTo(x - 20 + wob, y - 2); ctx.lineTo(x + wob, y - 22); ctx.lineTo(x + wob, y - 2); ctx.closePath(); ctx.fill();
-  // вышитый бордюр по коньку (казахский орнамент — полоска)
-  lnu(ctx, x - 20 + wob, y - 2, x + wob, y - 22, 1.5, blue ? '#f6d47c' : '#fca5a5');
-  lnu(ctx, x + wob, y - 22, x + 20 + wob, y - 2, 1.5, blue ? '#f6d47c' : '#fca5a5');
-  // бревно: качается вперёд при ударе (1.0.139: объём ствола и клёпки)
-  const swing = u.atkAnim > 0 ? Math.sin(u.atkAnim * Math.PI) * 9 : 0;
-  const bx0 = x + wob - f * 16 + f * swing, by0 = y - 9;
-  lnu(ctx, bx0, by0, bx0 + f * 40, by0, 5, '#7a5628');
-  lnu(ctx, bx0, by0 - 1, bx0 + f * 40, by0 - 1, 1.2, '#a07a45');
-  lnu(ctx, bx0, by0 + 2, bx0 + f * 40, by0 + 2, 1.5, D('#5c3f1c'));   // тень по низу ствола
-  for (let i = 6; i < 38; i += 8) pxu(ctx, bx0 + f * i, by0 - 1, 1.5, 3, D('#6b4a22')); // сучки
+  ctx.beginPath(); ctx.moveTo(x - 16 + wob, y - 3); ctx.lineTo(x + wob, y - 17); ctx.lineTo(x + wob, y - 3); ctx.closePath(); ctx.fill();
+  // стропила и швы на коже
+  for (let i = -3; i <= 3; i++) lnu(ctx, x + wob + i * 4.4, y - 3, x + wob + i * 1.2, y - 16, 0.6, D(roof));
+  lnu(ctx, x - 16 + wob, y - 3, x + wob, y - 17, 0.9, blue ? '#f6d47c' : '#fca5a5');   // бордюр по коньку
+  lnu(ctx, x + wob, y - 17, x + 16 + wob, y - 3, 0.9, blue ? '#f6d47c' : '#fca5a5');
+  // бревно: качается вперёд при ударе
+  const swing = u.atkAnim > 0 ? Math.sin(u.atkAnim * Math.PI) * 7 : 0;
+  const bx0 = x + wob - f * 13 + f * swing, by0 = y - 8;
+  lnu(ctx, bx0, by0, bx0 + f * 32, by0, 3.2, '#7a5628');
+  lnu(ctx, bx0, by0 - 1, bx0 + f * 32, by0 - 1, 0.9, '#a07a45');
+  lnu(ctx, bx0, by0 + 1.4, bx0 + f * 32, by0 + 1.4, 1, D('#5c3f1c'));
+  for (let i = 5; i < 30; i += 7) pxu(ctx, bx0 + f * i, by0 - 1, 1, 2.4, D('#6b4a22')); // сучки
   // окованный наконечник
-  pxu(ctx, bx0 + f * 36 - (f < 0 ? 7 : 0), by0 - 4, 7, 8, '#57534e');
-  pxu(ctx, bx0 + f * 39 - (f < 0 ? 3 : 0), by0 - 3, 3, 6, '#9ca3af');
-  // цепи подвеса
-  lnu(ctx, x + wob - 8, y - 18, bx0 + f * 8, by0, 1, '#3f3f46');
-  lnu(ctx, x + wob + 8, y - 18, bx0 + f * 28, by0, 1, '#3f3f46');
+  pxu(ctx, bx0 + f * 31, by0 - 2.4, 4, 4.8, '#57534e');
+  pxu(ctx, bx0 + f * 31, by0 - 2.4, 1.6, 4.8, L('#6f6b66'));
+  pxu(ctx, bx0 + f * 34.4, by0 - 1.6, 1.6, 3.2, '#8a8580');
+  // подвес бревна
+  lnu(ctx, x + wob - f * 4, y - 14, bx0 + f * 8, by0 - 2, 0.7, '#3f2a15');
+  lnu(ctx, x + wob + f * 4, y - 14, bx0 + f * 16, by0 - 2, 0.7, '#3f2a15');
 }
 
-// ── ФАЛЬКОНЕТ: короткий ствол на двухколёсном лафете, откат при выстреле ──
+// ── ФАЛЬКОНЕТ: бронзовая пушка на лафете ──
 function drawFalconet(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _sw: number, _time: number) {
   const f = u.face;
   const move = moving(u);
-  const wob = move ? Math.sin(u.anim) * 1.2 : 0;
-  const recoil = u.atkAnim > 0 ? Math.sin(Math.min(1, u.atkAnim * 1.6) * Math.PI) * 6 : 0;
+  const wob = move ? Math.sin(u.anim) * 1 : 0;
+  const recoil = u.atkAnim > 0 ? Math.sin(Math.min(1, u.atkAnim * 1.6) * Math.PI) * 5 : 0;
   const ox = x + wob - f * recoil;
-  // колёса
-  for (const wx of [-7, 7]) {
-    cxu(ctx, ox + wx, y + 6, 7, '#2e1a06'); cxu(ctx, ox + wx, y + 6, 5, '#4a2c10'); cxu(ctx, ox + wx, y + 6, 2, '#a8824a');
+
+  for (const wx of [-6, 6]) {
+    const cy0 = y + 1;
+    cxu(ctx, ox + wx, cy0, 5, '#2e1a06');
+    cxu(ctx, ox + wx, cy0, 3.8, '#4a2c10');
+    cxu(ctx, ox + wx, cy0, 1.4, '#a8824a');
     const rot = move ? u.anim * f : 0;
-    for (let i = 0; i < 3; i++) { const a = rot + i * Math.PI / 1.5; lnu(ctx, ox + wx, y + 6, ox + wx + Math.cos(a) * 5, y + 6 + Math.sin(a) * 5, 1.5, '#c9a05c'); }
+    for (let i = 0; i < 4; i++) {
+      const a = rot + (i * Math.PI) / 2;
+      lnu(ctx, ox + wx, cy0, ox + wx + Math.cos(a) * 3.4, cy0 + Math.sin(a) * 3.4, 0.8, '#c9a05c');
+    }
   }
-  // лафет: станина назад (1.0.139: объём дерева и бронзы)
-  lnu(ctx, ox, y + 2, ox - f * 18, y + 7, 4, '#5c3f1c');
-  lnu(ctx, ox, y + 4, ox - f * 18, y + 9, 1.5, D('#3f2a12'));
-  pxu(ctx, ox - 6, y - 4, 12, 7, '#6b4a22');
-  pxu(ctx, ox - 6, y - 4, 12, 2, L('#8a6132'));
-  pxu(ctx, ox - 6, y + 1, 12, 2, D('#4a3115'));
+  // лафет: станина назад и опора
+  lnu(ctx, ox, y - 2, ox - f * 15, y + 2, 2.4, '#5c3f1c');
+  lnu(ctx, ox, y - 0.6, ox - f * 15, y + 3, 0.9, D('#3f2a12'));
+  pxu(ctx, ox - 5, y - 5, 10, 5, '#6b4a22');
+  pxu(ctx, ox - 5, y - 5, 10, 1, L('#8a6132'));
+  pxu(ctx, ox - 5, y - 0.6, 10, 1, D('#4a3115'));
+  pxu(ctx, ox - 2, y - 4, 0.8, 3, D('#4a3115'));                       // болты
+  pxu(ctx, ox + 2, y - 4, 0.8, 3, D('#4a3115'));
   // ствол: бронзовый, слегка вверх
-  lnu(ctx, ox - f * 6, y - 4, ox + f * 22, y - 10, 6, '#7c5a1e');
-  lnu(ctx, ox - f * 6, y - 5, ox + f * 22, y - 11, 2, '#c8a44a');
-  lnu(ctx, ox - f * 6, y - 1, ox + f * 22, y - 7, 1.5, D('#5c3f14'));
-  cxu(ctx, ox + f * 22, y - 10, 3.5, '#3f2a14');   // дуло
-  cxu(ctx, ox - f * 5, y - 4, 4, '#8a6a2a');       // казённик
+  lnu(ctx, ox - f * 5, y - 5, ox + f * 18, y - 9, 4, '#7c5a1e');
+  lnu(ctx, ox - f * 5, y - 6.4, ox + f * 18, y - 10.4, 1.2, '#c8a44a');
+  lnu(ctx, ox - f * 5, y - 3.6, ox + f * 18, y - 7.6, 1.2, D('#5c3f14'));
+  cxu(ctx, ox + f * 18, y - 9, 2.4, '#3f2a14');                        // дуло
+  cxu(ctx, ox + f * 18, y - 9.6, 1.2, L('#6f6b66'));
+  cxu(ctx, ox - f * 4, y - 4.4, 2.6, '#8a6a2a');                       // казённик
+  cxu(ctx, ox - f * 4.6, y - 5, 1.2, L('#a98b3c'));
   // дымок после выстрела
-  if (u.atkAnim > 0.3) { ctx.globalAlpha = u.atkAnim * 0.5; cxu(ctx, ox + f * 28, y - 14, 5 + (1 - u.atkAnim) * 6, '#d6d3d1'); ctx.globalAlpha = 1; }
+  if (u.atkAnim > 0.3) {
+    ctx.globalAlpha = u.atkAnim * 0.5;
+    cxu(ctx, ox + f * 23, y - 12, 3.5 + (1 - u.atkAnim) * 4, '#d6d3d1');
+    ctx.globalAlpha = 1;
+  }
 }
 
 // ── НОЧНОЙ ФАКЕЛ У ЗДАНИЯ ────────────────────────────────────────────────────
