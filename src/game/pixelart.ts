@@ -1274,11 +1274,12 @@ function cx(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, c: s
 // Теперь кадр собирается в ART раз крупнее и уменьшается при выводе — как у
 // художника, который рисует в три-четыре раза больше экранного.
 // На приближении кадр и так большой, поэтому запас снижаем (память кэша).
-// Сколько пикселей черновика на одну игровую единицу. На листе арта (/?dev=art,
-// масштаб ×3–×6) запас нужен не меньше, а БОЛЬШЕ, чем в бою: иначе крупный кадр
-// просто растягивается из мелкого черновика и вместо деталей получается мыло.
-// В бою: ×4 на обычном обзоре, ×3 и ×2 на приближении (память кэша дороже).
-const artFor = (zoom: number) => (zoom >= 3 ? 4 : zoom >= 1.75 ? 2 : zoom >= 1.25 ? 3 : 4);
+// Сколько пикселей черновика на одну игровую единицу: А = черновик / габарит.
+// В бою юнит на экране 64 пикселя, черновик ×4 — это запас на сглаживание
+// (суперсэмплинг). На листе арта при ×6 юнит на экране 384 пикселя, и черновик
+// берётся 1:1 к выводу (×6), иначе крупный кадр растягивается из мелкого и
+// вместо деталей получается мыло.
+const artFor = (zoom: number) => (zoom >= 3 ? 6 : zoom >= 1.75 ? 4 : 4);
 let UUB = 1 / 3;                    // шаг сетки: один пиксель черновика (ставится на время отрисовки кадра)
 const PROC = new Map<string, { cv: HTMLCanvasElement; w: number; h: number; ox: number; oy: number }>();
 /** Сколько кадров в кэше (для тестов и диагностики). */
@@ -1312,10 +1313,11 @@ function lnu(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, 
 // Изготовить (или взять из кэша) кадр юнита. draw рисует в системе координат,
 // где (0,0) — точка под ногами юнита, ось Y вниз.
 interface ProcBox { w: number; h: number; ox: number; oy: number }
-function procFrame(key: string, box: ProcBox, zoom: number, draw: (c: CanvasRenderingContext2D) => void) {
+const uKeyOf = (key: string) => key.split('|')[0];
+function procFrame(key: string, box: ProcBox, zoom: number, fit: number, draw: (c: CanvasRenderingContext2D) => void) {
   const hit = PROC.get(key);
   if (hit) return hit;
-  const A = artFor(zoom);
+  const A = artFor(zoom) * (fit > 1.2 ? 1.15 : 1);   // крупной фигуре — чуть больше запаса
   const cv = document.createElement('canvas');
   cv.width = Math.max(1, Math.ceil(box.w * A));
   cv.height = Math.max(1, Math.ceil(box.h * A));
@@ -1325,7 +1327,10 @@ function procFrame(key: string, box: ProcBox, zoom: number, draw: (c: CanvasRend
   c.lineJoin = 'round'; c.lineCap = 'round';
   const keepUUB = UUB;
   UUB = 1 / A;                       // примитивы теперь кладут пиксель черновика
+  const slim = ['villager', 'swordsman', 'archer', 'spearman', 'monk', 'trader', 'scout'].includes(uKeyOf(key));
+  if (slim) c.scale(SLIM_HUMANOID, 1);
   draw(c);
+  if (slim) c.scale(1 / SLIM_HUMANOID, 1);
   UUB = keepUUB;
 
   // ── КОНТУР (1.0.139) ──
@@ -1353,6 +1358,75 @@ function procFrame(key: string, box: ProcBox, zoom: number, draw: (c: CanvasRend
     oc.drawImage(mask, dd, dd); oc.drawImage(mask, -dd, dd);
     oc.drawImage(mask, dd, -dd); oc.drawImage(mask, -dd, -dd);
     oc.drawImage(cv, 0, 0);
+
+    // ── ОБЩИЙ СВЕТ (1.0.143) ──
+    // Один проход вертикальным градиентом поверх силуэта: сверху тёплый свет,
+    // снизу холодная тень. Плоские заливки из-за этого получают плавный
+    // тональный переход — палитра кадра вырастает в разы, и спрайт перестаёт
+    // выглядеть «раскрашенной аппликацией». 'source-atop' красит только по
+    // уже нарисованному силуэту, альфу не трогает.
+    const light = oc.createLinearGradient(0, 0, 0, out.height);
+    light.addColorStop(0, 'rgba(255,246,224,0.20)');
+    light.addColorStop(0.45, 'rgba(255,246,224,0.03)');
+    light.addColorStop(0.72, 'rgba(24,30,44,0.06)');
+    light.addColorStop(1, 'rgba(16,22,36,0.34)');
+    oc.globalCompositeOperation = 'source-atop';
+    oc.fillStyle = light;
+    oc.fillRect(0, 0, out.width, out.height);
+    // притенение нижней трети: «земля отсвечивает меньше неба»
+    const ao = oc.createLinearGradient(0, out.height * 0.66, 0, out.height);
+    ao.addColorStop(0, 'rgba(10,14,24,0)');
+    ao.addColorStop(1, 'rgba(10,14,24,0.22)');
+    oc.fillStyle = ao;
+    oc.fillRect(0, 0, out.width, out.height);
+    oc.globalCompositeOperation = 'source-over';
+
+  // Зерно материала. Спрайт, сжатый с фотографии, богаче по тону вдвое: на
+  // каждый пиксель там свой оттенок. Плоские заливки дают «аппликацию», поэтому
+  // каждому непрозрачному пикселю силуэта добавляем свой сдвиг яркости. Хэш
+  // от координат, а не Math.random: случайное зерно рябило бы между кадрами
+  // анимации, фигура «кипела» бы на месте.
+  // Два удешевления. Первое: считаем зерно блоками — на листе арта (×6) кадр
+  // под миллион пикселей, попиксельно не успевало и за секунду. Крупнее блок —
+  // не хуже видом: при большом масштабе «материал» и должен быть крупнее, иначе
+  // это песок, а не фактура. Второе: идём не по кадру, а по прямоугольнику
+  // силуэта — он известен из роста фигуры и занимает пятую часть кадра.
+  try {
+    // Кадр — черновик с запасом: он больше игрового размера фигуры в scA раз
+    // (именно этот запас даёт сглаженные края после уменьшения). Все размеры
+    // ниже — в пикселях черновика, поэтому единицы фигуры умножаем на scA.
+    const scA = box.w > 0 ? out.width / box.w : 1;
+    const grow = (PROC_H[uKeyOf(key)] ?? 34) * fit * scA;        // рост фигуры в пикселях кадра
+    const wide = grow * (uKeyOf(key) === 'wolf' || MOUNTED_KEYS.includes(uKeyOf(key)) ? 0.62 : 0.34);
+    const gx0 = Math.max(0, Math.floor(box.ox * scA - wide));
+    const gx1 = Math.min(out.width, Math.ceil(box.ox * scA + wide));
+    const gy0 = Math.max(0, Math.floor(box.oy * scA - grow * 1.12));
+    const gy1 = Math.min(out.height, Math.ceil(box.oy * scA + 4 * scA));
+    const gx = gx1 - gx0, gy = gy1 - gy0;
+    const blk = gx * gy > 150000 ? 2 : 1;
+    if (gx > 0 && gy > 0) {
+      const im = oc.getImageData(gx0, gy0, gx, gy);
+      const d = im.data;
+      for (let yy = 0; yy < gy; yy += blk) {
+        for (let xx = 0; xx < gx; xx += blk) {
+          const i0 = (yy * gx + xx) * 4;
+          if (d[i0 + 3] < 200) continue;             // край силуэта не трогаем
+          const hsh = (((xx + gx0) * 73856093) ^ ((yy + gy0) * 19349663)) & 0xffff;
+          const k = ((hsh % 997) / 997 - 0.5) * 2 * 13;   // ±13 единиц яркости
+          for (let by = 0; by < blk; by++) {
+            const row = yy + by; if (row >= gy) break;
+            for (let bx = 0; bx < blk; bx++) {
+              const col = xx + bx; if (col >= gx) break;
+              const i = (row * gx + col) * 4;
+              if (d[i + 3] < 200) continue;
+              d[i] = d[i] + k; d[i + 1] = d[i + 1] + k * 0.92; d[i + 2] = d[i + 2] + k * 0.86;
+            }
+          }
+        }
+      }
+      oc.putImageData(im, gx0, gy0);
+    }
+  } catch { /* пиксели недоступны — обходимся без зерна */ }
   } catch { /* нет канваса (тест) — рисуем без контура */ }
 
   const rec = { cv: out, ...box };
@@ -1360,12 +1434,46 @@ function procFrame(key: string, box: ProcBox, zoom: number, draw: (c: CanvasRend
   return rec;
 }
 /** Блокировать кадр юнита по размерам (все юниты рисуются в одном габарите). */
-const procBox = (u: U, zoom = 1): ProcBox => {
+// Высота фигуры в ЕДИНИЦАХ, как её рисует процедурный код (1.0.143).
+// Настоящие спрайты в игре выводятся высотой по UNIT_TARGET_H (крестьянин 46,
+// всадник 60, волк 34), а процедурные фигуры получались мельче — крестьянин
+// 34, всадник 50. Из-за этого процедурный юнит выглядел простым и худым рядом
+// с PNG, а при догрузке спрайтов размер заметно «прыгал». Теперь фигура
+// приводится к той же высоте, что и настоящий спрайт этого юнита.
+// Числа — не «по замыслу», а измеренные: scripts/proc-preview.cjs all печатает
+// фактическую высоту силуэта каждого юнита в единицах рендера.
+const PROC_H: Record<string, number> = {
+  villager: 22.5, swordsman: 25.1, archer: 24.4, spearman: 25.1, monk: 25.5, trader: 22, scout: 25.1,
+  knight: 44.6, cavalry: 44.6, horsearcher: 44.6, camelry: 44.6,
+  wolf: 25.6, sheep: 22.7, cow: 26, deer: 36,
+  catapult: 47.8, ram: 23.7, falconet: 18,
+};
+// Ширина силуэта к росту: у настоящих спрайтов ~0.35 (крестьянин 16×46),
+// процедурные фигуры выходили 0.74 — то есть вдвое шире человека. Сужаем
+// силуэт по X; голову рисуем с компенсацией (ниже), иначе лицо сплющится.
+const SLIM_HUMANOID = 0.5;
+const MOUNTED_KEYS = ['knight', 'cavalry', 'horsearcher', 'camelry', 'trader'];
+
+// Во сколько раз растянуть фигуру, чтобы она совпала по росту со своим же
+// PNG-спрайтом. Где высоты спрайта нет (таран, фальконет) — оставляем как есть.
+const fitScale = (u: U) => {
+  const target = UNIT_TARGET_H[u.key];
+  const raw = PROC_H[u.key];
+  if (!target || !raw) return 1;
+  return target / raw;
+};
+
+// Габарит кадра — в ЕДИНИЦАХ ФИГУРЫ и не зависит от зума (1.0.142).
+// Раньше габарит умножался на зум: рос конверт кадра, а фигура внутри него
+// оставалась тех же 34 единиц — оттого переключатель масштаба на листе арта
+// увеличивал подложку, а не юнита. Теперь масштаб применяется один раз, при
+// выводе готового кадра (см. drawProcUnit).
+const procBoxFit = (u: U, fit: number): ProcBox => {
   const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'camelry' || u.key === 'trader';
   const big = u.key === 'catapult' || u.key === 'ram' || u.key === 'falconet';
-  const w = (big ? 84 : mounted ? 80 : 64) * zoom;
-  const h = (big ? 76 : mounted ? 76 : 72) * zoom;
-  return { w, h, ox: w / 2, oy: h - 12 * zoom };
+  const w = (big ? 84 : mounted ? 100 : 64) * fit;
+  const h = (big ? 76 : mounted ? 76 : 72) * fit;
+  return { w, h, ox: w / 2, oy: h - 12 * fit };
 };
 
 // ── ТОН (1.0.139) ───────────────────────────────────────────────────────────
@@ -1479,9 +1587,11 @@ function drawProcUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: numbe
   const mounted = u.key === 'knight' || u.key === 'cavalry' || u.key === 'horsearcher' || u.key === 'camelry'
     || u.key === 'trader' || (u.owner === 'player' && u.key === 'villager' && (u as U & { herder?: boolean }).herder);
   const zk = Math.max(0.5, Math.round(zoom * 4) / 4);      // зум режем до 0.25
+  const fit = fitScale(u);                                  // приводим рост к спрайту
+  const sc = zk * fit;
   const key = `${u.key}|${u.owner}|${f}|${zk}|${procPhase(u, sw, atk)}`;
-  const box = procBox(u, zk);
-  const rec = procFrame(key, box, zk, (c) => {
+  const box = procBoxFit(u, fit);
+  const rec = procFrame(key, box, zk, fit, (c) => {
     const x = atk > 0 ? atk * 4 * f : 0;
     if (u.key === 'wolf') drawWolf(c, u, x, 0, sw, time);
     else if (u.key === 'sheep' || u.key === 'cow' || u.key === 'deer') drawLivestock(c, u, x, 0, sw, 0);
@@ -1490,10 +1600,22 @@ function drawProcUnit(ctx: CanvasRenderingContext2D, u: U, ix: number, iy: numbe
     else if (u.key === 'falconet') drawFalconet(c, u, x, 0, sw, time);
     // торговец «верхом», но не на коне: пока спрайт верблюда не загрузился — рисуем
     // купца пешим (drawHumanoid), а НЕ рыцарским конём из drawHorse
-    else if (mounted && u.key !== 'trader') { drawHorse(c, u, x, 0, sw, time); drawRider(c, u, x, 0, sw, atk, time, t); }
+    else if (mounted && u.key !== 'trader') {
+      // Конь у процедурной фигуры выходил коротким: длина/высота 0.75, тогда как
+      // у настоящего спрайта 1.17 (жабы — коренастые, но не куб). Растягиваем
+      // коня по X вокруг той же оси, на которой стоит всадник, — иначе фигуры
+      // разъедутся. Всадника, наоборот, сужаем: для него действует тот же
+      // «человеческий» SLIM_HUMANOID, что и для пехоты.
+      const sx = (k: number) => { c.save(); c.translate(x, 0); c.scale(k, 1); c.translate(-x, 0); };
+      sx(1.45); drawHorse(c, u, x, 0, sw, time); c.restore();
+      sx(SLIM_HUMANOID); drawRider(c, u, x, 0, sw, atk, time, t); c.restore();
+    }
     else drawHumanoid(c, u, x, 0, sw, atk, time, t);
   });
-  ctx.drawImage(rec.cv, ix - box.ox, iy - box.oy, box.w, box.h);
+  // Масштаб применяется к готовому кадру: и фигура, и её детали растут вместе
+  // с ним (на листе арта переключатель ×1/×3/×6 теперь реально увеличивает
+  // юнита, а не только подложку ячейки).
+  ctx.drawImage(rec.cv, ix - box.ox * sc, iy - box.oy * sc, box.w * sc, box.h * sc);
   // Защита памяти. Комбинаций много (юнит × команда × поворот × фаза × зум),
   // а каждый кадр — отдельный канвас: держим кэш в пределах пары сотен и
   // выбрасываем самые старые (Map помнит порядок вставки).
@@ -1651,7 +1773,7 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
     cxu(ctx, x + f * 4.8, y - 3.6 - swing, 1.2, SKIN);
     // голова: смуглая, скулы, эпикантус, усы, борода
     pxu(ctx, x - 0.9, y - 11, 1.8, 1.4, D(SKIN));
-    ell(ctx, x, y - 14.6, 3, 3.75, SKIN, SKIN_D);
+    ell(ctx, x, y - 14.6, 2.8 / SLIM_HUMANOID, 3.6, SKIN, SKIN_D);
     pxu(ctx, x + f * 1.6, y - 14.6, 1.4, 5.4, SKIN_D);                          // скула в тени
     pxu(ctx, x + f * 0.6, y - 15.6, 1.5, 0.9, '#f8fafc');                      // белок
     pxu(ctx, x + f * 1.2, y - 15.5, 0.9, 0.9, '#241a10');                      // зрачок
@@ -1687,7 +1809,7 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
     poly(ctx, [[x + f * 4, y - 10], [x + f * 5.6, y - 10], [x + f * 5.4, y - 4], [x + f * 4, y - 4]], coat);
     cxu(ctx, x + f * 4.8, y - 3.6, 1.2, SKIN);
     pxu(ctx, x - 0.9, y - 11, 1.8, 1.4, D(SKIN));
-    ell(ctx, x, y - 14.6, 3, 3.75, SKIN, SKIN_D);
+    ell(ctx, x, y - 14.6, 2.8 / SLIM_HUMANOID, 3.6, SKIN, SKIN_D);
     pxu(ctx, x + f * 1.6, y - 14.6, 1.4, 5.4, SKIN_D);
     pxu(ctx, x + f * 0.6, y - 15.6, 1.5, 0.9, '#f8fafc');
     pxu(ctx, x + f * 1.2, y - 15.5, 0.9, 0.9, '#241a10');
@@ -1709,8 +1831,8 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   poly(ctx, [[x - f * 4.4, y - 10], [x - f * 6, y - 10], [x - f * 5.8, y - 4 + step * 0.5], [x - f * 4.4, y - 4 + step * 0.5]], D(robeC));
   cxu(ctx, x - f * 5.2, y - 3.4 + step * 0.5, 1.1, D(SKIN));
   // корпус: плечи, талия, подол колоколом
-  polyG(ctx, [[x - 4.4, y - 10.6], [x + 4.4, y - 10.6], [x + 4.8, y - 2.2], [x - 4.8, y - 2.2]], L(robeC), D(robeC));
-  poly(ctx, [[x + f * 1.8, y - 10.6], [x + f * 4.4, y - 10.6], [x + f * 4.8, y - 2.2], [x + f * 2, y - 2.2]], D(robeC)); // тень со спины
+  polyG(ctx, [[x - 4, y - 10.6], [x + 4, y - 10.6], [x + 4.4, y - 2.2], [x - 4.4, y - 2.2]], L(robeC), D(robeC));
+  poly(ctx, [[x + f * 1.6, y - 10.6], [x + f * 4, y - 10.6], [x + f * 4.4, y - 2.2], [x + f * 1.8, y - 2.2]], D(robeC)); // тень со спины
   pxu(ctx, x - f * 4.2, y - 10.4, 1.6, 8.2, L(robeC));                        // блик по груди
   if (armored) {
     // сауыт: ряды пластин с бликом и тёмным низом
@@ -1768,7 +1890,7 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   // тень от головы на плечи и ворот
   shadowPoly(ctx, [[x - 4.2, y - 11.2], [x + 4.2, y - 11.2], [x + 3.8, y - 9.8], [x - 3.8, y - 9.8]], 0.22);
   pxu(ctx, x - 0.9, y - 11, 1.8, 1.5, D(SKIN));                               // шея
-  ell(ctx, x, y - 14.6, 3, 3.75, SKIN, SKIN_D);
+  ell(ctx, x, y - 14.6, 2.8 / SLIM_HUMANOID, 3.6, SKIN, SKIN_D);
   pxu(ctx, x + f * 1.6, y - 14.6, 1.4, 5.4, SKIN_D);                           // скула в тени
   pxu(ctx, x + f * 0.6, y - 15.7, 1.5, 0.9, '#f8fafc');                        // белки
   pxu(ctx, x - f * 1.5, y - 15.7, 1.2, 0.9, '#e8eef2');
@@ -1783,7 +1905,7 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   // ── ГОЛОВНОЙ УБОР ──
   if (isVill) {
     // қалпақ: войлочная шляпа с широкими полями
-    ell(ctx, x, y - 17.4, 3.2, 2.4, '#7d4513', '#5a2f0c');
+    ell(ctx, x, y - 17.4, 3.2 / SLIM_HUMANOID, 2.4, '#7d4513', '#5a2f0c');
     poly(ctx, [[x - 5.6, y - 16.6], [x + 5.6, y - 16.6], [x + 5.2, y - 15.6], [x - 5.2, y - 15.6]], '#6b3a10');
     pxu(ctx, x - 5.6, y - 15.7, 11.2, 0.5, D('#5a2f0c'));
     pxu(ctx, x - 3.2, y - 17.2, 1.6, 1.2, L('#8f5220'));
@@ -1791,12 +1913,12 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
     const hd = u.owner === 'player' ? '#0f6930' : '#7c2d12';
     polyG(ctx, [[x - 3.6, y - 13], [x + 3.6, y - 13], [x + 3.2, y - 18.6], [x - 3.4, y - 18.6]], hd, D(hd)); // капюшон
     poly(ctx, [[x - f * 2.2, y - 18.4], [x + f * 0.6, y - 18.4], [x - f * 0.4, y - 22], [x - f * 2.6, y - 21]], hd); // остриё
-    pxu(ctx, x + f * 1, y - 14.4, 2.6, 3.4, SKIN_D);                           // лицо в тени капюшона
+    pxu(ctx, x + f * 1, y - 14.4, 2.6 / SLIM_HUMANOID, 3.4, SKIN_D);           // лицо в тени капюшона
     pxu(ctx, x + f * 1.8, y - 14.6, 1, 0.9, '#241a10');
     pxu(ctx, x + f * 0.4, y - 13.2, 1.8, 0.8, '#3f2a15');
   } else if (armored) {
     // дулыға: купол, обод, наносник, бармица, султан
-    ell(ctx, x, y - 16.6, 3.4, 2.6, '#d5d5d5', '#8a8a8a');
+    ell(ctx, x, y - 16.6, 3.4 / SLIM_HUMANOID, 2.6, '#d5d5d5', '#8a8a8a');
     poly(ctx, [[x - 3.6, y - 17.2], [x + 3.6, y - 17.2], [x + 3.6, y - 16], [x - 3.6, y - 16]], '#8a8a8a'); // обод
     pxu(ctx, x - 0.6, y - 18, 1.2, 3.6, '#a0a0a0');                            // наносник
     pxu(ctx, x - 3.4, y - 15.4, 6.8, 0.8, D('#8a8a8a'));
@@ -1830,16 +1952,16 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
     pxu(ctx, tx - 1.8, ty - 2.4, 1, 3, L('#c9c9c9'));
   } else if (isArch) {
     // садақ: сложносоставной лук (двойная дуга), тетива, стрела
-    const bx = x + f * 7, by = y - 6.5;
-    arc(ctx, bx, by, 5.6, -1.35, 1.35, 1.1, '#6b3a10');
-    arc(ctx, bx - f * 0.8, by, 4.4, -1.1, 1.1, 0.8, L('#7d4513'));
+    const bx = x + f * 5.4, by = y - 6.5;
+    arc(ctx, bx, by, 4.6, -1.35, 1.35, 1, '#6b3a10');
+    arc(ctx, bx - f * 0.8, by, 3.6, -1.1, 1.1, 0.7, L('#7d4513'));
     const pull = atk * 3;
     lnu(ctx, bx + f * Math.cos(-1.35) * 5.6, by + Math.sin(-1.35) * 5.6, bx - f * pull, by, 0.6, '#fef3c7');
     lnu(ctx, bx + f * Math.cos(1.35) * 5.6, by + Math.sin(1.35) * 5.6, bx - f * pull, by, 0.6, '#fef3c7');
     if (atk > 0.25) { lnu(ctx, bx - f * pull, by, bx + f * 5, by, 0.9, '#8a6a3a'); pxu(ctx, bx + f * 5, by - 0.8, 1.2, 1.6, '#d6d3d1'); }
   } else if (isSpear) {
     // найза: древко, наконечник-перо, красная кисть под ним
-    const ext = 13 + atk * 7;
+    const ext = 8 + atk * 5;
     lnu(ctx, x - f * 1, y - 2, x + f * ext, y - 14, 1.1, '#8a5a2a');
     lnu(ctx, x - f * 1, y - 2.5, x + f * ext, y - 14.5, 0.4, L('#a5743c'));
     poly(ctx, [[x + f * ext, y - 16.8], [x + f * (ext + 1.6), y - 13.6], [x + f * (ext - 1.6), y - 13.6]], '#d6d3d1');
@@ -1865,15 +1987,15 @@ function drawHumanoid(ctx: CanvasRenderingContext2D, u: U, x: number, y: number,
   }
   // қалқан — круглый щит, обтянутый кожей, с умбоном и заклёпками
   if (!isArch && !isVill) {
-    const sx2 = x - f * 8.4, sy2 = y - 6.4;
-    ell(ctx, sx2, sy2, 3.4, 4.2, L(t.tunicD), D(t.tunicD));
-    arc(ctx, sx2, sy2, 3.4, 0, Math.PI * 2, 0.7, '#8a6a2a');                    // обод
-    ell(ctx, sx2, sy2, 1.2, 1.4, '#d6c9a8', '#8a6a2a');                         // умбон
+    const sx2 = x - f * 5.6, sy2 = y - 6.4;
+    ell(ctx, sx2, sy2, 2.6, 3.2, L(t.tunicD), D(t.tunicD));
+    arc(ctx, sx2, sy2, 2.6, 0, Math.PI * 2, 0.6, '#8a6a2a');                    // обод
+    ell(ctx, sx2, sy2, 0.9, 1.1, '#d6c9a8', '#8a6a2a');                         // умбон
     for (let i = 0; i < 6; i++) {                                               // заклёпки
       const a = (i / 6) * Math.PI * 2;
-      cxu(ctx, sx2 + Math.cos(a) * 2.5, sy2 + Math.sin(a) * 3.1, 0.35, '#c9a05c');
+      cxu(ctx, sx2 + Math.cos(a) * 1.9, sy2 + Math.sin(a) * 2.4, 0.3, '#c9a05c');
     }
-    ornament(ctx, sx2 - 3, sy2 + 1.6, sx2 + 3, sy2 + 1.6, 0.3, t.trim);
+    ornament(ctx, sx2 - 2.2, sy2 + 1.2, sx2 + 2.2, sy2 + 1.2, 0.25, t.trim);
   }
 }
 
@@ -2003,14 +2125,14 @@ function drawRider(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _s
 
   // ─ ГОЛОВА: дулыға с султаном, смуглое лицо, усы ─
   pxu(ctx, rx - 0.9, ry - 10.8, 1.8, 1.4, D(SKIN));
-  ell(ctx, rx, ry - 13.4, 3, 3.6, SKIN, SKIN_D);
+  ell(ctx, rx, ry - 13.4, 3 / SLIM_HUMANOID, 3.6, SKIN, SKIN_D);
   pxu(ctx, rx + f * 1.6, ry - 13.4, 1.4, 5, SKIN_D);
   pxu(ctx, rx + f * 0.6, ry - 14.4, 1.4, 0.9, '#f8fafc');
   pxu(ctx, rx + f * 1.1, ry - 14.3, 0.8, 0.9, '#241a10');
   pxu(ctx, rx - f * 1.4, ry - 14.4, 1.1, 0.9, '#e8eef2');
   pxu(ctx, rx + f * 0.4, ry - 14.8, 1.5, 0.4, '#2b1a0c');
   pxu(ctx, rx + f * 0.3, ry - 12.2, 2.1, 0.9, '#3f2a15');                       // усы
-  ell(ctx, rx, ry - 15.6, 3.2, 2.4, '#d5d5d5', '#8a8a8a');                      // дулыға
+  ell(ctx, rx, ry - 15.6, 3.2 / SLIM_HUMANOID, 2.4, '#d5d5d5', '#8a8a8a');      // дулыға
   pxu(ctx, rx - 3.4, ry - 16, 6.8, 1.2, '#8a8a8a');
   pxu(ctx, rx - 0.5, ry - 16.6, 1, 3, '#a0a0a0');                               // наносник
   cxu(ctx, rx - f * 1.8, ry - 16.8, 1.1, L('#e8e8e8'));
@@ -2019,7 +2141,7 @@ function drawRider(ctx: CanvasRenderingContext2D, u: U, x: number, y: number, _s
   poly(ctx, [[rx - f * 0.8, ry - 19.4], [rx - f * 1.2, ry - 19], [rx - f * 4, ry - 20.6], [rx - f * 3.6, ry - 21]], t.plume);
 
   // ─ ПИКА (найза) ─
-  const ext = 15 + atk * 8;
+  const ext = 10 + atk * 6;
   lnu(ctx, rx + f * 3, ry - 6, rx + f * ext, ry - 12 - atk * 3, 1.3, '#78450f');
   lnu(ctx, rx + f * 3, ry - 6.5, rx + f * ext, ry - 12.5 - atk * 3, 0.4, L('#a5743c'));
   poly(ctx, [[rx + f * ext, ry - 15], [rx + f * (ext + 1.6), ry - 11.8], [rx + f * (ext - 1.6), ry - 11.8]], '#d6d3d1');
