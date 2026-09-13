@@ -338,7 +338,34 @@ function profile20(m) {
 const norm = (p) => { const mx = Math.max(...p, 1); return p.map(v => +(v / mx).toFixed(2)); };
 const diff = (a, b) => Math.sqrt(a.reduce((s, v, i) => s + (v - b[i]) ** 2, 0) / a.length);
 
-module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20, norm, diff };
+// ── АНТРОПОМЕТРИЯ ───────────────────────────────────────────────────────────
+// Профиль ширины метрике можно угодить и уродом: сузил тело вдвое — профиль
+// совпал с эталоном, а вышла голова на палочке. Здесь считаются человеческие
+// доли роста. Нормы — по натуре с поправкой на пиксель-арт (голова чуть
+// крупнее, иначе лицо не прочитать).
+const NORM = { head: [0.10, 0.20], sh: [0.18, 0.34], waist: [0.10, 0.26], legs: [0.35, 0.60] };
+function anthro(m) {
+  const a = m.top, b = m.bottom, h = Math.max(1, b - a + 1);
+  const at = (f) => { const r = m.profile[Math.round(a + h * f)]; return r ? r.w : 0; };
+  const band = (lo, hi, fn) => {
+    let v = fn === 'max' ? 0 : Infinity;
+    for (let f = lo; f <= hi + 1e-9; f += 0.005) { const w = at(f); if (w > 0) v = fn === 'max' ? Math.max(v, w) : Math.min(v, w); }
+    return v === Infinity ? 0 : v;
+  };
+  const r = { grow: h, head: band(0, 0.13, 'max'), sh: band(0.15, 0.36, 'max'), waist: band(0.42, 0.62, 'min'), legs: at(0.88), maxW: m.maxW };
+  r.bad = [];
+  for (const k of Object.keys(NORM)) {
+    const [lo, hi] = NORM[k], v = r[k] / h;
+    if (v < lo || v > hi) r.bad.push(`${k} ${(Math.round(v * 100) / 100)} (норма ${lo}–${hi})`);
+  }
+  return r;
+}
+const anthroLine = (name, r) => `${name.padEnd(9)} рост ${String(r.grow).padStart(3)} · голова ${String(r.head).padStart(3)}`
+  + ` · плечи ${String(r.sh).padStart(3)} · талия ${String(r.waist).padStart(3)} · ноги ${String(r.legs).padStart(3)}`
+  + ` · макс ${String(r.maxW).padStart(3)}   доли: ${Object.keys(NORM).map(k => (Math.round(r[k] / r.grow * 100) / 100)).join(' / ')}`
+  + (r.bad.length ? `\n    ⚠ вне нормы: ${r.bad.join('; ')}` : '');
+
+module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20, norm, diff, anthro };
 
 // ── запуск из командной строки ──────────────────────────────────────────────
 (async () => {
@@ -418,6 +445,7 @@ module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20
 
   const mine = metrics({ width: W, height: H, data: cv.data });
   const refFile = path.join(ROOT, 'src/assets/sprites/units/kz', `${key}.png`);
+  let refMetrics = null;
   console.log(`\n=== ${key} (процедурный, зум ×${zoom}) ===`);
   console.log(`габарит ${mine.W}×${mine.H}, силуэт строк ${mine.top}…${mine.bottom}, высота ${mine.bottom - mine.top + 1}`);
   console.log(`площадь силуэта ${(mine.fill * 100).toFixed(1)}% кадра, макс. ширина ${mine.maxW}, цветов ${mine.colors}, яркость ${mine.lum.toFixed(0)}`);
@@ -448,6 +476,7 @@ module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20
     }
     fs.writeFileSync(path.join(OUT, `${key}_ref_scaled.png`), encodePNG(rw, rh, rs.data));
     const ref = metrics({ width: rw, height: rh, data: rs.data });
+    refMetrics = ref;
     console.log(`\n--- эталон ${key}.png, приведён к ${rh} px (игровой размер) ---`);
     console.log(`габарит ${ref.W}×${ref.H}, силуэт строк ${ref.top}…${ref.bottom}, высота ${ref.bottom - ref.top + 1}`);
     console.log(`площадь силуэта ${(ref.fill * 100).toFixed(1)}% кадра, макс. ширина ${ref.maxW}, цветов ${ref.colors}, яркость ${ref.lum.toFixed(0)}`);
@@ -455,5 +484,8 @@ module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20
     console.log(`\nрасхождение профиля: ${diff(norm(profile20(mine)), norm(profile20(ref))).toFixed(3)} (0 — совпадает)`);
     console.log(`отношение цветов: ${(mine.colors / ref.colors).toFixed(2)}×  ·  яркость: ${(mine.lum / ref.lum).toFixed(2)}×`);
   } else console.log(`\nэталона ${refFile} нет — сравнивать не с чем`);
+  console.log('\n--- антропометрия (доли роста: голова / плечи / талия / ноги) ---');
+  console.log(anthroLine('процед.', anthro(mine)));
+  if (refMetrics) console.log(anthroLine('эталон', anthro(refMetrics)));
   console.log(`\nPNG: ${path.relative(ROOT, file)}`);
 })();
