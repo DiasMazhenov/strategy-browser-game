@@ -22,3 +22,4 @@ src/assets/sprites/units/_gen/
 
 # локальная копия workflow: пуш запрещён правами токена, ставится вручную из ci/
 .github/
+tmp-preview/
