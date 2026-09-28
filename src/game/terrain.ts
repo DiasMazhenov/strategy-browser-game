@@ -90,11 +90,11 @@ export class Terrain {
   }
 
   // базовые поля шума
-  private elev(wx: number, wz: number) { return fbm(wx, wz, this.seed, 600, 5); }
-  private moist(wx: number, wz: number) { return fbm(wx, wz, this.seed + 17, 600, 4); }
-  private temp(wx: number, wz: number) { return fbm(wx, wz, this.seed + 31, 1200, 3); }
+  elev(wx: number, wz: number) { return fbm(wx, wz, this.seed, 600, 5); }
+  moist(wx: number, wz: number) { return fbm(wx, wz, this.seed + 17, 600, 4); }
+  temp(wx: number, wz: number) { return fbm(wx, wz, this.seed + 31, 1200, 3); }
   // долины рек: узкие извилистые ленты понижения
-  private river(wx: number, wz: number) {
+  river(wx: number, wz: number) {
     const v = fbm(wx, wz, this.seed + 53, 1200, 3);
     // «гребень» v≈0.5 → узкая долина реки (две системы рек разной частотой)
     const m1 = 1 - Math.min(1, Math.abs(v - 0.5) * 16);
@@ -102,6 +102,16 @@ export class Terrain {
     const m2 = 1 - Math.min(1, Math.abs(v2 - 0.55) * 20);
     return Math.max(m1, m2);
   }
+
+  // Публичные точки входа для слоя местности (?dev=map).
+  // Раньше поля шума были приватными: рельеф считался только внутри classAt,
+  // и нарисовать непрерывную карту (гипсометрия, тени склонов, русла) было
+  // нечем. Здесь те же функции, что считают биом, — значит внешний вид
+  // гарантированно совпадёт с игровой проходимостью.
+  elevAt(wx: number, wz: number): number { return this.elev(wrapW(wx), wrapH(wz)); }
+  moistAt(wx: number, wz: number): number { return this.moist(wrapW(wx), wrapH(wz)); }
+  tempAt(wx: number, wz: number): number { return this.temp(wrapW(wx), wrapH(wz)); }
+  riverAt(wx: number, wz: number): number { return this.river(wrapW(wx), wrapH(wz)); }
 
   private rawClass(wx0: number, wz0: number): TerrainClass {
     const wx = wrapW(wx0), wz = wrapH(wz0);

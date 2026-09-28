@@ -1381,52 +1381,6 @@ function procFrame(key: string, box: ProcBox, zoom: number, fit: number, draw: (
     oc.fillRect(0, 0, out.width, out.height);
     oc.globalCompositeOperation = 'source-over';
 
-  // Зерно материала. Спрайт, сжатый с фотографии, богаче по тону вдвое: на
-  // каждый пиксель там свой оттенок. Плоские заливки дают «аппликацию», поэтому
-  // каждому непрозрачному пикселю силуэта добавляем свой сдвиг яркости. Хэш
-  // от координат, а не Math.random: случайное зерно рябило бы между кадрами
-  // анимации, фигура «кипела» бы на месте.
-  // Два удешевления. Первое: считаем зерно блоками — на листе арта (×6) кадр
-  // под миллион пикселей, попиксельно не успевало и за секунду. Крупнее блок —
-  // не хуже видом: при большом масштабе «материал» и должен быть крупнее, иначе
-  // это песок, а не фактура. Второе: идём не по кадру, а по прямоугольнику
-  // силуэта — он известен из роста фигуры и занимает пятую часть кадра.
-  try {
-    // Кадр — черновик с запасом: он больше игрового размера фигуры в scA раз
-    // (именно этот запас даёт сглаженные края после уменьшения). Все размеры
-    // ниже — в пикселях черновика, поэтому единицы фигуры умножаем на scA.
-    const scA = box.w > 0 ? out.width / box.w : 1;
-    const grow = (PROC_H[uKeyOf(key)] ?? 34) * fit * scA;        // рост фигуры в пикселях кадра
-    const wide = grow * (uKeyOf(key) === 'wolf' || MOUNTED_KEYS.includes(uKeyOf(key)) ? 0.62 : 0.34);
-    const gx0 = Math.max(0, Math.floor(box.ox * scA - wide));
-    const gx1 = Math.min(out.width, Math.ceil(box.ox * scA + wide));
-    const gy0 = Math.max(0, Math.floor(box.oy * scA - grow * 1.12));
-    const gy1 = Math.min(out.height, Math.ceil(box.oy * scA + 4 * scA));
-    const gx = gx1 - gx0, gy = gy1 - gy0;
-    const blk = gx * gy > 150000 ? 2 : 1;
-    if (gx > 0 && gy > 0) {
-      const im = oc.getImageData(gx0, gy0, gx, gy);
-      const d = im.data;
-      for (let yy = 0; yy < gy; yy += blk) {
-        for (let xx = 0; xx < gx; xx += blk) {
-          const i0 = (yy * gx + xx) * 4;
-          if (d[i0 + 3] < 200) continue;             // край силуэта не трогаем
-          const hsh = (((xx + gx0) * 73856093) ^ ((yy + gy0) * 19349663)) & 0xffff;
-          const k = ((hsh % 997) / 997 - 0.5) * 2 * 13;   // ±13 единиц яркости
-          for (let by = 0; by < blk; by++) {
-            const row = yy + by; if (row >= gy) break;
-            for (let bx = 0; bx < blk; bx++) {
-              const col = xx + bx; if (col >= gx) break;
-              const i = (row * gx + col) * 4;
-              if (d[i + 3] < 200) continue;
-              d[i] = d[i] + k; d[i + 1] = d[i + 1] + k * 0.92; d[i + 2] = d[i + 2] + k * 0.86;
-            }
-          }
-        }
-      }
-      oc.putImageData(im, gx0, gy0);
-    }
-  } catch { /* пиксели недоступны — обходимся без зерна */ }
   } catch { /* нет канваса (тест) — рисуем без контура */ }
 
   const rec = { cv: out, ...box };
@@ -1452,7 +1406,6 @@ const PROC_H: Record<string, number> = {
 // процедурные фигуры выходили 0.74 — то есть вдвое шире человека. Сужаем
 // силуэт по X; голову рисуем с компенсацией (ниже), иначе лицо сплющится.
 const SLIM_HUMANOID = 0.5;
-const MOUNTED_KEYS = ['knight', 'cavalry', 'horsearcher', 'camelry', 'trader'];
 
 // Во сколько раз растянуть фигуру, чтобы она совпала по росту со своим же
 // PNG-спрайтом. Где высоты спрайта нет (таран, фальконет) — оставляем как есть.

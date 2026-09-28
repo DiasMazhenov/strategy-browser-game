@@ -201,6 +201,7 @@ function makeCtx(cv) {
       }
     },
     // настоящая работа с пикселями: иначе «зерно» из pixelart.ts в прогоне молчит
+    createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; },
     getImageData(x, y, w, h) {
       const out = new Uint8ClampedArray(w * h * 4);
       for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
@@ -368,6 +369,7 @@ const anthroLine = (name, r) => `${name.padEnd(9)} рост ${String(r.grow).pad
 module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20, norm, diff, anthro };
 
 // ── запуск из командной строки ──────────────────────────────────────────────
+if (require.main === module) {
 (async () => {
   const key = process.argv[2] || 'kz_villager';
   const zoom = Number(process.argv[3] || 1);
@@ -489,3 +491,5 @@ module.exports = { makeCanvas, makeCtx, decodePNG, encodePNG, metrics, profile20
   if (refMetrics) console.log(anthroLine('эталон', anthro(refMetrics)));
   console.log(`\nPNG: ${path.relative(ROOT, file)}`);
 })();
+}
+
